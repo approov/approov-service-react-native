@@ -1,0 +1,47 @@
+{
+  "name": "@approov/approov-service-react-native",
+  "version": "3.2.6",
+  "publishConfig": {
+    "access": "public"
+  },
+  "title": "Approov React Native Service Layer",
+  "description": "Approov Mobile App Protection for ReactNative",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/approov/approov-service-react-native.git",
+    "baseUrl": "https://github.com/approov/approov-service-react-native"
+  },
+  "homepage": "https://github.com/approov/approov-service-react-native",
+  "bugs": {
+    "url": "https://github.com/approov/quickstart-react-native/issues"
+  },
+  "keywords": [
+    "react-native",
+    "android",
+    "ios",
+    "api",
+    "security"
+  ],
+  "author": {
+    "name": "CriticalBlue, Ltd.",
+    "email": "support@approov.io"
+  },
+  "license": "MIT",
+  "licenseFilename": "LICENSE",
+  "readmeFilename": "README.md",
+  "main": "index.js",
+  "typings": "index",
+  "peerDependencies": {
+    "react": ">=18.2.0",
+    "react-native": ">=0.75.0"
+  },
+  "devDependencies": {
+    "react": ">=18.3.0",
+    "react-native": ">=0.75.0",
+    "typescript": ">=5.5.4"
+  },
+  "scripts": {
+    "start": "echo \"*** This package is not runnable. *** To get started, run: npx @approov/react-native-approov:\n\" && npx @approov/react-native-approov; exit 0",
+    "preview-readme": "generate-md --layout github --input README.md --output readme.html"
+  }
+}

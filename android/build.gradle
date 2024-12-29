@@ -63,19 +63,20 @@ repositories {
         // Android JSC is installed from npm
         url "$rootDir/../node_modules/jsc-android/dist"
 
-        // Approov SDK installed via jitpack
-        url "https://jitpack.io"
+        // Obsolete: Approov SDK installed via jitpack
+        // We use mavenCentral() instead
+        //url "https://jitpack.io"
     }
     google()
     jcenter()
-
+    mavenCentral()
 }
 
 dependencies {
     //noinspection GradleDynamicVersion
     implementation fileTree(dir: "libs", include: ["*.aar"])
     implementation 'com.facebook.react:react-native:+'
-    implementation 'com.github.approov:approov-android-sdk:3.2.0'
+    implementation 'io.approov:approov-android-sdk:3.3.0'
     if (findProject(':rn-fetch-blob') != null) {
         implementation project(path: ':rn-fetch-blob')  // From node_modules
     } else {

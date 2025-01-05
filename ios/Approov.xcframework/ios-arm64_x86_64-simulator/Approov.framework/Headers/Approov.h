@@ -142,10 +142,13 @@ __attribute__((visibility("default"))) @interface Approov: NSObject
  * that is obtained from the Approov CLI tool and contains all necessary parameters to initialize the SDK.
  * An updated configuration may be transmitted while the SDK is in use and this must be stored in the
  * local storage of the app. If "auto" is provided as the update configuration then the SDK will manage
- * its own configuration update storage. If "auto" is used then on the very first initialization
- * a short network fetch will be attempted to get the latest update configuration if possible. If
- * "reinit" is provided for the comment then it allows the SDK to be reinitialized to change Approov
- * accounts.
+ * its own configuration update storage. If "reinit" is provided for the comment then it allows the SDK to
+ * be reinitialized to change Approov accounts.
+ * 
+ * Calling this method causes a background fetch preparation to be initiated to contact the
+ * Approov servers ready for performing a subsequent token fetch. This helps to reduce the
+ * latency associated with this operation. This fetch preparation is performed fully in the
+ * background and this method always returns immediately.
  *
  * @param initialConfig is the initial configuration which is either a short init string or full JWT and must be present
  * @param updateConfig is any update configuration JWT, "auto" or nil if there is none
@@ -162,11 +165,10 @@ __attribute__((visibility("default"))) @interface Approov: NSObject
  * configuration allow new sets of certificate pins and other configuration to be passed to
  * an app instance that is running in the field.
  *
- * Normally this method returns the latest configuration that is available and is cached in the
- * SDK. Thus the method will return quickly. However, if this method is called when there has
- * been no prior call to fetch an Approov token then a network request to the Approov cloud
- * service will be made to obtain any latest configuration update. The maximum timeout period
- * is set to be quite short but the caller must be aware that this delay may occur.
+ * Normally this method returns immediately with the latest configuration that is cached in the
+ * SDK. However, if the configuration has not been refreshed at all from the Approov server since
+ * the app started, then there will be a short blocking delay as an attempt will be made to the
+ * latest configuration from the Approov servers.
  *
  * Note that the returned configuration should generally be kept in local storage for the app
  * so that it can be made available on initialisation of the Approov SDK next time the app
@@ -186,6 +188,10 @@ __attribute__((visibility("default"))) @interface Approov: NSObject
  * token fetch then this clears the flag for future fetches as it indicates that the latest pin information has been read.
  * Pins may be returned with "*" as the domain as these represent the trusted root pins of all the acceptable
  * certificate authorities.
+ * 
+ * Normally this method returns immediately with the latest pins that are cached in the
+ * SDK. However, if no pins are available at all then there will be a short blocking delay as an
+ * attempt will be made to fetch them from the Approov servers.
  *
  * @param pinType is the format of the pins that should be retrieved
  * @result NSDictionary mapping from domain names to a list of pins in base64 format for that domain
@@ -199,6 +205,10 @@ __attribute__((visibility("default"))) @interface Approov: NSObject
  * that the latest pin information has been read. Pins may be returned with "*" as the domain as these represent the trusted
  * root pins of all the acceptable certificate authorities.
  *
+ * Normally this method returns immediately with the latest pins that are cached in the
+ * SDK. However, if no pins are available at all then there will be a short blocking delay as an
+ * attempt will be made to fetch them from the Approov servers.
+ * 
  * @param pinType is the format of the pins that should be retrieved
  * @result String representation of the JSON representing the pins, or nil if the SDK has not been initialized
 */

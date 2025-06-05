@@ -32,7 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
 #define APPROOV_ERROR   4
 
 // set this to control amount of logging
-#define APPROOV_LEVEL   APPROOV_INFO
+#define APPROOV_LEVEL   APPROOV_DEBUG
 
 // logging functions at various log levels
 void ApproovLog(NSString *fmt, ...);

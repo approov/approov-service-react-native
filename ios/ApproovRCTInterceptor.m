@@ -48,6 +48,7 @@ static dispatch_once_t _onceToken = 0;
 + (instancetype) startWithApproovService:(ApproovService *)approovService {
     dispatch_once(&_onceToken, ^{
         _sharedInterceptor = [[self alloc] initWithApproovService:approovService];
+        [ApproovRCTInterceptor logAllNSURLSessionCreations]; // DEBUG: log all NSURLSession creations
     });
     return _sharedInterceptor;
 }
@@ -177,6 +178,22 @@ static dispatch_once_t _onceToken = 0;
             }
         }),
     0, NULL);
+}
+
+/*  DEBUG: Log all NSURLSession creations
+*
+*/
++ (void)logAllNSURLSessionCreations {
+    ApproovLogI(@"[Approov DIAG] Swizzling NSURLSession sessionWithConfiguration:delegate:delegateQueue: to log all session creations");
+    RSSwizzleClassMethod(NSClassFromString(@"NSURLSession"),
+        @selector(sessionWithConfiguration:delegate:delegateQueue:),
+        RSSWReturnType(NSURLSession *),
+        RSSWArguments(NSURLSessionConfiguration * _Nonnull configuration, id _Nullable delegate, NSOperationQueue * _Nullable queue),
+        RSSWReplacement({
+            ApproovLogI(@"[Approov DIAG] NSURLSession created with delegate: %@", delegate ? NSStringFromClass([delegate class]) : @"nil");
+            return RSSWCallOriginal(configuration, delegate, queue);
+        })
+    );
 }
 
 @end

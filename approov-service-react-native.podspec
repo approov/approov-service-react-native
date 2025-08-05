@@ -16,8 +16,7 @@ Pod::Spec.new do |s|
   # s.license    = { :type => "MIT", :file => "LICENSE" }
   s.authors      = { "CriticalBlue, Ltd." => "support@approov.io" }
   s.platform     = :ios
-  #s.source       = { :git => "https://github.com/approov/approov-service-react-native.git", :tag => "#{s.version}" }
-  s.source       = { :git => "https://github.com/approov/approov-service-react-native.git", :branch => "feature/3.5.0" }
+  s.source       = { :git => "https://github.com/approov/approov-service-react-native.git", :tag => "#{s.version}" }
   s.source_files = "ios/**/*.{h,c,m,swift}"
   s.exclude_files = "ios/Approov.xcframework/**/*"
   s.requires_arc = true

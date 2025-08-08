@@ -17,14 +17,21 @@ Pod::Spec.new do |s|
   s.authors      = { "CriticalBlue, Ltd." => "support@approov.io" }
   s.platform     = :ios
   s.source       = { :git => "https://github.com/approov/approov-service-react-native.git", :tag => "#{s.version}" }
-
   s.source_files = "ios/**/*.{h,c,m,swift}"
   s.exclude_files = "ios/Approov.xcframework/**/*"
   s.requires_arc = true
   s.resources = "ios/approov.{config,plist}"
 
-  s.ios.vendored_frameworks = "ios/Approov.xcframework"
+  # s.ios.vendored_frameworks = "ios/Approov.xcframework"
   s.ios.deployment_target  = '13.4'
+
+  # Vendored frameworks for both iOS and watchOS
+  s.ios.vendored_frameworks = 'Approov.xcframework'
+  s.ios.prepare_command = <<-CMD
+    curl -L https://github.com/approov/approov-ios-sdk/releases/download/3.5.0/Approov.xcframework.zip > ios/Approov.xcframework.zip
+    unzip -o ios/Approov.xcframework.zip  -d ios/
+    rm -f ios/Approov.xcframework.zip
+  CMD
 
   s.dependency "React"
 end

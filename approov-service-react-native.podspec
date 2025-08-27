@@ -25,8 +25,6 @@ Pod::Spec.new do |s|
   # s.ios.vendored_frameworks = "ios/Approov.xcframework"
   s.ios.deployment_target  = '11.0'
 
-  # Vendored frameworks for both iOS and watchOS
-  s.ios.vendored_frameworks = 'Approov.xcframework'
   # Dependency on the Approov SDK
   s.dependency 'approov-ios-sdk', '~> 3.5.0'
   s.frameworks = 'Approov'

@@ -27,7 +27,7 @@ Pod::Spec.new do |s|
 
   # Vendored frameworks for both iOS and watchOS
   s.ios.vendored_frameworks = 'Approov.xcframework'
-  s.ios.prepare_command = <<-CMD
+  s.prepare_command = <<-CMD
     curl -L https://github.com/approov/approov-ios-sdk/releases/download/3.5.0/Approov.xcframework.zip > ios/Approov.xcframework.zip
     unzip -o ios/Approov.xcframework.zip  -d ios/
     rm -f ios/Approov.xcframework.zip

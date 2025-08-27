@@ -23,7 +23,7 @@ Pod::Spec.new do |s|
   s.resources = "ios/approov.{config,plist}"
 
   # s.ios.vendored_frameworks = "ios/Approov.xcframework"
-  s.ios.deployment_target  = '13.4'
+  s.ios.deployment_target  = '11.0'
 
   # Vendored frameworks for both iOS and watchOS
   s.ios.vendored_frameworks = 'Approov.xcframework'

@@ -18,9 +18,9 @@ Pod::Spec.new do |s|
   s.platform     = :ios
   s.source       = { :git => "https://github.com/approov/approov-service-react-native.git", :tag => "#{s.version}" }
   s.source_files = "ios/**/*.{h,c,m,swift}"
-  s.exclude_files = "ios/Approov.xcframework/**/*"
+  # s.exclude_files = "ios/Approov.xcframework/**/*"
   s.requires_arc = true
-  s.resources = "ios/approov.{config,plist}"
+  # s.resources = "ios/approov.{config,plist}"
 
   # s.ios.vendored_frameworks = "ios/Approov.xcframework"
   s.ios.deployment_target  = '11.0'

@@ -26,7 +26,7 @@ Pod::Spec.new do |s|
   s.ios.deployment_target  = '11.0'
 
   # Dependency on the Approov SDK
-  s.dependency 'approov-ios-sdk', '~> 3.5.0'
+  s.dependency 'approov-ios-sdk', '~> 3.5.1'
   s.frameworks = 'Approov'
 
   s.dependency "React"

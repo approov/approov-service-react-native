@@ -288,6 +288,47 @@ RCT_EXPORT_METHOD(initialize:(NSString*)config resolver:(RCTPromiseResolveBlock)
 }
 
 /**
+     * Gets the last ARC (Approov Rejection Code) code.
+     *
+     * @return String of the last ARC or empty string if there was none
+     */
+/**
+ * Gets the last ARC (Approov Rejection Code) code.
+ *
+ * @param resolve is used if the operation resolved without error (returns NSString)
+ * @param reject is used if the operation failed with an error (not used here)
+ */
+RCT_EXPORT_METHOD(getLastARC:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    // Get the dynamic pins from Approov
+    NSDictionary<NSString *, NSArray<NSString *> *> *approovPins = [Approov getPins:@"public-key-sha256"];
+    if (approovPins == nil || approovPins.count == 0) {
+        ApproovLogE(@"ApproovService: no host pinning information available");
+        resolve(@"");
+        return;
+    }
+    // The approovPins contains a map of hostnames to pin strings. Skip '*' and use another hostname if available.
+    NSString *hostname = nil;
+    for (NSString *key in approovPins.allKeys) {
+        if (![key isEqualToString:@"*"]) {
+            hostname = key;
+            break;
+        }
+    }
+    if (hostname != nil) {
+        ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:hostname];
+        // Check if a token was fetched successfully and return its arc code
+        if (result.token != nil && result.token.length > 0) {
+            if (result.ARC != nil) {
+                resolve(result.ARC);
+                return;
+            }
+        }
+    }
+    ApproovLogI(@"ApproovService: ARC code unavailable");
+    resolve(@"");
+}
+
+/**
  * Indicates that requests should proceed anyway if it is not possible to obtain an Approov token
  * due to a networking failure. If this is called then the backend API can receive calls without the
  * expected Approov token header being added, or without header/query parameter substitutions being

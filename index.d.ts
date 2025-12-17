@@ -19,6 +19,7 @@ export declare class ApproovService {
   static getMessageSignature(message: string): Promise<String>;
   static fetchSecureString(key: string, newDef: string): Promise<String>;
   static fetchCustomJWT(payload: string): Promise<String>;
+  static getLastARC(): Promise<String>;
 }
 import { ApproovProvider } from "./approov-provider";
 import { ApproovMonitor } from "./approov-monitor";

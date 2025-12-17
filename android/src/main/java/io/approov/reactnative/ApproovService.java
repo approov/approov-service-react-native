@@ -409,6 +409,54 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
  
     /**
+     * Gets the last ARC (Approov Rejection Code) code.
+     *
+     * Always resolves with a string (ARC or empty string).
+     *
+     * @param promise React Native promise to resolve with ARC string or empty string
+     */
+    @ReactMethod
+    public void getLastARC(Promise promise) {
+        // Get the dynamic pins from Approov
+        Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
+        if (approovPins == null || approovPins.isEmpty()) {
+            Log.e(TAG, "ApproovService: no host pinning information available");
+            promise.resolve("");
+            return;
+        }
+        // The approovPins contains a map of hostnames to pin strings, we just need one of them
+        String hostname = null;
+        for (String key : approovPins.keySet()) {
+            hostname = key;
+            break;
+        }
+        if (hostname != null) {
+            try {
+                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
+                    @Override
+                    public void approovTokenFetchResult(Approov.TokenFetchResult result) {
+                        if (result.getToken() != null && !result.getToken().isEmpty()) {
+                            String arc = result.getARC();
+                            if (arc != null) {
+                                promise.resolve(arc);
+                                return;
+                            }
+                        }
+                        Log.i(TAG, "ApproovService: ARC code unavailable");
+                        promise.resolve("");
+                    }
+                }, hostname);
+            } catch (Exception e) {
+                Log.e(TAG, "ApproovService: error fetching ARC", e);
+                promise.resolve("");
+            }
+        } else {
+            Log.i(TAG, "ApproovService: ARC code unavailable");
+            promise.resolve("");
+        }
+    }
+
+    /**
      * Indicates that requests should proceed anyway if it is not possible to obtain an Approov token
      * due to a networking failure. If this is called then the backend API can receive calls without the
      * expected Approov token header being added, or without header/query parameter substitutions being

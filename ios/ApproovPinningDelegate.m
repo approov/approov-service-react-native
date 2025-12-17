@@ -67,9 +67,10 @@
  * @param completionHandler is a handler that must be called providing the outcome of the decision
  */
 - (void)URLSession:(NSURLSession *)session
+        dataTask:(NSURLSessionDataTask *)dataTask
         didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
         completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler {
-    ApproovLogD(@"session received authentication challenge");
+    ApproovLogD(@"session task received authentication challenge");
     if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
         ApproovTrustDecision trustDecision = [_approovService verifyPins:challenge.protectionSpace.serverTrust forHost:challenge.protectionSpace.host];
         if (trustDecision == ApproovTrustDecisionBlock) {
@@ -77,6 +78,9 @@
         } else {
             completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
         }
+    } else {
+        // Non-server-trust challenges handling
+        completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
 }
 

@@ -334,7 +334,7 @@ RCT_EXPORT_METHOD(getLastARC:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromis
  */
 RCT_EXPORT_METHOD(setInstallAttrsInToken:(NSString *)attrs resolver:(RCTPromiseResolveBlock)resolve) {
     ApproovLogI(@"setInstallAttrsInToken");
-    [Approov setInstallAttributesInToken:attrs];
+    [Approov setInstallAttrsInToken:attrs];
     resolve(nil);
 }
 

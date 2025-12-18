@@ -288,12 +288,7 @@ RCT_EXPORT_METHOD(initialize:(NSString*)config resolver:(RCTPromiseResolveBlock)
 }
 
 /**
-     * Gets the last ARC (Approov Rejection Code) code.
-     *
-     * @return String of the last ARC or empty string if there was none
-     */
-/**
- * Gets the last ARC (Approov Rejection Code) code.
+ * Gets the last ARC (Attestation Result Code) code.
  *
  * @param resolve is used if the operation resolved without error (returns NSString)
  * @param reject is used if the operation failed with an error (not used here)
@@ -326,6 +321,21 @@ RCT_EXPORT_METHOD(getLastARC:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromis
     }
     ApproovLogI(@"ApproovService: ARC code unavailable");
     resolve(@"");
+}
+
+/**
+ * Sets an install attributes token to be sent to the server and associated with this particular
+ * app installation for future Approov token fetches. The token must be signed, within its
+ * expiry time and bound to the correct device ID for it to be accepted by the server.
+ * Calling this method ensures that the next call to fetch an Approov
+ * token will not use a cached version, so that this information can be transmitted to the server.
+ *
+ * @param attrs is the signed JWT holding the new install attributes
+ */
+RCT_EXPORT_METHOD(setInstallAttrsInToken:(NSString *)attrs resolver:(RCTPromiseResolveBlock)resolve) {
+    ApproovLogI(@"setInstallAttrsInToken");
+    [Approov setInstallAttributesInToken:attrs];
+    resolve(nil);
 }
 
 /**

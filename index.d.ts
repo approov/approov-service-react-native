@@ -20,6 +20,7 @@ export declare class ApproovService {
   static fetchSecureString(key: string, newDef: string): Promise<String>;
   static fetchCustomJWT(payload: string): Promise<String>;
   static getLastARC(): Promise<String>;
+  static setInstallAttrsInToken(attrs: string): Promise<void>;
 }
 import { ApproovProvider } from "./approov-provider";
 import { ApproovMonitor } from "./approov-monitor";

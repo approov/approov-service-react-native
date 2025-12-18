@@ -457,6 +457,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Sets an install attributes token to be sent to the server and associated with this particular
+     * app installation for future Approov token fetches. The token must be signed, within its
+     * expiry time and bound to the correct device ID for it to be accepted by the server.
+     * Calling this method ensures that the next call to fetch an Approov
+     * token will not use a cached version, so that this information can be transmitted to the server.
+     *
+     * @param attrs is the signed JWT holding the new install attributes
+     */
+    @ReactMethod
+    public void setInstallAttrsInToken(String attrs, Promise promise) {
+        try {
+            Approov.setInstallAttributesInToken(attrs);
+            Log.d(TAG, "setInstallAttrsInToken");
+            promise.resolve(null);
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
+            promise.reject("setInstallAttrsInToken", "IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalState: " + e.getMessage());
+            promise.reject("setInstallAttrsInToken", "IllegalState: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
      * Indicates that requests should proceed anyway if it is not possible to obtain an Approov token
      * due to a networking failure. If this is called then the backend API can receive calls without the
      * expected Approov token header being added, or without header/query parameter substitutions being

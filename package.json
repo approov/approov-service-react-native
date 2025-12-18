@@ -1,6 +1,6 @@
 {
   "name": "@approov/approov-service-react-native",
-  "version": "3.5.4",
+  "version": "3.5.5",
   "publishConfig": {
     "access": "public"
   },
@@ -33,11 +33,11 @@
   "typings": "index",
   "peerDependencies": {
     "react": ">=19.0.0",
-    "react-native": ">=0.76.0"
+    "react-native": ">=0.83.0"
   },
   "devDependencies": {
     "react": ">=19.0.0",
-    "react-native": ">=0.76.0",
+    "react-native": ">=0.83.0",
     "typescript": ">=5.5.4"
   },
   "scripts": {

@@ -434,7 +434,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             try {
                 Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
                     @Override
-                    public void approovTokenFetchResult(Approov.TokenFetchResult result) {
+                    public void approovCallback(Approov.TokenFetchResult result) {
                         if (result.getToken() != null && !result.getToken().isEmpty()) {
                             String arc = result.getARC();
                             if (arc != null) {
@@ -468,9 +468,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void setInstallAttrsInToken(String attrs, Promise promise) {
         try {
-            Approov.setInstallAttributesInToken(attrs);
+            Approov.setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
-            promise.resolve(null);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
             promise.reject("setInstallAttrsInToken", "IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));

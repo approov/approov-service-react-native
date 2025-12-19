@@ -332,10 +332,15 @@ RCT_EXPORT_METHOD(getLastARC:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromis
  *
  * @param attrs is the signed JWT holding the new install attributes
  */
-RCT_EXPORT_METHOD(setInstallAttrsInToken:(NSString *)attrs resolver:(RCTPromiseResolveBlock)resolve) {
-    ApproovLogI(@"setInstallAttrsInToken");
-    [Approov setInstallAttrsInToken:attrs];
-    resolve(nil);
+RCT_EXPORT_METHOD(setInstallAttrsInToken:(NSString *)attrs resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    @try {
+        ApproovLogI(@"setInstallAttrsInToken");
+        [Approov setInstallAttrsInToken:attrs];
+        resolve(nil);
+    }
+    @catch (NSException *exception) {
+        reject(@"setInstallAttrsInToken", exception.reason, nil);
+    }
 }
 
 /**

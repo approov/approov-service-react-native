@@ -424,28 +424,26 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.resolve("");
             return;
         }
-        // The approovPins contains a map of hostnames to pin strings, we just need one of them
+        // The approovPins contains a map of hostnames to pin strings. Skip '*' and use another hostname if available.
         String hostname = null;
         for (String key : approovPins.keySet()) {
-            hostname = key;
-            break;
+            if (!"*".equals(key)) {
+                hostname = key;
+                break;
+            }
         }
         if (hostname != null) {
             try {
-                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
-                    @Override
-                    public void approovCallback(Approov.TokenFetchResult result) {
-                        if (result.getToken() != null && !result.getToken().isEmpty()) {
-                            String arc = result.getARC();
-                            if (arc != null) {
-                                promise.resolve(arc);
-                                return;
-                            }
-                        }
-                        Log.i(TAG, "ApproovService: ARC code unavailable");
-                        promise.resolve("");
+                Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(hostname);
+                if (result != null && result.getToken() != null && !result.getToken().isEmpty()) {
+                    String arc = result.getARC();
+                    if (arc != null) {
+                        promise.resolve(arc);
+                        return;
                     }
-                }, hostname);
+                }
+                Log.i(TAG, "ApproovService: ARC code unavailable");
+                promise.resolve("");
             } catch (Exception e) {
                 Log.e(TAG, "ApproovService: error fetching ARC", e);
                 promise.resolve("");

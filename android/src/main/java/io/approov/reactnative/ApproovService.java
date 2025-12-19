@@ -434,16 +434,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         if (hostname != null) {
             try {
-                Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(hostname);
-                if (result != null && result.getToken() != null && !result.getToken().isEmpty()) {
-                    String arc = result.getARC();
-                    if (arc != null) {
-                        promise.resolve(arc);
-                        return;
+                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
+                    @Override
+                    public void approovCallback(Approov.TokenFetchResult result) {
+                        if (result.getToken() != null && !result.getToken().isEmpty()) {
+                            String arc = result.getARC();
+                            if (arc != null) {
+                                promise.resolve(arc);
+                                return;
+                            }
+                        }
+                        Log.i(TAG, "ApproovService: ARC code unavailable");
+                        promise.resolve("");
                     }
-                }
-                Log.i(TAG, "ApproovService: ARC code unavailable");
-                promise.resolve("");
+                }, hostname);
             } catch (Exception e) {
                 Log.e(TAG, "ApproovService: error fetching ARC", e);
                 promise.resolve("");
@@ -452,6 +456,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             Log.i(TAG, "ApproovService: ARC code unavailable");
             promise.resolve("");
         }
+        promise.resolve("");
     }
 
     /**

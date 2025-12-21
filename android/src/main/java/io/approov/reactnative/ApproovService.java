@@ -473,6 +473,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             Approov.setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
+            promise.resolve(null);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
             promise.reject("setInstallAttrsInToken", "IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));

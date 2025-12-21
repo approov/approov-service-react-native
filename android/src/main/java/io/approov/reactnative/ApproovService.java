@@ -417,6 +417,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void getLastARC(Promise promise) {
+        Log.i(TAG, "ApproovService: getLastARC");
         // Get the dynamic pins from Approov
         Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
         if (approovPins == null || approovPins.isEmpty()) {
@@ -456,7 +457,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
             Log.i(TAG, "ApproovService: ARC code unavailable");
             promise.resolve("");
         }
-        promise.resolve("");
     }
 
     /**
@@ -473,6 +473,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             Approov.setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
+            promise.resolve(null);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
             promise.reject("setInstallAttrsInToken", "IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));

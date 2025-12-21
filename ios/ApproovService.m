@@ -288,6 +288,62 @@ RCT_EXPORT_METHOD(initialize:(NSString*)config resolver:(RCTPromiseResolveBlock)
 }
 
 /**
+ * Gets the last ARC (Attestation Result Code) code.
+ *
+ * @param resolve is used if the operation resolved without error (returns NSString)
+ * @param reject is used if the operation failed with an error (not used here)
+ */
+RCT_EXPORT_METHOD(getLastARC:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    // Get the dynamic pins from Approov
+    NSDictionary<NSString *, NSArray<NSString *> *> *approovPins = [Approov getPins:@"public-key-sha256"];
+    if (approovPins == nil || approovPins.count == 0) {
+        ApproovLogE(@"ApproovService: no host pinning information available");
+        resolve(@"");
+        return;
+    }
+    // The approovPins contains a map of hostnames to pin strings. Skip '*' and use another hostname if available.
+    NSString *hostname = nil;
+    for (NSString *key in approovPins.allKeys) {
+        if (![key isEqualToString:@"*"]) {
+            hostname = key;
+            break;
+        }
+    }
+    if (hostname != nil) {
+        ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:hostname];
+        // Check if a token was fetched successfully and return its arc code
+        if (result.token != nil && result.token.length > 0) {
+            if (result.ARC != nil) {
+                resolve(result.ARC);
+                return;
+            }
+        }
+    }
+    ApproovLogI(@"ApproovService: ARC code unavailable");
+    resolve(@"");
+}
+
+/**
+ * Sets an install attributes token to be sent to the server and associated with this particular
+ * app installation for future Approov token fetches. The token must be signed, within its
+ * expiry time and bound to the correct device ID for it to be accepted by the server.
+ * Calling this method ensures that the next call to fetch an Approov
+ * token will not use a cached version, so that this information can be transmitted to the server.
+ *
+ * @param attrs is the signed JWT holding the new install attributes
+ */
+RCT_EXPORT_METHOD(setInstallAttrsInToken:(NSString *)attrs resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    @try {
+        ApproovLogI(@"setInstallAttrsInToken");
+        [Approov setInstallAttrsInToken:attrs];
+        resolve(nil);
+    }
+    @catch (NSException *exception) {
+        reject(@"setInstallAttrsInToken", exception.reason, nil);
+    }
+}
+
+/**
  * Indicates that requests should proceed anyway if it is not possible to obtain an Approov token
  * due to a networking failure. If this is called then the backend API can receive calls without the
  * expected Approov token header being added, or without header/query parameter substitutions being

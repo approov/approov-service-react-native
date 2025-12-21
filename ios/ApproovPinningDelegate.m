@@ -67,28 +67,6 @@
  * @param completionHandler is a handler that must be called providing the outcome of the decision
  */
 - (void)URLSession:(NSURLSession *)session
-        didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
-        completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler {
-    ApproovLogD(@"session received authentication challenge");
-    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-        ApproovTrustDecision trustDecision = [_approovService verifyPins:challenge.protectionSpace.serverTrust forHost:challenge.protectionSpace.host];
-        if (trustDecision == ApproovTrustDecisionBlock) {
-            completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, NULL);
-        } else {
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
-        }
-    }
-}
-
-/**
- * Handles session authentication challenges. This is handled by Approov pinning and not passed to the original delegate.
- *
- * @param session is the session containing the task whose request requires authentication
- * @param dataTask is the task whose request requires authentication
- * @param challenge is an object that contains the request for authentication
- * @param completionHandler is a handler that must be called providing the outcome of the decision
- */
-- (void)URLSession:(NSURLSession *)session
         dataTask:(NSURLSessionDataTask *)dataTask
         didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
         completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler {
@@ -100,8 +78,12 @@
         } else {
             completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
         }
+    } else {
+        // Non-server-trust challenges handling
+        completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
 }
+
 
 /**
  * Periodically informs the delegate of the progress of sending body content to the server. This is simply passed to the original

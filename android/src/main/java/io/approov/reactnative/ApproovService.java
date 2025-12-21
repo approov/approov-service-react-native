@@ -409,6 +409,81 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
  
     /**
+     * Gets the last ARC (Approov Rejection Code) code.
+     *
+     * Always resolves with a string (ARC or empty string).
+     *
+     * @param promise React Native promise to resolve with ARC string or empty string
+     */
+    @ReactMethod
+    public void getLastARC(Promise promise) {
+        Log.i(TAG, "ApproovService: getLastARC");
+        // Get the dynamic pins from Approov
+        Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
+        if (approovPins == null || approovPins.isEmpty()) {
+            Log.e(TAG, "ApproovService: no host pinning information available");
+            promise.resolve("");
+            return;
+        }
+        // The approovPins contains a map of hostnames to pin strings. Skip '*' and use another hostname if available.
+        String hostname = null;
+        for (String key : approovPins.keySet()) {
+            if (!"*".equals(key)) {
+                hostname = key;
+                break;
+            }
+        }
+        if (hostname != null) {
+            try {
+                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
+                    @Override
+                    public void approovCallback(Approov.TokenFetchResult result) {
+                        if (result.getToken() != null && !result.getToken().isEmpty()) {
+                            String arc = result.getARC();
+                            if (arc != null) {
+                                promise.resolve(arc);
+                                return;
+                            }
+                        }
+                        Log.i(TAG, "ApproovService: ARC code unavailable");
+                        promise.resolve("");
+                    }
+                }, hostname);
+            } catch (Exception e) {
+                Log.e(TAG, "ApproovService: error fetching ARC", e);
+                promise.resolve("");
+            }
+        } else {
+            Log.i(TAG, "ApproovService: ARC code unavailable");
+            promise.resolve("");
+        }
+    }
+
+    /**
+     * Sets an install attributes token to be sent to the server and associated with this particular
+     * app installation for future Approov token fetches. The token must be signed, within its
+     * expiry time and bound to the correct device ID for it to be accepted by the server.
+     * Calling this method ensures that the next call to fetch an Approov
+     * token will not use a cached version, so that this information can be transmitted to the server.
+     *
+     * @param attrs is the signed JWT holding the new install attributes
+     */
+    @ReactMethod
+    public void setInstallAttrsInToken(String attrs, Promise promise) {
+        try {
+            Approov.setInstallAttrsInToken(attrs);
+            Log.d(TAG, "setInstallAttrsInToken");
+            promise.resolve(null);
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
+            promise.reject("setInstallAttrsInToken", "IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalState: " + e.getMessage());
+            promise.reject("setInstallAttrsInToken", "IllegalState: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
      * Indicates that requests should proceed anyway if it is not possible to obtain an Approov token
      * due to a networking failure. If this is called then the backend API can receive calls without the
      * expected Approov token header being added, or without header/query parameter substitutions being

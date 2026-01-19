@@ -258,6 +258,8 @@ RCT_EXPORT_METHOD(initialize:(NSString*)config resolver:(RCTPromiseResolveBlock)
             if (![initialConfigString isEqualToString:config]) {
                 NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self errorUserInfo:NO]];
                 reject(@"initialize", @"attempt to reinitialize Approov SDK with a different config", error);
+            } else {
+                resolve(nil);
             }
         }
         else {

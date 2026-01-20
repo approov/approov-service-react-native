@@ -371,6 +371,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
             if (!config.equals(initialConfig)) {
                 Log.e(TAG, "attempt to reinitialize with a different config");
                 promise.reject("initialize", "attempt to reinitialize with a different config", getErrorUserInfo(false));
+            } else {
+                promise.resolve(null);
             }
         }
         else {

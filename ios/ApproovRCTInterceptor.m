@@ -95,12 +95,12 @@ static dispatch_once_t _onceToken = 0;
             if (delegate != nil) {
                 NSString *delegateClassName = NSStringFromClass([delegate class]);
                 ApproovLogD(@"checking session creation with %@ delegate", delegateClassName);
-                if (([delegateClassName hasPrefix:@"RCT"] || [delegateClassName isEqual:@"RNFetchBlobRequest"]) &&
+                if (([delegateClassName hasPrefix:@"RCT"] || [delegateClassName isEqual:@"RNFetchBlobRequest"] || [delegateClassName isEqual:@"NRMAURLSessionTaskDelegate"]) &&
                     ![delegateClassName isEqual:@"RCTMultipartDataTask"]) {
                     // we have a delegate associated with React Native that we need to handle (note we don't intercept
                     // the RCTMultipartDataTask since this is specifically associated with bundle reload of Javascript and
                     // is not associated with the app's own network requests)
-                    ApproovLogI(@"intercepting a session creation with %@ delegate", NSStringFromClass([delegate class]));
+                    ApproovLogI(@"intercepting a session creation with %@ delegate", delegateClassName));
 
                     // add mock https protocol for sending status code and error
                     if (!configuration.protocolClasses || [configuration.protocolClasses count] == 0) {

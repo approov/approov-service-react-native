@@ -18,7 +18,7 @@ You will not generally need to call this function directly, since this is called
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the Approov CLI. This will generate an error if a second attempt is made at initialization with a different `config` but will succeed if called multiple times with the same `config`.
 
 ```Javascript
-ApproovService.initialize(config);
+ApproovService.initialize(config: string);
 ```
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
@@ -32,7 +32,7 @@ ApproovService.setProceedOnNetworkFail();
 
 Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
-You are recommended to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
+You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## setSuppressLoggingUnknownURL
 Indicates that logging should be suppressed for requests to domains that have not been added in Approov. These requests would normally cause a `UNKNOWN_URL` (Android) or `unknown URL` (iOS) to be generated. Use this option if you wish to reduce the amount of logging being generated.
@@ -43,7 +43,7 @@ ApproovService.setSuppressLoggingUnknownURL();
 
 Note that this also suppresses logging generated for domains that match a criteria set with `addExclusionURLRegex`.
 
-You are recommended to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
+You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## setTokenHeader
 Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass in an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
@@ -92,7 +92,7 @@ You are encouraged to make this call inside the `approovSetup` function called b
 Removes a query parameter key name previously added using addSubstitutionQueryParam.
 
 ```Javascript
-ApproovService.removeSubstitutionQueryParam(key);
+ApproovService.removeSubstitutionQueryParam(key: string);
 ```
 
 ## addExclusionURLRegex
@@ -116,7 +116,7 @@ You are encouraged to make this call inside the `approovSetup` function called b
 Removes an exclusion URL regular expression previously added using addExclusionURLRegex.
 
 ```Javascript
-ApproovService.removeSubstitutionQueryParam(key);
+ApproovService.removeSubstitutionQueryParam(key: string);
 ```
 
 ## prefetch
@@ -172,7 +172,7 @@ This function returns a `Promise` that is resolved when the operation is complet
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
 
 ```Javascript
-ApproovService.SetDevKey(devKey);
+ApproovService.SetDevKey(devKey: string);
 ```
 
 This function returns a `Promise` that is resolved when the operation is completed.
@@ -181,7 +181,7 @@ This function returns a `Promise` that is resolved when the operation is complet
 Performs an Approov token fetch for the given `url`. This should be used in situations where it is not possible to use the networking interception to add the token. This will likely require network access so may take some time to complete.
 
 ```Javascript
-ApproovService.fetchToken(url);
+ApproovService.fetchToken(url: string);
 ```
 
 This function returns a `Promise` providing the result.
@@ -190,7 +190,7 @@ This function returns a `Promise` providing the result.
 Gets the [message signature](https://ext.approov.io/docs/latest/approov-usage-documentation/#account-message-signing) for the given `message`. This uses an account specific message signing key that is transmitted to the SDK after a successful fetch if the facility is enabled for the account. Note that if the attestation failed then the signing key provided is actually random so that the signature will be incorrect. An Approov token should always be included in the message being signed and sent alongside this signature to prevent replay attacks.
 
 ```Javascript
-ApproovService.getMessageSignature(message);
+ApproovService.getMessageSignature(message: string);
 ```
 
 This function returns a `Promise` providing the result.

@@ -2,7 +2,7 @@
 This provides a reference for all of the methods defined on `ApproovService`. These are available if you import:
 
 ```Javascript
-import { ApproovProvider, ApproovService } from '@approov/react-native-approov';
+import { ApproovProvider, ApproovService } from '@approov/approov-service-react-native';
 ```
 
 Many of the methods execute asynchronously and return a `Promise`. This is resolved to indicate success, or rejected with an `error` otherwise. The `error` is a map that provides:
@@ -64,7 +64,7 @@ ApproovService.setBindingHeader(header: string);
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## addSubstitutionHeader
-Adds the name of a header which should be subject to [secure strings](https://ext.approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the header is present then the value will be used as a key to look up a secure string value which will be substituted into the header value instead. This allows easy migration to the use of secure strings. A required prefix may be specified to dealwith cases such as the use of "Bearer " prefixed before values in an authorization header.
+Adds the name of a header which should be subject to [secure strings](https://ext.approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the header is present then the value will be used as a key to look up a secure string value which will be substituted into the header value instead. This allows easy migration to the use of secure strings. A required prefix may be specified to deal with cases such as the use of "Bearer " prefixed before values in an authorization header.
 
 ```Javascript
 ApproovService.addSubstitutionHeader(header: string, requiredPrefix: string);
@@ -116,7 +116,7 @@ You are encouraged to make this call inside the `approovSetup` function called b
 Removes an exclusion URL regular expression previously added using addExclusionURLRegex.
 
 ```Javascript
-ApproovService.removeSubstitutionQueryParam(key: string);
+ApproovService.removeExclusionURLRegex(urlRegex: string);
 ```
 
 ## prefetch
@@ -160,7 +160,7 @@ different from any previously set value then this will cause the next token fetc
 fetch a new token with the correct payload data hash. The hash appears in the
 'pay' claim of the Approov token as a base64 encoded string of the SHA256 hash of the
 data. Note that the data is hashed locally and never sent to the Approov cloud service.
-This is an alternative to using `SetBindingHeader` and you should not use both methods at the same time. 
+This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
 
 ```Javascript
 ApproovService.setDataHashInToken(data: string);
@@ -172,7 +172,7 @@ This function returns a `Promise` that is resolved when the operation is complet
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
 
 ```Javascript
-ApproovService.SetDevKey(devKey: string);
+ApproovService.setDevKey(devKey: string);
 ```
 
 This function returns a `Promise` that is resolved when the operation is completed.

@@ -411,7 +411,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
  
     /**
-     * Gets the last ARC (Approov Rejection Code) code.
+     * Gets the last ARC (Attestation Response Code) code.
      *
      * Always resolves with a string (ARC or empty string).
      *

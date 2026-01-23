@@ -290,7 +290,7 @@ RCT_EXPORT_METHOD(initialize:(NSString*)config resolver:(RCTPromiseResolveBlock)
 }
 
 /**
- * Gets the last ARC (Attestation Result Code) code.
+ * Gets the last ARC (Attestation Response Code) code.
  *
  * @param resolve is used if the operation resolved without error (returns NSString)
  * @param reject is used if the operation failed with an error (not used here)

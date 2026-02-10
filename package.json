@@ -45,6 +45,6 @@
     "preview-readme": "generate-md --layout github --input README.md --output readme.html",
     "build:android": "cd android && ./gradlew assembleDebug",
     "build:ios": "xcodebuild -project ios/Approov.xcodeproj -scheme Approov -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' clean build CODE_SIGNING_ALLOWED=NO",
-    "prepack": "npm run build:android && npm run build:ios"
+    "prepack": "npm run build:android && node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run build:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS build on non-macOS platform ' + process.platform); }\""
   }
 }

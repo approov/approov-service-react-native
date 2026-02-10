@@ -127,7 +127,7 @@ static dispatch_once_t _onceToken = 0;
               configuration.protocolClasses = protocolClasses;
             }
 
-            // call the original method but provide the pjnning delegate instead
+            // call the original method but provide the pinning delegate instead
             // of the one provided
             PinningURLSessionDelegate *pinningDelegate =
                 [PinningURLSessionDelegate

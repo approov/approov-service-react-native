@@ -176,7 +176,7 @@ static dispatch_once_t _onceToken = 0;
         // pinned
         if ((self == interceptor->_RNSession) ||
             (self == interceptor->_BlobSession)) {
-          // update the request to include Appproov dealing with any failures -
+          // update the request to include Approov dealing with any failures -
           // note that this part may block for the duration of the time it takes
           // to fetch an Approov token but experiments indicate that this does
           // not impact the behaviour of the React Native Javascript execution

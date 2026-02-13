@@ -444,7 +444,30 @@ RCT_EXPORT_METHOD(setDevKey : (NSString *)devKey resolver : (
 RCT_EXPORT_METHOD(setSuppressLoggingUnknownURL) {
   // no need to synchronize on this
   suppressLoggingUnknownURL = YES;
-  ApproovLogI(@"suppressLoggingUnknownURL");
+  ApproovLogI(@"setSuppressLoggingUnknownURL");
+}
+
+/**
+ * Adds a delegate class name pattern to the allowed list for session
+ * interception. This ensures that sessions using this delegate are intercepted
+ * by Approov.
+ *
+ * @param delegatePattern the class name or pattern (e.g. "MyDelegate*") to
+ * allow
+ */
+RCT_EXPORT_METHOD(addAllowedDelegate : (NSString *)delegatePattern) {
+  [ApproovRCTInterceptor addAllowedDelegate:delegatePattern];
+  ApproovLogI(@"addAllowedDelegate: %@", delegatePattern);
+}
+
+/**
+ * Sets the log level for Approov logging.
+ *
+ * @param level is the log level to set
+ */
+RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
+  setApproovLogLevel((int)level);
+  ApproovLogI(@"setLogLevel %d", (int)level);
 }
 
 /**

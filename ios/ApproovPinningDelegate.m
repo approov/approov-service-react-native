@@ -63,7 +63,7 @@
     _approovService = approovService;
     _originalDelegate = delegate;
   }
-  ApproovLogD(@"pinning NSURLSessionDelegate: %@",
+  ApproovLogI(@"pinning NSURLSessionDelegate: %@",
               NSStringFromClass([delegate class]));
   return self;
 }
@@ -84,7 +84,7 @@
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
                     NSURLCredential *credential))completionHandler {
-  ApproovLogD(@"session task received authentication challenge");
+  ApproovLogI(@"session task received authentication challenge");
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
     NSString *host = challenge.protectionSpace.host;
@@ -102,7 +102,7 @@
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogD(@"Pinning allowed connection to %@", host);
+      ApproovLogI(@"Pinning allowed connection to %@", host);
       completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
   } else {
@@ -128,7 +128,7 @@
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
                     NSURLCredential *credential))completionHandler {
-  ApproovLogD(@"session received authentication challenge (session-level)");
+  ApproovLogI(@"session received authentication challenge (session-level)");
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
     NSString *host = challenge.protectionSpace.host;
@@ -146,7 +146,7 @@
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogD(@"Pinning allowed connection to %@ (session-level)", host);
+      ApproovLogI(@"Pinning allowed connection to %@ (session-level)", host);
       completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
   } else {

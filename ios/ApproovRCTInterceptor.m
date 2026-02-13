@@ -220,7 +220,7 @@ static dispatch_once_t _onceToken = 0;
         NSURLSession *session;
         if (delegate != nil) {
           NSString *delegateClassName = NSStringFromClass([delegate class]);
-          ApproovLogD(@"checking session creation with %@ delegate",
+          ApproovLogI(@"checking session creation with %@ delegate",
                       delegateClassName);
           // Thread-safe policy check
           BOOL shouldIntercept;
@@ -305,7 +305,7 @@ static dispatch_once_t _onceToken = 0;
 
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
               [interceptor->_pinnedSessions setObject:metadata forKey:session];
-              ApproovLogD(@"Registered session %p (total: %lu)", session,
+              ApproovLogI(@"Registered session %p (total: %lu)", session,
                           (unsigned long)interceptor->_pinnedSessions.count);
             });
 
@@ -353,7 +353,7 @@ static dispatch_once_t _onceToken = 0;
           // note that this part may block for the duration of the time it takes
           // to fetch an Approov token but experiments indicate that this does
           // not impact the behaviour of the React Native Javascript execution
-          ApproovLogD(@"intercepting data task %@ %@ for session %p (delegate: "
+          ApproovLogI(@"intercepting data task %@ %@ for session %p (delegate: "
                       @"%@, requests: %lu)",
                       request.HTTPMethod, request.URL, self,
                       metadata.delegateClassName,
@@ -389,7 +389,7 @@ static dispatch_once_t _onceToken = 0;
         } else {
           // if the data task creation is for a different (unpinned) session
           // then we don't add Approov
-          ApproovLogD(@"skipping request for unregistered session %p", self);
+          ApproovLogI(@"skipping request for unregistered session %p", self);
           return RSSWCallOriginal(request);
         }
       }),

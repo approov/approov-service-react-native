@@ -1,6 +1,16 @@
 export declare class ApproovService {
   static initialize(config: string): Promise<void>;
   static setProceedOnNetworkFail(): void;
+  static setLogLevel(level: number): void;
+  static addAllowedDelegate(delegatePattern: string): void;
+  static Log: {
+    EXTREME: number;
+    DEBUG: number;
+    INFO: number;
+    WARN: number;
+    ERROR: number;
+    NONE: number;
+  }
   static setSuppressLoggingUnknownURL(): void;
   static setTokenHeader(header: string, prefix: string): void;
   static setBindingHeader(header: string): void;
@@ -21,6 +31,11 @@ export declare class ApproovService {
   static fetchCustomJWT(payload: string): Promise<String>;
   static getLastARC(): Promise<String>;
   static setInstallAttrsInToken(attrs: string): Promise<void>;
+  static getPinningDiagnostics(): Promise<{
+    sessionsWithPinning: number;
+    sessionsWithoutPinning: number;
+    unpinnedSessions: Array<{ sessionId: string; requestCount: number }>;
+  }>;
 }
 import { ApproovProvider } from "./approov-provider";
 import { ApproovMonitor } from "./approov-monitor";

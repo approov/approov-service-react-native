@@ -21,6 +21,17 @@
 
 import { NativeModules } from 'react-native'
 const { ApproovService } = NativeModules
+
+// Add log levels
+ApproovService.Log = {
+    EXTREME: 0,
+    DEBUG: 1,
+    INFO: 2,
+    WARN: 3,
+    ERROR: 4,
+    NONE: 5
+}
+
 import { ApproovProvider, useApproov } from './approov-provider'
 import { ApproovMonitor } from './approov-monitor'
 

@@ -28,13 +28,117 @@
 #import "ApproovUtils.h"
 #import "RSSwizzle.h"
 
-// remember the current NSURLSessions that are being processed
-@implementation ApproovRCTInterceptor {
-  // any current ReactNative session
-  NSURLSession *_RNSession;
+// MARK: - Session Interception Mode
 
-  // any current RNFetchBlob session
-  NSURLSession *_BlobSession;
+/// Defines how sessions are intercepted
+typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
+  SessionInterceptionModeAllowList, // Only intercept known delegates (default)
+  SessionInterceptionModeDenyList,  // Intercept all except known exclusions
+  SessionInterceptionModeAll        // Intercept everything
+};
+
+// MARK: - Session Metadata
+
+/// Metadata tracked for each intercepted session
+@interface SessionMetadata : NSObject
+@property(nonatomic, strong) NSString *delegateClassName;
+@property(nonatomic, strong) NSDate *createdAt;
+@property(nonatomic, assign) NSUInteger requestCount;
+
+// Pinning validation tracking
+@property(nonatomic, assign) NSUInteger authChallengeCount;
+@property(nonatomic, assign) NSUInteger pinnedChallengeCount;
+@property(nonatomic, assign) NSUInteger blockedChallengeCount;
+@property(nonatomic, strong) NSDate *lastAuthChallengeAt;
+@property(nonatomic, assign) BOOL pinningDelegateVerified;
+@end
+
+@implementation SessionMetadata
+@end
+
+// MARK: - Session Interception Policy
+
+/// Policy for determining which sessions to intercept
+@interface SessionInterceptionPolicy : NSObject
+@property(nonatomic, assign) SessionInterceptionMode mode;
+@property(nonatomic, strong) NSSet<NSString *> *allowedDelegates;
+@property(nonatomic, strong) NSSet<NSString *> *excludedDelegates;
+
+- (BOOL)shouldInterceptSessionWithDelegate:(NSString *)delegateClassName;
+- (BOOL)matchesPattern:(NSString *)className
+                 inSet:(NSSet<NSString *> *)patterns;
+@end
+
+@implementation SessionInterceptionPolicy
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    // Default: Allow known delegates (backward compatible)
+    _mode = SessionInterceptionModeAllowList;
+    _allowedDelegates = [NSSet setWithArray:@[
+      @"RCT*",                       // React Native (prefix match)
+      @"RNFetchBlobRequest",         // rn-fetch-blob
+      @"NRMAURLSessionTaskDelegate", // NewRelic
+      @"SentryNSURLSessionDelegate", // Sentry
+      @"Sentry*", // Sentry (prefix match for any Sentry delegates)
+    ]];
+    _excludedDelegates = [NSSet setWithArray:@[
+      @"RCTMultipartDataTask" // Bundle reload (excluded)
+    ]];
+  }
+  return self;
+}
+
+- (BOOL)shouldInterceptSessionWithDelegate:(NSString *)delegateClassName {
+  // Check exclusions first
+  if ([self matchesPattern:delegateClassName inSet:_excludedDelegates]) {
+    return NO;
+  }
+
+  switch (_mode) {
+  case SessionInterceptionModeAll:
+    return YES;
+
+  case SessionInterceptionModeDenyList:
+    return ![self matchesPattern:delegateClassName inSet:_excludedDelegates];
+
+  case SessionInterceptionModeAllowList:
+    return [self matchesPattern:delegateClassName inSet:_allowedDelegates];
+  }
+}
+
+- (BOOL)matchesPattern:(NSString *)className
+                 inSet:(NSSet<NSString *> *)patterns {
+  for (NSString *pattern in patterns) {
+    if ([pattern hasSuffix:@"*"]) {
+      // Prefix match
+      NSString *prefix = [pattern substringToIndex:pattern.length - 1];
+      if ([className hasPrefix:prefix])
+        return YES;
+    } else {
+      // Exact match
+      if ([className isEqualToString:pattern])
+        return YES;
+    }
+  }
+  return NO;
+}
+
+@end
+
+// MARK: - ApproovRCTInterceptor Implementation
+
+@implementation ApproovRCTInterceptor {
+  // Track all pinned sessions with metadata
+  NSMapTable<NSURLSession *, SessionMetadata *> *_pinnedSessions;
+
+  // Configuration for which sessions to intercept
+  SessionInterceptionPolicy *_policy;
+
+  // Thread safety
+  dispatch_queue_t _sessionRegistryQueue;
+  NSLock *_policyLock;
 }
 
 // the single shared intercetor for React Native
@@ -67,14 +171,30 @@ static dispatch_once_t _onceToken = 0;
     return self;
   }
   _approovService = approovService;
-  _RNSession = nil;
-  _BlobSession = nil;
+
+  // Thread-safe session registry using weak-to-strong map table
+  // #5)
+  _pinnedSessions = [NSMapTable weakToStrongObjectsMapTable];
+
+  // Serial queue for session registry operations
+  _sessionRegistryQueue = dispatch_queue_create("io.approov.sessionRegistry",
+                                                DISPATCH_QUEUE_SERIAL);
+
+  // Lock for policy updates
+  _policyLock = [[NSLock alloc] init];
+
+  // Initialize policy
+  _policy = [[SessionInterceptionPolicy alloc] init];
 
   // swizzle react native session creation methods
   [self swizzleRCTSessionCreation];
 
   // swizzle react native session data task creation methods
   [self swizzleRCTSessionDataTasks];
+
+  // Swizzle session invalidation for cleanup
+  [self swizzleSessionInvalidation];
+
   return self;
 }
 
@@ -102,10 +222,14 @@ static dispatch_once_t _onceToken = 0;
           NSString *delegateClassName = NSStringFromClass([delegate class]);
           ApproovLogD(@"checking session creation with %@ delegate",
                       delegateClassName);
-          if (([delegateClassName hasPrefix:@"RCT"] ||
-               [delegateClassName isEqual:@"RNFetchBlobRequest"] ||
-               [delegateClassName isEqual:@"NRMAURLSessionTaskDelegate"]) &&
-              ![delegateClassName isEqual:@"RCTMultipartDataTask"]) {
+          // Thread-safe policy check
+          BOOL shouldIntercept;
+          [interceptor->_policyLock lock];
+          shouldIntercept = [interceptor->_policy
+              shouldInterceptSessionWithDelegate:delegateClassName];
+          [interceptor->_policyLock unlock];
+
+          if (shouldIntercept) {
             // we have a delegate associated with React Native that we need to
             // handle (note we don't intercept the RCTMultipartDataTask since
             // this is specifically associated with bundle reload of Javascript
@@ -133,23 +257,69 @@ static dispatch_once_t _onceToken = 0;
                 [PinningURLSessionDelegate
                     createWithDelegate:delegate
                         approovService:interceptor.approovService];
-            session = RSSWCallOriginal(configuration, pinningDelegate, queue);
 
-            // remember this particular NSURLSession since it is one we should
-            // add Approov to. We only remember one for React Native at a time
-            // but this is okay given its session creation process. For
-            // rn-fetch-blob a new session is created for each request, so there
-            // is a very small chance of a race at this point but this would
-            // only result in a missing Approov token rather than a pinning
-            // vulnerability.
-            if ([delegateClassName hasPrefix:@"RCT"])
-              interceptor->_RNSession = session;
-            else
-              interceptor->_BlobSession = session;
+            // Create session FIRST so we can capture it in the callback
+            session = RSSWCallOriginal(configuration, pinningDelegate, queue);
+            __weak NSURLSession *weakSession = session;
+
+            // Register auth challenge callback
+            // IMPORTANT: weakSession must be assigned BEFORE this block is
+            // created
+            pinningDelegate.authChallengeCallback =
+                ^(NSString *host, ApproovTrustDecision decision) {
+                  dispatch_async(interceptor->_sessionRegistryQueue, ^{
+                    SessionMetadata *metadata =
+                        [interceptor->_pinnedSessions objectForKey:weakSession];
+                    if (metadata) {
+                      metadata.authChallengeCount++;
+                      metadata.lastAuthChallengeAt = [NSDate date];
+                      metadata.pinningDelegateVerified = YES;
+
+                      if (decision == ApproovTrustDecisionAllow) {
+                        metadata.pinnedChallengeCount++;
+                      } else {
+                        metadata.blockedChallengeCount++;
+                      }
+
+                      ApproovLogI(@"Session %p: auth challenge for %@ "
+                                  @"(decision: %d, total: %lu)",
+                                  weakSession, host, decision,
+                                  (unsigned long)metadata.authChallengeCount);
+                    } else {
+                      ApproovLogW(@"Auth challenge callback: session %p not "
+                                  @"found in registry",
+                                  weakSession);
+                    }
+                  });
+                };
+
+            // Store in registry with metadata
+            SessionMetadata *metadata = [[SessionMetadata alloc] init];
+            metadata.delegateClassName = delegateClassName;
+            metadata.createdAt = [NSDate date];
+            metadata.requestCount = 0;
+            metadata.authChallengeCount = 0;
+            metadata.pinnedChallengeCount = 0;
+            metadata.blockedChallengeCount = 0;
+            metadata.pinningDelegateVerified = NO;
+
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              [interceptor->_pinnedSessions setObject:metadata forKey:session];
+              ApproovLogD(@"Registered session %p (total: %lu)", session,
+                          (unsigned long)interceptor->_pinnedSessions.count);
+            });
 
             // provide the created session
             return session;
+          } else {
+            // Delegate was rejected by policy - log this for diagnostics
+            ApproovLogW(@"SKIPPING session creation with %@ delegate (not in "
+                        @"interception policy)",
+                        delegateClassName);
           }
+        } else {
+          // No delegate provided
+          ApproovLogD(@"session creation with nil delegate");
         }
 
         // if we don't want to intercept the session then we just call the
@@ -172,16 +342,28 @@ static dispatch_once_t _onceToken = 0;
       NSClassFromString(@"NSURLSession"), @selector(dataTaskWithRequest:),
       RSSWReturnType(NSURLSessionDataTask *),
       RSSWArguments(NSURLRequest *_Nonnull request), RSSWReplacement({
-        // check if the data task creation is for a current session that we have
-        // pinned
-        if ((self == interceptor->_RNSession) ||
-            (self == interceptor->_BlobSession)) {
+        // Thread-safe session lookup
+        __block SessionMetadata *metadata = nil;
+        dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+          metadata = [interceptor->_pinnedSessions objectForKey:self];
+        });
+
+        if (metadata != nil) {
           // update the request to include Approov dealing with any failures -
           // note that this part may block for the duration of the time it takes
           // to fetch an Approov token but experiments indicate that this does
           // not impact the behaviour of the React Native Javascript execution
-          ApproovLogD(@"intercepting data task %@ %@", request.HTTPMethod,
-                      request.URL);
+          ApproovLogD(@"intercepting data task %@ %@ for session %p (delegate: "
+                      @"%@, requests: %lu)",
+                      request.HTTPMethod, request.URL, self,
+                      metadata.delegateClassName,
+                      (unsigned long)metadata.requestCount);
+
+          // Thread-safe counter increment
+          dispatch_async(interceptor->_sessionRegistryQueue, ^{
+            metadata.requestCount++;
+          });
+
           ApproovInterceptorResult *result =
               [interceptor.approovService interceptRequest:request];
           switch ([result action]) {
@@ -207,10 +389,214 @@ static dispatch_once_t _onceToken = 0;
         } else {
           // if the data task creation is for a different (unpinned) session
           // then we don't add Approov
+          ApproovLogD(@"skipping request for unregistered session %p", self);
           return RSSWCallOriginal(request);
         }
       }),
       0, NULL);
+}
+
+/**
+ * Swizzles the NSURLSession invalidation methods to clean up the session
+ * registry when sessions are invalidated. This prevents memory leaks and stale
+ * session tracking.
+ */
+- (void)swizzleSessionInvalidation {
+  __block ApproovRCTInterceptor *interceptor = self;
+
+  // Swizzle both invalidation methods
+  NSArray *invalidationSelectors =
+      @[ @"invalidateAndCancel", @"finishTasksAndInvalidate" ];
+
+  for (NSString *selectorName in invalidationSelectors) {
+    RSSwizzleInstanceMethod(
+        NSClassFromString(@"NSURLSession"), NSSelectorFromString(selectorName),
+        RSSWReturnType(void), RSSWArguments(), RSSWReplacement({
+          // Thread-safe cleanup
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            SessionMetadata *metadata =
+                [interceptor->_pinnedSessions objectForKey:self];
+            if (metadata) {
+              ApproovLogD(@"Removing invalidated session %p (served %lu "
+                          @"requests, %lu auth challenges)",
+                          self, (unsigned long)metadata.requestCount,
+                          (unsigned long)metadata.authChallengeCount);
+              [interceptor->_pinnedSessions removeObjectForKey:self];
+            }
+          });
+          RSSWCallOriginal();
+        }),
+        0, NULL);
+  }
+}
+
+// MARK: - Configuration API Implementations
+
++ (void)setInterceptionMode:(NSInteger)mode {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    _sharedInterceptor->_policy.mode = (SessionInterceptionMode)mode;
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Interception mode set to %ld", (long)mode);
+  }
+}
+
++ (void)addAllowedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *allowed =
+        [_sharedInterceptor->_policy.allowedDelegates mutableCopy];
+    [allowed addObject:delegatePattern];
+    _sharedInterceptor->_policy.allowedDelegates = [allowed copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Added allowed delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)addExcludedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *excluded =
+        [_sharedInterceptor->_policy.excludedDelegates mutableCopy];
+    [excluded addObject:delegatePattern];
+    _sharedInterceptor->_policy.excludedDelegates = [excluded copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Added excluded delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)removeAllowedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *allowed =
+        [_sharedInterceptor->_policy.allowedDelegates mutableCopy];
+    [allowed removeObject:delegatePattern];
+    _sharedInterceptor->_policy.allowedDelegates = [allowed copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Removed allowed delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)removeExcludedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *excluded =
+        [_sharedInterceptor->_policy.excludedDelegates mutableCopy];
+    [excluded removeObject:delegatePattern];
+    _sharedInterceptor->_policy.excludedDelegates = [excluded copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Removed excluded delegate pattern: %@", delegatePattern);
+  }
+}
+
+// MARK: - Diagnostic API Implementations
+
++ (NSDictionary *)getSessionDiagnostics {
+  if (!_sharedInterceptor) {
+    return @{@"error" : @"Interceptor not initialized"};
+  }
+
+  __block NSMutableArray *sessions = [NSMutableArray array];
+  __block NSUInteger totalRequests = 0;
+
+  dispatch_sync(_sharedInterceptor->_sessionRegistryQueue, ^{
+    NSEnumerator *sessionEnum =
+        [_sharedInterceptor->_pinnedSessions keyEnumerator];
+    NSURLSession *session;
+    while ((session = [sessionEnum nextObject])) {
+      SessionMetadata *metadata =
+          [_sharedInterceptor->_pinnedSessions objectForKey:session];
+      if (metadata) {
+        totalRequests += metadata.requestCount;
+        [sessions addObject:@{
+          @"sessionPointer" : [NSString stringWithFormat:@"%p", session],
+          @"delegateClassName" : metadata.delegateClassName,
+          @"createdAt" : [NSString stringWithFormat:@"%@", metadata.createdAt],
+          @"requestCount" : @(metadata.requestCount),
+          @"authChallengeCount" : @(metadata.authChallengeCount),
+          @"pinnedChallengeCount" : @(metadata.pinnedChallengeCount),
+          @"blockedChallengeCount" : @(metadata.blockedChallengeCount),
+          @"pinningDelegateVerified" : @(metadata.pinningDelegateVerified)
+        }];
+      }
+    }
+  });
+
+  return @{
+    @"totalSessions" : @(sessions.count),
+    @"totalRequests" : @(totalRequests),
+    @"sessions" : sessions
+  };
+}
+
++ (NSDictionary *)getPinningDiagnostics {
+  if (!_sharedInterceptor) {
+    return @{@"error" : @"Interceptor not initialized"};
+  }
+
+  __block NSUInteger totalAuthChallenges = 0;
+  __block NSUInteger totalPinned = 0;
+  __block NSUInteger totalBlocked = 0;
+  __block NSUInteger sessionsWithPinning = 0;
+  __block NSUInteger sessionsWithoutPinning = 0;
+  __block NSMutableArray *unpinnedSessions = [NSMutableArray array];
+
+  dispatch_sync(_sharedInterceptor->_sessionRegistryQueue, ^{
+    NSEnumerator *sessionEnum =
+        [_sharedInterceptor->_pinnedSessions keyEnumerator];
+    NSURLSession *session;
+    while ((session = [sessionEnum nextObject])) {
+      SessionMetadata *metadata =
+          [_sharedInterceptor->_pinnedSessions objectForKey:session];
+      if (metadata) {
+        totalAuthChallenges += metadata.authChallengeCount;
+        totalPinned += metadata.pinnedChallengeCount;
+        totalBlocked += metadata.blockedChallengeCount;
+
+        if (metadata.requestCount > 0 && !metadata.pinningDelegateVerified) {
+          sessionsWithoutPinning++;
+          [unpinnedSessions addObject:@{
+            @"sessionPointer" : [NSString stringWithFormat:@"%p", session],
+            @"delegateClassName" : metadata.delegateClassName,
+            @"requestCount" : @(metadata.requestCount)
+          }];
+        } else if (metadata.pinningDelegateVerified) {
+          sessionsWithPinning++;
+        }
+      }
+    }
+  });
+
+  return @{
+    @"totalAuthChallenges" : @(totalAuthChallenges),
+    @"totalPinned" : @(totalPinned),
+    @"totalBlocked" : @(totalBlocked),
+    @"sessionsWithPinning" : @(sessionsWithPinning),
+    @"sessionsWithoutPinning" : @(sessionsWithoutPinning),
+    @"unpinnedSessions" : unpinnedSessions
+  };
+}
+
++ (void)validatePinningIsActive {
+  NSDictionary *pinningDiag = [self getPinningDiagnostics];
+  NSNumber *sessionsWithoutPinning = pinningDiag[@"sessionsWithoutPinning"];
+  NSArray *unpinnedSessions = pinningDiag[@"unpinnedSessions"];
+
+  if ([sessionsWithoutPinning integerValue] > 0) {
+    ApproovLogW(@"WARNING: %@ session(s) have made requests but pinning was "
+                @"NOT verified!",
+                sessionsWithoutPinning);
+    for (NSDictionary *session in unpinnedSessions) {
+      ApproovLogW(@"  - Session %@ (delegate: %@, requests: %@)",
+                  session[@"sessionPointer"], session[@"delegateClassName"],
+                  session[@"requestCount"]);
+    }
+    ApproovLogW(@"This may indicate that pinning is being bypassed. "
+                @"Investigate immediately!");
+  } else {
+    ApproovLogI(
+        @"Pinning validation: All active sessions have verified pinning ✓");
+  }
 }
 
 @end

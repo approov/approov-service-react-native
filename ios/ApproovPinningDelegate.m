@@ -24,6 +24,7 @@
 
 #import "ApproovPinningDelegate.h"
 #import "ApproovUtils.h"
+#import "approov_service_react_native-Swift.h"
 
 @interface PinningURLSessionDelegate ()
 
@@ -188,6 +189,10 @@
     willPerformHTTPRedirection:(NSHTTPURLResponse *)response
                     newRequest:(NSURLRequest *)request
              completionHandler:(void (^)(NSURLRequest *))completionHandler {
+  // Sign the redirected request
+  NSMutableURLRequest *mutableRequest = [request mutableCopy];
+  [[ApproovServiceMutatorBridge shared] signRequest:mutableRequest];
+
   if ([_originalDelegate respondsToSelector:@selector
                          (URLSession:
                                 task:willPerformHTTPRedirection:newRequest
@@ -195,7 +200,7 @@
     [_originalDelegate URLSession:session
                               task:task
         willPerformHTTPRedirection:response
-                        newRequest:request
+                        newRequest:mutableRequest
                  completionHandler:completionHandler];
 }
 

@@ -30,7 +30,18 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
+import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReadableArray;
+import com.facebook.react.bridge.ReadableType;
+import com.facebook.react.bridge.WritableArray;
+import com.facebook.react.bridge.Arguments;
 import com.facebook.react.modules.network.NetworkingModule;
+import com.facebook.react.modules.network.OkHttpClientProvider;
+import com.facebook.react.modules.network.OkHttpClientFactory;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Interceptor;
+import okhttp3.CertificatePinner;
 
 import com.criticalblue.approovsdk.Approov;
 
@@ -42,6 +53,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.util.Properties;
 import java.util.Map;
 import java.util.HashMap;
@@ -54,6 +66,14 @@ import java.util.regex.PatternSyntaxException;
 public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
+
+    /**
+     * Interface to be implemented by classes that wish to be notified of any pin
+     * changes.
+     */
+    public interface PinChangeListener {
+        void approovPinsUpdated();
+    }
 
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
@@ -105,6 +125,31 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // Approov token
     private boolean proceedOnNetworkFail;
 
+    // true if the interceptor should proceed on network failures and not add an
+    // Approov token and instead add the Approov status
+    private boolean useApproovStatusIfNoToken;
+
+    /**
+     * Sets the flag to indicate if the interceptor should proceed on network
+     * failures and not add an Approov token and instead add the Approov status.
+     * 
+     * @param useApproovStatusIfNoToken is the flag value
+     */
+    public synchronized void setUseApproovStatusIfNoToken(boolean useApproovStatusIfNoToken) {
+        this.useApproovStatusIfNoToken = useApproovStatusIfNoToken;
+    }
+
+    /**
+     * Gets the flag that indicates if the interceptor should proceed on network
+     * failures and not add an Approov token and instead add the Approov status.
+     * 
+     * @return true if the interceptor should proceed on network failures and not
+     *         add an Approov token and instead add the Approov status
+     */
+    public synchronized boolean getUseApproovStatusIfNoToken() {
+        return useApproovStatusIfNoToken;
+    }
+
     // true if the logging should be suppressed for unknown (and excluded) URLs
     private boolean suppressLoggingUnknownURL;
 
@@ -130,6 +175,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
+    // list of listeners for pin changes
+    private List<PinChangeListener> pinChangeListeners;
+
     // Log levels matching iOS/ApproovUtils
     private static final int LOG_EXTREME = 0;
     private static final int LOG_DEBUG = 1;
@@ -140,6 +188,31 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
+
+    // The mutator instance used to control ApproovService behavior
+    private ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
+
+    /**
+     * Sets the ApproovServiceMutator instance to handle configurations.
+     *
+     * @param mutator is the ApproovServiceMutator to use
+     */
+    public void setServiceMutator(ApproovServiceMutator mutator) {
+        if (mutator == null) {
+            mutator = ApproovServiceMutator.DEFAULT;
+        }
+        this.serviceMutator = mutator;
+        log(LOG_DEBUG, TAG, "Applied ApproovServiceMutator: " + mutator.toString());
+    }
+
+    /**
+     * Gets the active service mutator instance.
+     *
+     * @return the service mutator instance (never null)
+     */
+    public ApproovServiceMutator getServiceMutator() {
+        return serviceMutator;
+    }
 
     /**
      * Sets the log level for Approov logging.
@@ -346,12 +419,47 @@ public class ApproovService extends ReactContextBaseJavaModule {
             log(LOG_INFO, TAG, "started");
 
         // set the custom Approov OkHttp client builder in the React Native networking
-        // stack
-        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this);
+        // stack. We need to use reflection to see if a custom builder is already
+        // set, because if so we need to wrap it to ensure that the other SDK (e.g. New
+        // Relic)
+        // still works.
+        NetworkingModule.CustomClientBuilder previousBuilder = null;
+        try {
+            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
+            field.setAccessible(true);
+            previousBuilder = (NetworkingModule.CustomClientBuilder) field.get(null);
+            if (previousBuilder != null)
+                Log.d(TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
+        } catch (Exception e) {
+            Log.d(TAG, "failed to check for existing custom client builder: " + e.getMessage());
+        }
+        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, previousBuilder);
         NetworkingModule.setCustomClientBuilder(clientBuilder);
 
         // add the Approov client builder to any rn-fetch-blob instances
         configureRNFetchBlobIfFound(clientBuilder);
+    }
+
+    /**
+     * Checks if the Approov interceptor is currently active in the React Native
+     * networking stack.
+     *
+     * @param promise to be fulfilled with the boolean result
+     */
+    @ReactMethod
+    public void isInterceptorActive(Promise promise) {
+        try {
+            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
+            field.setAccessible(true);
+            NetworkingModule.CustomClientBuilder currentBuilder = (NetworkingModule.CustomClientBuilder) field
+                    .get(null);
+            if ((currentBuilder != null) && (currentBuilder instanceof ApproovClientBuilder))
+                promise.resolve(true);
+            else
+                promise.resolve(false);
+        } catch (Exception e) {
+            promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
+        }
     }
 
     /**
@@ -887,6 +995,103 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Gets the signature for the given message. This uses an account specific
+     * message signing key.
+     *
+     * @param message is the message whose content is to be signed
+     * @return String of the base64 encoded message signature
+     * @throws ApproovException if there was a problem
+     */
+    public static String getAccountMessageSignature(String message) throws ApproovException {
+        try {
+            String signature = Approov.getMessageSignature(message);
+            if (signature == null)
+                throw new ApproovException("no account signature available");
+            return signature;
+        } catch (IllegalStateException e) {
+            throw new ApproovException(e);
+        } catch (IllegalArgumentException e) {
+            throw new ApproovException(e);
+        }
+    }
+
+    /**
+     * Gets the install signature for the given message. This uses an app install
+     * specific message signing key.
+     *
+     * @param message is the message whose content is to be signed
+     * @return String of the base64 encoded message signature in ASN.1 DER format
+     * @throws ApproovException if there was a problem
+     */
+    public static String getInstallMessageSignature(String message) throws ApproovException {
+        try {
+            String signature = Approov.getInstallMessageSignature(message);
+            if (signature == null)
+                throw new ApproovException("no install signature available");
+            return signature;
+        } catch (IllegalStateException e) {
+            throw new ApproovException(e);
+        } catch (IllegalArgumentException e) {
+            throw new ApproovException(e);
+        }
+    }
+
+    /**
+     * Sets the configuration for message signing.
+     *
+     * @param config  is a dictionary of configuration options
+     * @param promise to be fulfilled when configured
+     */
+    @ReactMethod
+    public void setMessageSigningConfig(ReadableMap config, Promise promise) {
+        try {
+            ApproovDefaultMessageSigning.SignatureParametersFactory factory = ApproovDefaultMessageSigning
+                    .generateDefaultSignatureParametersFactory();
+
+            // Parsing Algorithm
+            if (config.hasKey("alg")) {
+                String alg = config.getString("alg");
+                if ("sha-256".equals(alg)) {
+                    factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true);
+                } else if ("sha-512".equals(alg)) {
+                    factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA512, true);
+                }
+            }
+
+            // Parsing Headers
+            if (config.hasKey("headers")) {
+                ReadableArray headers = config.getArray("headers");
+                if (headers != null) {
+                    List<String> headerList = new ArrayList<>();
+                    for (int i = 0; i < headers.size(); i++) {
+                        if (headers.getType(i) == ReadableType.String) {
+                            headerList.add(headers.getString(i));
+                        }
+                    }
+                    if (!headerList.isEmpty()) {
+                        factory.addOptionalHeaders(headerList.toArray(new String[0]));
+                    }
+                }
+            }
+
+            // Parsing Header Configs
+            if (config.hasKey("addApproovTokenHeader")) {
+                factory.setAddApproovTokenHeader(config.getBoolean("addApproovTokenHeader"));
+            }
+
+            // Create signer and set as mutator
+            ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
+            signer.setDefaultFactory(factory);
+            setServiceMutator(signer);
+
+            log(LOG_INFO, TAG, "setMessageSigningConfig configured");
+            promise.resolve(null);
+        } catch (Exception e) {
+            promise.reject("setMessageSigningConfig", "Error: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
      * Callback handler for prefetching. We simply log as we don't need the token
      * itself, as it will be returned as a cached value on a subsequent token fetch.
      */
@@ -1269,6 +1474,108 @@ public class ApproovService extends ReactContextBaseJavaModule {
             else
                 // provide the custom JWT result
                 promise.resolve(result.getToken());
+        }
+    }
+
+    /**
+     * Gets pinning diagnostics showing if the Approov interceptor and certificate
+     * pinner are present.
+     * 
+     * @param promise to be fulfilled with the diagnostics map
+     */
+    @ReactMethod
+    public void getPinningDiagnostics(Promise promise) {
+        try {
+            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
+            WritableMap diagnostics = Arguments.createMap();
+            boolean isInterceptorPresent = false;
+            WritableArray interceptors = Arguments.createArray();
+
+            for (Interceptor interceptor : client.interceptors()) {
+                String name = interceptor.getClass().getName();
+                interceptors.pushString(name);
+                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
+                    isInterceptorPresent = true;
+            }
+            
+            for (Interceptor interceptor : client.networkInterceptors()) {
+                String name = interceptor.getClass().getName();
+                interceptors.pushString(name);
+                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
+                    isInterceptorPresent = true;
+            }
+
+            diagnostics.putBoolean("isInterceptorPresent", isInterceptorPresent);
+            diagnostics.putArray("interceptors", interceptors);
+
+            CertificatePinner pinner = client.certificatePinner();
+            boolean isPinnerPresent = (pinner != null) && !pinner.equals(CertificatePinner.DEFAULT);
+            diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
+
+            log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());
+            promise.resolve(diagnostics);
+        } catch (Exception e) {
+            promise.reject("getPinningDiagnostics", "Exception: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
+     * Updates the OkHttpClient factory to ensure Approov is being used. This checks if the current
+     * OkHttpClient is already using Approov and if not then it creates a new OkHttpClient that
+     * includes the Approov protection and sets this as the default shared client. This is useful
+     * if the OkHttpClient has been overwritten by another library (such as a 3rd party SDK).
+     * 
+     * @param wrapExisting is true if the existing OkHttpClient should be wrapped, false to start fresh
+     * @param promise to be fulfilled with the result
+     */
+    @ReactMethod
+    public void updateClientFactory(boolean wrapExisting, Promise promise) {
+        try {
+            // we obtain the NetworkingModule and the current client it is using
+            NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
+            OkHttpClient currentClient = OkHttpClientProvider.getOkHttpClient(); 
+
+            // if we are wrapping the existing client then we use it as the basis for the new one
+            OkHttpClient.Builder builder;
+            if (wrapExisting)
+                builder = currentClient.newBuilder();
+            else
+                builder = new OkHttpClient.Builder();
+            
+            // add the Approov protection to the builder
+            ApproovClientBuilder approovBuilder;
+            if (wrapExisting)
+                approovBuilder = new ApproovClientBuilder(this, null); // interceptors are already in the builder
+            else
+                approovBuilder = new ApproovClientBuilder(this, null);
+            approovBuilder.apply(builder);
+            
+            // build the new client
+            OkHttpClient newClient = builder.build();
+
+            // set the new client as the default shared client
+            OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
+                @Override
+                public OkHttpClient createNewNetworkModuleClient() {
+                    return newClient;
+                }
+            });
+
+            // we also need to use reflection to set the client on the NetworkingModule since it has
+            // already grasped a reference to the previous client
+            try {
+                Field clientField = NetworkingModule.class.getDeclaredField("mClient");
+                clientField.setAccessible(true);
+                clientField.set(networkingModule, newClient);
+            } catch (Exception e) {
+                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client: " + e.getMessage());
+                // we determine this is not a fatal error as the provider update should work for future requests
+            }
+
+            log(LOG_INFO, TAG, "updateClientFactory: success");
+            promise.resolve(true); 
+        } catch (Exception e) {
+            promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
 }

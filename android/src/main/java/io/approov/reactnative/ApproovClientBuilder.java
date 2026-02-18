@@ -36,21 +36,30 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     // underlying ApproovService that is wrapping the SDK
     private ApproovService approovService;
 
-    // interceptor for adding Approov tokens or substituting headers and/or query parameters
+    // interceptor for adding Approov tokens or substituting headers and/or query
+    // parameters
     private Interceptor interceptor;
 
     // current certificate pinner to be used
     private CertificatePinner pinner;
 
+    // prior client builder that might have been set by another SDK (e.g. New Relic)
+    private CustomClientBuilder wrappedBuilder;
+
     /**
-     * Creates an ApproovClientBuilder for OkHttp requests. This adds the interceptor and certificate
-     * pinning, which can be dynamically updated if the pins change during app usage.
+     * Creates an ApproovClientBuilder for OkHttp requests. This adds the
+     * interceptor and certificate
+     * pinning, which can be dynamically updated if the pins change during app
+     * usage.
      *
      * @param approovService is the ApproovService being used
+     * @param wrappedBuilder is the CustomClientBuilder that was already set, or
+     *                       null if none
      */
-    public ApproovClientBuilder(ApproovService approovService) {
+    public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder) {
         this.approovService = approovService;
-        
+        this.wrappedBuilder = wrappedBuilder;
+
         // set initial certificate pinner
         pinner = ApproovCertificatePinner.build(approovService);
 
@@ -70,6 +79,10 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
 
     @Override
     public void apply(OkHttpClient.Builder builder) {
+        // apply the wrapped builder first if it exists
+        if (wrappedBuilder != null)
+            wrappedBuilder.apply(builder);
+
         if (builder != null) {
             builder.addInterceptor(interceptor).certificatePinner(pinner);
         }

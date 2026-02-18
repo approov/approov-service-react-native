@@ -92,7 +92,7 @@ void ApproovLogE(NSString *fmt, ...) {
   }
 }
 
-NSError *ApproovError(NSInteger code, NSString *fmt, ...) {
+NSError *ApproovRNError(NSInteger code, NSString *fmt, ...) {
   va_list vargs;
   va_start(vargs, fmt);
   NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];

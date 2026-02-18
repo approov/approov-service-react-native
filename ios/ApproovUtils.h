@@ -49,7 +49,7 @@ void ApproovLogW(NSString *fmt, ...);
 void ApproovLogE(NSString *fmt, ...);
 
 // create an error
-NSError *ApproovError(NSInteger code, NSString *fmt, ...);
+NSError *ApproovRNError(NSInteger code, NSString *fmt, ...);
 
 /// String convenience methods encapsulating URL encoding, which seems
 /// is a mess of deprecations over various iOS releases.

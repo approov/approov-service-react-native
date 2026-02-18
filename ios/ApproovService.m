@@ -27,6 +27,7 @@
 #import "ApproovProps.h"
 #import "ApproovRCTInterceptor.h"
 #import "ApproovUtils.h"
+#import "approov_service_react_native-Swift.h"
 #import <CommonCrypto/CommonCrypto.h>
 
 // Results generated as a result of a networking interception
@@ -563,6 +564,16 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
     [substitutionQueryParams removeObject:key];
   }
   ApproovLogI(@"removeSubstitutionQueryParam %@", key);
+}
+
+/**
+ * Sets the configuration for message signing.
+ *
+ * @param config is a dictionary of configuration options
+ */
+RCT_EXPORT_METHOD(setMessageSigningConfig : (NSDictionary *)config) {
+  [[ApproovServiceMutatorBridge shared] configure:config];
+  ApproovLogI(@"setMessageSigningConfig called");
 }
 
 /**
@@ -1523,6 +1534,22 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
   ApproovLogE(@"verifyPins for %@ failed to match one of %d pins", host,
               [pinsForHost count]);
   return ApproovTrustDecisionBlock;
+}
+
++ (BOOL)sharedProceedOnNetworkFailure {
+  return proceedOnNetworkFail;
+}
+
++ (NSMutableSet<NSString *> *)sharedExclusionURLRegexs {
+  return exclusionURLRegexs;
+}
+
++ (NSString *)getInstallMessageSignature:(NSString *)message {
+  return [Approov getInstallMessageSignature:message];
+}
+
++ (NSString *)getAccountMessageSignature:(NSString *)message {
+  return [Approov getMessageSignature:message];
 }
 
 @end

@@ -27,6 +27,7 @@
 #import "ApproovPinningDelegate.h"
 #import "ApproovUtils.h"
 #import "RSSwizzle.h"
+#import "approov_service_react_native-Swift.h"
 
 // MARK: - Session Interception Mode
 
@@ -368,8 +369,13 @@ static dispatch_once_t _onceToken = 0;
               [interceptor.approovService interceptRequest:request];
           switch ([result action]) {
           case ApproovInterceptorActionProceed: {
+            // Sign the request using the Swift Bridge
+            NSMutableURLRequest *mutableRequest =
+                [[result request] mutableCopy];
+            [[ApproovServiceMutatorBridge shared] signRequest:mutableRequest];
+
             // proceed with the task using the updated request
-            return RSSWCallOriginal(result.request);
+            return RSSWCallOriginal(mutableRequest);
           }
           case ApproovInterceptorActionRetry: {
             // return a task with 5xx error code suggesting retry

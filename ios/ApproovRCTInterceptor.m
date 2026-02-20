@@ -106,6 +106,9 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
   case SessionInterceptionModeAllowList:
     return [self matchesPattern:delegateClassName inSet:_allowedDelegates];
   }
+
+  // Defensive fallback for unexpected enum values.
+  return [self matchesPattern:delegateClassName inSet:_allowedDelegates];
 }
 
 - (BOOL)matchesPattern:(NSString *)className
@@ -215,111 +218,107 @@ static dispatch_once_t _onceToken = 0;
       RSSWArguments(NSURLSessionConfiguration *_Nonnull configuration,
                     id _Nullable delegate, NSOperationQueue *_Nullable queue),
       RSSWReplacement({
-        // check if the delegate is part of the React Native or rn-fetch-blob
-        // stack
+        // Check if the delegate should be intercepted.
+        // Note: in `mode=all` we also intercept nil delegates so that sessions
+        // created without an explicit delegate still receive Approov protection.
         NSURLSession *session;
+        NSString *delegateClassName =
+            delegate ? NSStringFromClass([delegate class]) : @"<nil>";
+        BOOL shouldIntercept = NO;
+
+        [interceptor->_policyLock lock];
         if (delegate != nil) {
-          NSString *delegateClassName = NSStringFromClass([delegate class]);
-          ApproovLogI(@"checking session creation with %@ delegate",
-                      delegateClassName);
-          // Thread-safe policy check
-          BOOL shouldIntercept;
-          [interceptor->_policyLock lock];
           shouldIntercept = [interceptor->_policy
               shouldInterceptSessionWithDelegate:delegateClassName];
-          [interceptor->_policyLock unlock];
-
-          if (shouldIntercept) {
-            // we have a delegate associated with React Native that we need to
-            // handle (note we don't intercept the RCTMultipartDataTask since
-            // this is specifically associated with bundle reload of Javascript
-            // and is not associated with the app's own network requests)
-            ApproovLogI(@"intercepting a session creation with %@ delegate",
-                        delegateClassName);
-
-            // add mock https protocol for sending status code and error
-            if (!configuration.protocolClasses ||
-                [configuration.protocolClasses count] == 0) {
-              configuration.protocolClasses =
-                  @[ [ApproovMockURLProtocol class] ];
-            } else if (![configuration.protocolClasses
-                           containsObject:[ApproovMockURLProtocol class]]) {
-              NSMutableArray *protocolClasses =
-                  [configuration.protocolClasses mutableCopy];
-              [protocolClasses insertObject:[ApproovMockURLProtocol class]
-                                    atIndex:0];
-              configuration.protocolClasses = protocolClasses;
-            }
-
-            // call the original method but provide the pinning delegate instead
-            // of the one provided
-            PinningURLSessionDelegate *pinningDelegate =
-                [PinningURLSessionDelegate
-                    createWithDelegate:delegate
-                        approovService:interceptor.approovService];
-
-            // Create session FIRST so we can capture it in the callback
-            session = RSSWCallOriginal(configuration, pinningDelegate, queue);
-            __weak NSURLSession *weakSession = session;
-
-            // Register auth challenge callback
-            // IMPORTANT: weakSession must be assigned BEFORE this block is
-            // created
-            pinningDelegate.authChallengeCallback =
-                ^(NSString *host, ApproovTrustDecision decision) {
-                  dispatch_async(interceptor->_sessionRegistryQueue, ^{
-                    SessionMetadata *metadata =
-                        [interceptor->_pinnedSessions objectForKey:weakSession];
-                    if (metadata) {
-                      metadata.authChallengeCount++;
-                      metadata.lastAuthChallengeAt = [NSDate date];
-                      metadata.pinningDelegateVerified = YES;
-
-                      if (decision == ApproovTrustDecisionAllow) {
-                        metadata.pinnedChallengeCount++;
-                      } else {
-                        metadata.blockedChallengeCount++;
-                      }
-
-                      ApproovLogI(@"Session %p: auth challenge for %@ "
-                                  @"(decision: %d, total: %lu)",
-                                  weakSession, host, decision,
-                                  (unsigned long)metadata.authChallengeCount);
-                    } else {
-                      ApproovLogW(@"Auth challenge callback: session %p not "
-                                  @"found in registry",
-                                  weakSession);
-                    }
-                  });
-                };
-
-            // Store in registry with metadata
-            SessionMetadata *metadata = [[SessionMetadata alloc] init];
-            metadata.delegateClassName = delegateClassName;
-            metadata.createdAt = [NSDate date];
-            metadata.requestCount = 0;
-            metadata.authChallengeCount = 0;
-            metadata.pinnedChallengeCount = 0;
-            metadata.blockedChallengeCount = 0;
-            metadata.pinningDelegateVerified = NO;
-
-            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-              [interceptor->_pinnedSessions setObject:metadata forKey:session];
-              ApproovLogI(@"Registered session %p (total: %lu)", session,
-                          (unsigned long)interceptor->_pinnedSessions.count);
-            });
-
-            // provide the created session
-            return session;
-          } else {
-            // Delegate was rejected by policy - log this for diagnostics
-            ApproovLogW(@"SKIPPING session creation with %@ delegate (not in "
-                        @"interception policy)",
-                        delegateClassName);
-          }
         } else {
-          // No delegate provided
-          ApproovLogD(@"session creation with nil delegate");
+          shouldIntercept =
+              interceptor->_policy.mode == SessionInterceptionModeAll;
+        }
+        [interceptor->_policyLock unlock];
+
+        if (shouldIntercept) {
+          ApproovLogI(@"intercepting a session creation with %@ delegate",
+                      delegateClassName);
+
+          // add mock https protocol for sending status code and error
+          if (!configuration.protocolClasses ||
+              [configuration.protocolClasses count] == 0) {
+            configuration.protocolClasses =
+                @[ [ApproovMockURLProtocol class] ];
+          } else if (![configuration.protocolClasses
+                         containsObject:[ApproovMockURLProtocol class]]) {
+            NSMutableArray *protocolClasses =
+                [configuration.protocolClasses mutableCopy];
+            [protocolClasses insertObject:[ApproovMockURLProtocol class]
+                                  atIndex:0];
+            configuration.protocolClasses = protocolClasses;
+          }
+
+          // call the original method but provide the pinning delegate instead
+          // of the one provided
+          PinningURLSessionDelegate *pinningDelegate =
+              [PinningURLSessionDelegate
+                  createWithDelegate:delegate
+                      approovService:interceptor.approovService];
+
+          // Create session FIRST so we can capture it in the callback
+          session = RSSWCallOriginal(configuration, pinningDelegate, queue);
+          __weak NSURLSession *weakSession = session;
+
+          // Register auth challenge callback
+          // IMPORTANT: weakSession must be assigned BEFORE this block is
+          // created
+          pinningDelegate.authChallengeCallback =
+              ^(NSString *host, ApproovTrustDecision decision) {
+                dispatch_async(interceptor->_sessionRegistryQueue, ^{
+                  SessionMetadata *metadata =
+                      [interceptor->_pinnedSessions objectForKey:weakSession];
+                  if (metadata) {
+                    metadata.authChallengeCount++;
+                    metadata.lastAuthChallengeAt = [NSDate date];
+                    metadata.pinningDelegateVerified = YES;
+
+                    if (decision == ApproovTrustDecisionAllow) {
+                      metadata.pinnedChallengeCount++;
+                    } else {
+                      metadata.blockedChallengeCount++;
+                    }
+
+                    ApproovLogI(@"Session %p: auth challenge for %@ "
+                                @"(decision: %d, total: %lu)",
+                                weakSession, host, decision,
+                                (unsigned long)metadata.authChallengeCount);
+                  } else {
+                    ApproovLogW(@"Auth challenge callback: session %p not "
+                                @"found in registry",
+                                weakSession);
+                  }
+                });
+              };
+
+          // Store in registry with metadata
+          SessionMetadata *metadata = [[SessionMetadata alloc] init];
+          metadata.delegateClassName = delegateClassName;
+          metadata.createdAt = [NSDate date];
+          metadata.requestCount = 0;
+          metadata.authChallengeCount = 0;
+          metadata.pinnedChallengeCount = 0;
+          metadata.blockedChallengeCount = 0;
+          metadata.pinningDelegateVerified = NO;
+
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            [interceptor->_pinnedSessions setObject:metadata forKey:session];
+            ApproovLogI(@"Registered session %p (total: %lu)", session,
+                        (unsigned long)interceptor->_pinnedSessions.count);
+          });
+
+          // provide the created session
+          return session;
+        } else {
+          // Delegate was rejected by policy - log this for diagnostics
+          ApproovLogW(@"SKIPPING session creation with %@ delegate (not in "
+                      @"interception policy)",
+                      delegateClassName);
         }
 
         // if we don't want to intercept the session then we just call the
@@ -434,10 +433,20 @@ static dispatch_once_t _onceToken = 0;
 
 + (void)setInterceptionMode:(NSInteger)mode {
   if (_sharedInterceptor) {
+    SessionInterceptionMode normalizedMode = SessionInterceptionModeAllowList;
+    if (mode == SessionInterceptionModeDenyList) {
+      normalizedMode = SessionInterceptionModeDenyList;
+    } else if (mode == SessionInterceptionModeAll) {
+      normalizedMode = SessionInterceptionModeAll;
+    } else if (mode != SessionInterceptionModeAllowList) {
+      ApproovLogW(@"Invalid interception mode %ld, defaulting to AllowList",
+                  (long)mode);
+    }
+
     [_sharedInterceptor->_policyLock lock];
-    _sharedInterceptor->_policy.mode = (SessionInterceptionMode)mode;
+    _sharedInterceptor->_policy.mode = normalizedMode;
     [_sharedInterceptor->_policyLock unlock];
-    ApproovLogI(@"Interception mode set to %ld", (long)mode);
+    ApproovLogI(@"Interception mode set to %ld", (long)normalizedMode);
   }
 }
 

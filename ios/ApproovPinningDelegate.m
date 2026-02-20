@@ -32,7 +32,7 @@
 @property ApproovService *approovService;
 
 // the original delegate to which non-authentication calls are passed
-@property id<NSURLSessionDataDelegate> originalDelegate;
+@property id<NSURLSessionDelegate> originalDelegate;
 
 @end
 
@@ -44,7 +44,7 @@
  * @param approovService is the ApproovService that will provide the pinning
  * information
  */
-+ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate>)delegate
++ (instancetype)createWithDelegate:(id<NSURLSessionDelegate>)delegate
                     approovService:(ApproovService *)approovService {
   return [[self alloc] initWithDelegate:delegate approovService:approovService];
 }
@@ -56,7 +56,7 @@
  * @param approovService is the ApproovService that will provide the pinning
  * information
  */
-- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
+- (instancetype)initWithDelegate:(id<NSURLSessionDelegate>)delegate
                   approovService:(ApproovService *)approovService {
   self = [super init];
   if (self) {
@@ -66,6 +66,45 @@
   ApproovLogI(@"pinning NSURLSessionDelegate: %@",
               NSStringFromClass([delegate class]));
   return self;
+}
+
+/**
+ * Makes this delegate proxy transparent for optional callbacks that are not
+ * explicitly implemented here. This keeps third party SDK delegate behaviors
+ * intact.
+ */
+- (BOOL)respondsToSelector:(SEL)aSelector {
+  return [super respondsToSelector:aSelector] ||
+         [_originalDelegate respondsToSelector:aSelector];
+}
+
+/**
+ * Forwards unknown selectors to the original delegate so SDK-specific
+ * NSURLSession delegate callbacks continue to work.
+ */
+- (id)forwardingTargetForSelector:(SEL)aSelector {
+  if ([_originalDelegate respondsToSelector:aSelector]) {
+    return _originalDelegate;
+  }
+  return [super forwardingTargetForSelector:aSelector];
+}
+
+/**
+ * Preserves delegate identity semantics for SDKs that introspect the delegate
+ * class/protocols at runtime.
+ */
+- (Class)class {
+  return _originalDelegate ? [_originalDelegate class] : [super class];
+}
+
+- (BOOL)isKindOfClass:(Class)aClass {
+  return [super isKindOfClass:aClass] ||
+         [_originalDelegate isKindOfClass:aClass];
+}
+
+- (BOOL)conformsToProtocol:(Protocol *)aProtocol {
+  return [super conformsToProtocol:aProtocol] ||
+         [_originalDelegate conformsToProtocol:aProtocol];
 }
 
 /**
@@ -106,8 +145,18 @@
       completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
   } else {
-    // Non-server-trust challenges handling
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    // Forward non-server-trust challenges to the original delegate if possible.
+    if ([_originalDelegate respondsToSelector:@selector
+                           (URLSession:
+                                  dataTask:didReceiveChallenge:
+                                      completionHandler:)]) {
+      [_originalDelegate URLSession:session
+                           dataTask:dataTask
+                 didReceiveChallenge:challenge
+                   completionHandler:completionHandler];
+    } else {
+      completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    }
   }
 }
 
@@ -150,8 +199,16 @@
       completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
   } else {
-    // Non-server-trust challenges handling
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    // Forward non-server-trust challenges to the original delegate if possible.
+    if ([_originalDelegate respondsToSelector:@selector
+                           (URLSession:didReceiveChallenge:
+                                         completionHandler:)]) {
+      [_originalDelegate URLSession:session
+                 didReceiveChallenge:challenge
+                   completionHandler:completionHandler];
+    } else {
+      completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    }
   }
 }
 
@@ -197,6 +254,8 @@
         willPerformHTTPRedirection:response
                         newRequest:request
                  completionHandler:completionHandler];
+  else
+    completionHandler(request);
 }
 
 /**
@@ -217,6 +276,8 @@
                          dataTask:dataTask
                didReceiveResponse:response
                 completionHandler:completionHandler];
+  else
+    completionHandler(NSURLSessionResponseAllow);
 }
 
 /**

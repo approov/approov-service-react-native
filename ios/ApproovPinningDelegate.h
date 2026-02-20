@@ -27,8 +27,12 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// An NSURLSessionDelegate for applying the dynamic pins provided by Approov
-@interface PinningURLSessionDelegate : NSObject <NSURLSessionDelegate>
+/// An NSURLSessionDelegate proxy for applying the dynamic pins provided by
+/// Approov while transparently forwarding all other delegate callbacks to the
+/// original delegate.
+@interface PinningURLSessionDelegate
+    : NSObject <NSURLSessionDelegate, NSURLSessionTaskDelegate,
+                NSURLSessionDataDelegate, NSURLSessionDownloadDelegate>
 
 // Callback to notify interceptor of auth challenges
 @property(nonatomic, copy) void (^authChallengeCallback)
@@ -39,7 +43,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param delegate is the original delgate
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
-+ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate>)delegate
++ (instancetype)createWithDelegate:(id<NSURLSessionDelegate>)delegate
                     approovService:(ApproovService *)approovService;
 
 /// Initializes a pinning URL session delegate.
@@ -47,7 +51,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param delegate is the original delgate
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
-- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
+- (instancetype)initWithDelegate:(id<NSURLSessionDelegate>)delegate
                   approovService:(ApproovService *)approovService;
 
 @end

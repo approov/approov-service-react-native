@@ -65,6 +65,7 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 @property(nonatomic, strong) NSSet<NSString *> *excludedDelegates;
 
 - (BOOL)shouldInterceptSessionWithDelegate:(NSString *)delegateClassName;
+- (BOOL)isExcludedDelegateClassName:(NSString *)delegateClassName;
 - (BOOL)matchesPattern:(NSString *)className
                  inSet:(NSSet<NSString *> *)patterns;
 @end
@@ -109,6 +110,10 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 
   // Defensive fallback for unexpected enum values.
   return [self matchesPattern:delegateClassName inSet:_allowedDelegates];
+}
+
+- (BOOL)isExcludedDelegateClassName:(NSString *)delegateClassName {
+  return [self matchesPattern:delegateClassName inSet:_excludedDelegates];
 }
 
 - (BOOL)matchesPattern:(NSString *)className
@@ -202,6 +207,28 @@ static dispatch_once_t _onceToken = 0;
 }
 
 /**
+ * Determines whether a delegate can participate in TLS challenge handling.
+ * This lets us intercept third-party delegates without relying on brittle class
+ * name matching.
+ */
+- (BOOL)delegateSupportsAuthChallenge:(id)delegate {
+  if (!delegate) {
+    return NO;
+  }
+  return [delegate
+              respondsToSelector:@selector(URLSession:didReceiveChallenge:
+                                                        completionHandler:)] ||
+         [delegate
+             respondsToSelector:@selector(
+                                    URLSession:task:didReceiveChallenge:
+                                                   completionHandler:)] ||
+         [delegate
+             respondsToSelector:@selector(
+                                    URLSession:dataTask:didReceiveChallenge:
+                                                       completionHandler:)];
+}
+
+/**
  * Swizzles the NSURLSession creation method that is used by the React Native
  * or rn-fetch-blob networking stacks. This allows us to intercept the creation
  * of this and ensure that a special pinning delegate can be used that applies
@@ -225,11 +252,22 @@ static dispatch_once_t _onceToken = 0;
         NSString *delegateClassName =
             delegate ? NSStringFromClass([delegate class]) : @"<nil>";
         BOOL shouldIntercept = NO;
+        BOOL usedCapabilityFallback = NO;
+        BOOL delegateSupportsAuthChallenge =
+            [interceptor delegateSupportsAuthChallenge:delegate];
 
         [interceptor->_policyLock lock];
         if (delegate != nil) {
           shouldIntercept = [interceptor->_policy
               shouldInterceptSessionWithDelegate:delegateClassName];
+          if (!shouldIntercept &&
+              interceptor->_policy.mode == SessionInterceptionModeAllowList &&
+              delegateSupportsAuthChallenge &&
+              ![interceptor->_policy
+                  isExcludedDelegateClassName:delegateClassName]) {
+            shouldIntercept = YES;
+            usedCapabilityFallback = YES;
+          }
         } else {
           shouldIntercept =
               interceptor->_policy.mode == SessionInterceptionModeAll;
@@ -237,8 +275,15 @@ static dispatch_once_t _onceToken = 0;
         [interceptor->_policyLock unlock];
 
         if (shouldIntercept) {
-          ApproovLogI(@"intercepting a session creation with %@ delegate",
-                      delegateClassName);
+          if (usedCapabilityFallback) {
+            ApproovLogI(@"intercepting a session creation with %@ delegate "
+                        @"(capability fallback: auth challenge selector "
+                        @"detected)",
+                        delegateClassName);
+          } else {
+            ApproovLogI(@"intercepting a session creation with %@ delegate",
+                        delegateClassName);
+          }
 
           // add mock https protocol for sending status code and error
           if (!configuration.protocolClasses ||

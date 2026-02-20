@@ -335,62 +335,130 @@ static dispatch_once_t _onceToken = 0;
  * request, or substitute headers or query parameters. We only do this for
  * requests using the known pinned session.
  */
+- (NSURLSessionDataTask *)
+    interceptDataTaskCreationForSession:(NSURLSession *)session
+                                request:(NSURLRequest *)request
+                           originalCall:(NSURLSessionDataTask * (^)(NSURLRequest
+                                                                        *request))
+                                            originalCall {
+  // Thread-safe session lookup
+  __block SessionMetadata *metadata = nil;
+  dispatch_sync(_sessionRegistryQueue, ^{
+    metadata = [_pinnedSessions objectForKey:session];
+  });
+
+  if (metadata != nil) {
+    // update the request to include Approov dealing with any failures -
+    // note that this part may block for the duration of the time it takes
+    // to fetch an Approov token but experiments indicate that this does
+    // not impact the behaviour of the React Native Javascript execution
+    ApproovLogI(@"intercepting data task %@ %@ for session %p (delegate: "
+                @"%@, requests: %lu)",
+                request.HTTPMethod, request.URL, session,
+                metadata.delegateClassName, (unsigned long)metadata.requestCount);
+
+    // Thread-safe counter increment
+    dispatch_async(_sessionRegistryQueue, ^{
+      metadata.requestCount++;
+    });
+
+    ApproovInterceptorResult *result = [_approovService interceptRequest:request];
+    switch ([result action]) {
+    case ApproovInterceptorActionProceed: {
+      // proceed with the updated request
+      return originalCall(result.request);
+    }
+    case ApproovInterceptorActionRetry: {
+      // return a task with 5xx error code suggesting retry
+      return [ApproovMockURLProtocol createMockTaskForSession:session
+                                                withStatusCode:503
+                                                   withMessage:[result message]];
+    }
+    default: {
+      // return a task which fails indicating a more permanent issue
+      return [ApproovMockURLProtocol createMockTaskForSession:session
+                                                 withErrorCode:499
+                                                   withMessage:[result message]];
+    }
+    }
+  }
+
+  // if the data task creation is for a different (unpinned) session
+  // then we don't add Approov
+  ApproovLogI(@"skipping request for unregistered session %p", session);
+  return originalCall(request);
+}
+
 - (void)swizzleRCTSessionDataTasks {
   __block ApproovRCTInterceptor *interceptor = self;
+
+  // Primary request-based creator.
   RSSwizzleInstanceMethod(
       NSClassFromString(@"NSURLSession"), @selector(dataTaskWithRequest:),
       RSSWReturnType(NSURLSessionDataTask *),
       RSSWArguments(NSURLRequest *_Nonnull request), RSSWReplacement({
-        // Thread-safe session lookup
-        __block SessionMetadata *metadata = nil;
-        dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-          metadata = [interceptor->_pinnedSessions objectForKey:self];
-        });
+        return [interceptor
+            interceptDataTaskCreationForSession:self
+                                       request:request
+                                  originalCall:^NSURLSessionDataTask *(
+                                                   NSURLRequest
+                                                       *updatedRequest) {
+                                    return RSSWCallOriginal(updatedRequest);
+                                  }];
+      }),
+      0, NULL);
 
-        if (metadata != nil) {
-          // update the request to include Approov dealing with any failures -
-          // note that this part may block for the duration of the time it takes
-          // to fetch an Approov token but experiments indicate that this does
-          // not impact the behaviour of the React Native Javascript execution
-          ApproovLogI(@"intercepting data task %@ %@ for session %p (delegate: "
-                      @"%@, requests: %lu)",
-                      request.HTTPMethod, request.URL, self,
-                      metadata.delegateClassName,
-                      (unsigned long)metadata.requestCount);
+  // Completion-handler request creator used by many SDKs/framework wrappers.
+  RSSwizzleInstanceMethod(
+      NSClassFromString(@"NSURLSession"),
+      @selector(dataTaskWithRequest:completionHandler:),
+      RSSWReturnType(NSURLSessionDataTask *),
+      RSSWArguments(NSURLRequest *_Nonnull request,
+                    void (^_Nullable completionHandler)(
+                        NSData *_Nullable data, NSURLResponse *_Nullable response,
+                        NSError *_Nullable error)),
+      RSSWReplacement({
+        return [interceptor
+            interceptDataTaskCreationForSession:self
+                                       request:request
+                                  originalCall:^NSURLSessionDataTask *(
+                                                   NSURLRequest
+                                                       *updatedRequest) {
+                                    return RSSWCallOriginal(updatedRequest,
+                                                            completionHandler);
+                                  }];
+      }),
+      0, NULL);
 
-          // Thread-safe counter increment
-          dispatch_async(interceptor->_sessionRegistryQueue, ^{
-            metadata.requestCount++;
-          });
-
-          ApproovInterceptorResult *result =
-              [interceptor.approovService interceptRequest:request];
-          switch ([result action]) {
-          case ApproovInterceptorActionProceed: {
-            // proceed with the task using the updated request
-            return RSSWCallOriginal(result.request);
-          }
-          case ApproovInterceptorActionRetry: {
-            // return a task with 5xx error code suggesting retry
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:503
-                             withMessage:[result message]];
-          }
-          default: {
-            // return a task which fails indicating a more permanent issue
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                           withErrorCode:499
-                             withMessage:[result message]];
-          }
-          }
-        } else {
-          // if the data task creation is for a different (unpinned) session
-          // then we don't add Approov
-          ApproovLogI(@"skipping request for unregistered session %p", self);
-          return RSSWCallOriginal(request);
+  // URL-only creators are redirected to the request-based creators so they
+  // share exactly the same interception path.
+  RSSwizzleInstanceMethod(
+      NSClassFromString(@"NSURLSession"), @selector(dataTaskWithURL:),
+      RSSWReturnType(NSURLSessionDataTask *),
+      RSSWArguments(NSURL *_Nonnull url), RSSWReplacement({
+        if (url == nil) {
+          return RSSWCallOriginal(url);
         }
+        NSURLRequest *request = [NSURLRequest requestWithURL:url];
+        return [self dataTaskWithRequest:request];
+      }),
+      0, NULL);
+
+  RSSwizzleInstanceMethod(
+      NSClassFromString(@"NSURLSession"),
+      @selector(dataTaskWithURL:completionHandler:),
+      RSSWReturnType(NSURLSessionDataTask *),
+      RSSWArguments(NSURL *_Nonnull url,
+                    void (^_Nullable completionHandler)(
+                        NSData *_Nullable data, NSURLResponse *_Nullable response,
+                        NSError *_Nullable error)),
+      RSSWReplacement({
+        if (url == nil) {
+          return RSSWCallOriginal(url, completionHandler);
+        }
+        NSURLRequest *request = [NSURLRequest requestWithURL:url];
+        return [self dataTaskWithRequest:request
+                       completionHandler:completionHandler];
       }),
       0, NULL);
 }

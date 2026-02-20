@@ -40,6 +40,9 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     private Interceptor interceptor;
 
     // current certificate pinner to be used
+    // TODO(android-hardening): make this volatile (or use AtomicReference) so pin
+    // updates from approovPinsUpdated are safely published across threads before
+    // apply() reads and uses the latest pinner.
     private CertificatePinner pinner;
 
     /**

@@ -461,6 +461,16 @@ RCT_EXPORT_METHOD(addAllowedDelegate : (NSString *)delegatePattern) {
 }
 
 /**
+ * Sets session interception mode in the iOS interceptor.
+ *
+ * @param mode 0=allowlist, 1=denylist, 2=all
+ */
+RCT_EXPORT_METHOD(setInterceptionMode : (NSInteger)mode) {
+  [ApproovRCTInterceptor setInterceptionMode:mode];
+  ApproovLogI(@"setInterceptionMode: %ld", (long)mode);
+}
+
+/**
  * Sets the log level for Approov logging.
  *
  * @param level is the log level to set

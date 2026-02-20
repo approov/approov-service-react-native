@@ -130,6 +130,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
+    // list of listeners to changes in the Approov pins to be applied
+    private List<PinChangeListener> pinChangeListeners;
+
+    // interface for receiving updates on pin changes
+    public interface PinChangeListener {
+        public void approovPinsUpdated();
+    }
+
     // Log levels matching iOS/ApproovUtils
     private static final int LOG_EXTREME = 0;
     private static final int LOG_DEBUG = 1;
@@ -150,6 +158,26 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void setLogLevel(int level) {
         currentLogLevel = level;
         log(LOG_INFO, TAG, "setLogLevel " + level);
+    }
+
+    /**
+     * iOS-only API parity method.
+     *
+     * @param delegatePattern delegate pattern to allow
+     */
+    @ReactMethod
+    public void addAllowedDelegate(String delegatePattern) {
+        log(LOG_WARN, TAG, "addAllowedDelegate is iOS-only, ignoring on Android: " + delegatePattern);
+    }
+
+    /**
+     * iOS-only API parity method.
+     *
+     * @param mode interception mode
+     */
+    @ReactMethod
+    public void setInterceptionMode(int mode) {
+        log(LOG_WARN, TAG, "setInterceptionMode is iOS-only, ignoring on Android: " + mode);
     }
 
     private void log(int level, String tag, String msg) {
@@ -254,6 +282,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *                      used
      */
     private void configureRNFetchBlobIfFound(ApproovClientBuilder clientBuilder) {
+        // TODO(android-hardening): add first-class integration hooks for popular SDKs
+        // that use their own OkHttp clients (outside RN NetworkingModule). Those
+        // clients currently bypass this bridge unless manually configured.
         try {
             // find the class we want to use
             Class<?> clazz = Class.forName("com.RNFetchBlob.RNFetchBlob");
@@ -347,6 +378,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
         // set the custom Approov OkHttp client builder in the React Native networking
         // stack
+        // TODO(android-hardening): RN only supports one global custom builder.
+        // Implement a composition strategy so Approov cannot be silently replaced if
+        // another module calls NetworkingModule.setCustomClientBuilder later.
         ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this);
         NetworkingModule.setCustomClientBuilder(clientBuilder);
 

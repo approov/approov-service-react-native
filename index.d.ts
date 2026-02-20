@@ -3,6 +3,7 @@ export declare class ApproovService {
   static setProceedOnNetworkFail(): void;
   static setLogLevel(level: number): void;
   static addAllowedDelegate(delegatePattern: string): void;
+  static setInterceptionMode(mode: number): void;
   static Log: {
     EXTREME: number;
     DEBUG: number;

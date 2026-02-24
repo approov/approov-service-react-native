@@ -81,6 +81,7 @@ dependencies {
     } else {
         println 'optional rn-fetch-blob dependency not found'
     }
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.77'
 }
 
 def configureReactNativePom(def pom) {

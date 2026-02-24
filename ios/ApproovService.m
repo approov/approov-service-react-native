@@ -1544,6 +1544,17 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
   return exclusionURLRegexs;
 }
 
+/**
+ * Stub for Android client recovery. Not needed on iOS, so it just resolves
+ * true.
+ */
+RCT_EXPORT_METHOD(updateClientFactory : (BOOL)wrapExisting resolve : (
+    RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  ApproovLogI(@"updateClientFactory (iOS stub) called with wrapExisting: %@",
+              wrapExisting ? @"YES" : @"NO");
+  resolve(@YES);
+}
+
 + (NSString *)getInstallMessageSignature:(NSString *)message {
   return [Approov getInstallMessageSignature:message];
 }

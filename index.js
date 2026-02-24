@@ -22,6 +22,20 @@
 import { NativeModules } from 'react-native'
 const { ApproovService } = NativeModules
 
+const defaultPinningDiagnostics = {
+    totalAuthChallenges: 0,
+    totalPinned: 0,
+    totalBlocked: 0,
+    sessionsWithPinning: 0,
+    sessionsWithoutPinning: 0,
+    unpinnedSessions: [],
+}
+
+// Keep JS API stable even when older native binaries are installed.
+if (typeof ApproovService.getPinningDiagnostics !== 'function') {
+    ApproovService.getPinningDiagnostics = () => Promise.resolve(defaultPinningDiagnostics)
+}
+
 // Add log levels
 ApproovService.Log = {
     EXTREME: 0,

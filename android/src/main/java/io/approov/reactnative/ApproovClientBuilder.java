@@ -22,10 +22,6 @@
 package io.approov.reactnative;
 
 import com.facebook.react.modules.network.NetworkingModule.CustomClientBuilder;
-import com.facebook.react.modules.network.ReactCookieJarContainer;
-
-import android.content.Context;
-import android.util.Log;
 
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
@@ -34,16 +30,15 @@ import okhttp3.OkHttpClient;
 // ApproovClientBuilder is a custom client building for OkHttp to add Approov protection, including dynamic pinning
 public class ApproovClientBuilder implements CustomClientBuilder, ApproovService.PinChangeListener {
     // underlying ApproovService that is wrapping the SDK
-    private ApproovService approovService;
+    private final ApproovService approovService;
 
     // interceptor for adding Approov tokens or substituting headers and/or query parameters
-    private Interceptor interceptor;
+    private final Interceptor interceptor;
 
-    // current certificate pinner to be used
-    // TODO(android-hardening): make this volatile (or use AtomicReference) so pin
-    // updates from approovPinsUpdated are safely published across threads before
+    // Current certificate pinner to be used.
+    // Volatile guarantees pin updates are safely published across threads before
     // apply() reads and uses the latest pinner.
-    private CertificatePinner pinner;
+    private volatile CertificatePinner pinner;
 
     /**
      * Creates an ApproovClientBuilder for OkHttp requests. This adds the interceptor and certificate
@@ -74,7 +69,9 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     @Override
     public void apply(OkHttpClient.Builder builder) {
         if (builder != null) {
-            builder.addInterceptor(interceptor).certificatePinner(pinner);
+            // Read volatile pinner once so the same snapshot is used for this build.
+            CertificatePinner pinnerSnapshot = pinner;
+            builder.addInterceptor(interceptor).certificatePinner(pinnerSnapshot);
         }
     }
 }

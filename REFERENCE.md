@@ -12,6 +12,147 @@ Many of the methods execute asynchronously and return a `Promise`. This is resol
 * `userInfo.rejectionARC`: Only provided for a `rejection` error type. Provides the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code), which could be provided to the user for communication with your app support to determine the reason for failure, without this being revealed to the end user.
 * `userInfo.rejectionReasons`: Only provided for a `rejection` error type. If the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) feature is enabled, this provides a comma separated list of reasons why the app attestation was rejected.
 
+## Compatibility and Interception Guide
+This section explains the interception hardening model and exactly what customer apps need to do when combining Approov with other networking/swizzling SDKs.
+
+### Platform behavior summary
+| Area | iOS | Android |
+| --- | --- | --- |
+| Primary interception mechanism | `NSURLSession` interception + delegate wrapping | React Native `NetworkingModule` custom `OkHttpClient.Builder` |
+| Interception mode controls | Yes (`setInterceptionMode`) | No (method is API-parity no-op) |
+| Delegate allow-list controls | Yes (`addAllowedDelegate`) | No (method is API-parity no-op) |
+| Session pinning diagnostics | Detailed `NSURLSession` counters | Baseline compatibility counters only |
+| Coexistence with other SDKs | Controlled by mode + allowed delegate patterns + exclusions | Composes RN global custom client builders to avoid silent overwrite |
+
+### Customer app integration checklist
+1. Wrap app startup with `ApproovProvider` and provide your config.
+2. In `onInit` / setup callback, apply shared policy:
+```Javascript
+const approovSetup = () => {
+  // Optional but common:
+  ApproovService.setSuppressLoggingUnknownURL();
+  // Optional exclusions for telemetry endpoints:
+  // ApproovService.addExclusionURLRegex('^https://example\\.telemetry\\.com/.*$');
+};
+```
+3. If your app includes third-party telemetry/security SDKs:
+  - iOS: configure mode/delegate policy as described below.
+  - Android: no delegate policy configuration exists; use exclusions for endpoints that should not be Approov-protected.
+
+### iOS interception modes
+`setInterceptionMode(mode)` is iOS-only.
+
+```Javascript
+// 0 = allow list (default), 1 = deny list, 2 = all
+ApproovService.setInterceptionMode(0);
+```
+
+Mode behavior:
+- `0` (`allow list`): only delegates matching the allow list are intercepted. Safest migration mode with explicit control.
+- `1` (`deny list`): all delegates are intercepted except explicitly excluded delegates.
+- `2` (`all`): intercept everything, including sessions with `nil` delegate.
+
+Default iOS policy:
+- Mode defaults to allow-list mode.
+- Built-in allowed patterns include `RCT*`, `RNFetchBlobRequest`, `NRMAURLSessionTaskDelegate`, `SentryNSURLSessionDelegate`, `Sentry*`.
+- Built-in excluded delegate includes `RCTMultipartDataTask`.
+
+Delegate pattern matching:
+- `ExactName` means exact class name match.
+- `Prefix*` means prefix match.
+
+Example:
+```Javascript
+ApproovService.setInterceptionMode(0);
+ApproovService.addAllowedDelegate('Sentry*');
+ApproovService.addAllowedDelegate('DD*');
+ApproovService.addAllowedDelegate('NRMAURLSessionTaskDelegate');
+```
+
+### How to onboard another iOS SDK that swizzles networking
+1. Identify its `NSURLSession` delegate class name(s).
+2. If using allow-list mode (`0`), add patterns with `addAllowedDelegate`.
+3. If its collector endpoints are not protected by Approov, add exclusions using `addExclusionURLRegex`.
+4. Verify with `getPinningDiagnostics` after traffic runs.
+
+### SDK-specific recipes
+#### Sentry (`@sentry/react-native`)
+1. In iOS allow-list mode, allow Sentry delegates:
+```Javascript
+ApproovService.addAllowedDelegate('Sentry*');
+```
+2. If Sentry endpoints should bypass Approov processing, add targeted exclusion regexes for your Sentry ingest host(s).
+
+#### New Relic (`newrelic-react-native-agent`)
+1. In iOS allow-list mode:
+```Javascript
+ApproovService.addAllowedDelegate('NRMAURLSessionTaskDelegate');
+```
+2. Exclude New Relic collector hosts when they are outside your protected API surface:
+```Javascript
+ApproovService.addExclusionURLRegex('^https://mobile-collector\\.eu01\\.nr-data\\.net/.*$');
+ApproovService.addExclusionURLRegex('^https://mobile-crash\\.eu01\\.nr-data\\.net/.*$');
+```
+
+#### Datadog (`@datadog/mobile-react-native`)
+1. In iOS allow-list mode:
+```Javascript
+ApproovService.addAllowedDelegate('DD*');
+```
+2. Exclude Datadog intake endpoints when they are not part of your protected API:
+```Javascript
+ApproovService.addExclusionURLRegex('^https://mobile-http-intake\\.logs\\.datadoghq\\.(eu|com)/.*$');
+ApproovService.addExclusionURLRegex('^https://rum-http-intake\\.logs\\.datadoghq\\.(eu|com)/.*$');
+ApproovService.addExclusionURLRegex('^https://trace-http-intake\\.logs\\.datadoghq\\.(eu|com)/.*$');
+ApproovService.addExclusionURLRegex('^https://browser-intake-datadoghq\\.(eu|com)/.*$');
+```
+3. Follow Datadog SDK requirements for your chosen version (for example, minimum React Native / Android SDK compile level), since these are Datadog-version specific.
+
+#### Unknown/custom SDK
+1. Run app with verbose native logs.
+2. Capture delegate class names for sessions created by that SDK.
+3. Add narrow allow-list patterns on iOS.
+4. Add exclusions for telemetry-only hosts if needed.
+5. Re-run diagnostics and validate protected API behavior remains unchanged.
+
+### Android coexistence model
+Android does not use delegate policies. Instead:
+- Approov installs a custom RN networking client builder.
+- If another SDK sets RN's custom builder, Approov composes both (instead of replacing one).
+- Approov also re-checks/repairs composition on host resume.
+
+What this protects:
+- Networking through React Native `NetworkingModule` (`fetch`, and libraries using RN default networking path).
+
+What this does not automatically protect:
+- SDKs that create independent native `OkHttp` clients outside RN `NetworkingModule`.
+- For those SDKs, use endpoint exclusions when appropriate, or perform native-side integration in that SDK/client path.
+
+### Endpoint exclusion policy for telemetry SDKs
+Use exclusions for SDK ingestion endpoints that should not carry Approov token/pinning policy:
+
+```Javascript
+ApproovService.addExclusionURLRegex('^https://mobile-collector\\.eu01\\.nr-data\\.net/.*$');
+ApproovService.addExclusionURLRegex('^https://mobile-crash\\.eu01\\.nr-data\\.net/.*$');
+ApproovService.addExclusionURLRegex('^https://mobile-http-intake\\.logs\\.datadoghq\\.(eu|com)/.*$');
+ApproovService.addExclusionURLRegex('^https://rum-http-intake\\.logs\\.datadoghq\\.(eu|com)/.*$');
+```
+
+Use exclusions carefully:
+- Over-excluding protected API domains can weaken pin refresh/token protection coverage.
+- Prefer narrow host-specific patterns.
+
+### Verification workflow (recommended)
+1. Run protected API call(s) and confirm expected app behavior.
+2. Trigger telemetry SDK calls (Sentry/New Relic/Datadog/etc).
+3. Collect diagnostics:
+```Javascript
+const d = await ApproovService.getPinningDiagnostics();
+console.log(d);
+```
+4. On iOS, verify pinning/session counters move as expected and no unexpected unpinned sessions appear.
+5. On Android, verify no regressions/crashes and that protected API calls still include Approov behavior.
+
 ## initialize
 You will not generally need to call this function directly, since this is called automatically if you use the `ApproovProvider` component. It is only included here for completeness.
 
@@ -33,6 +174,52 @@ ApproovService.setProceedOnNetworkFail();
 Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
+
+## setLogLevel
+Sets the native logging verbosity used by Approov.
+
+```Javascript
+ApproovService.setLogLevel(ApproovService.Log.INFO);
+```
+
+Available levels are exposed on `ApproovService.Log`:
+- `EXTREME`
+- `DEBUG`
+- `INFO`
+- `WARN`
+- `ERROR`
+- `NONE`
+
+## addAllowedDelegate
+Adds an allowed delegate pattern for iOS session interception policy. This is used primarily in interception mode `0` (allow-list mode).
+
+```Javascript
+ApproovService.addAllowedDelegate(delegatePattern: string);
+```
+
+Pattern rules:
+- `SomeClassName` = exact match
+- `SomePrefix*` = prefix match
+
+Platform notes:
+- iOS: active and affects interception policy.
+- Android: no-op (API parity only).
+
+## setInterceptionMode
+Sets the iOS session interception policy mode.
+
+```Javascript
+ApproovService.setInterceptionMode(mode: number);
+```
+
+Supported iOS values:
+- `0`: allow list (default)
+- `1`: deny list
+- `2`: all
+
+Platform notes:
+- iOS: active and changes how sessions are intercepted.
+- Android: no-op (API parity only).
 
 ## setSuppressLoggingUnknownURL
 Indicates that logging should be suppressed for requests to domains that have not been added in Approov. These requests would normally cause a `UNKNOWN_URL` (Android) or `unknown URL` (iOS) to be generated. Use this option if you wish to reduce the amount of logging being generated.
@@ -104,7 +291,7 @@ exclude some URLs on domains that are protected with Approov, then these will be
 Approov pins but without a path to update the pins until a URL is used that is not excluded. Thus
 you are responsible for ensuring that there is always a possibility of calling a non-excluded
 URL, or you should make an explicit call to fetchToken if there are persistent pinning failures.
-Conversely, use of those option may allow a connection to be established before any dynamic pins have been received via Approov. thus potentially opening the channel to a MitM.
+Conversely, use of this option may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 ```Javascript
 ApproovService.addExclusionURLRegex(urlRegex: string);
@@ -225,6 +412,35 @@ This function returns a `Promise` providing the result.
 
 The ARC code should ideally be returned from your server as part of a rejected API call (such as for an invalid JWT token or missing token). However, if you are unable to customize your server response to include the ARC code (for example, when using a WAF service), you can use this method to obtain the ARC code. Be aware that if the device has recently experienced a network transition or temporary connectivity loss and a request has been made without an Approov Token, you might receive an incorrect or outdated ARC code from this method if connectivity is available at the time the call is made.
 
+## getPinningDiagnostics
+Gets interception/pinning diagnostics for compatibility verification.
+
+```Javascript
+ApproovService.getPinningDiagnostics();
+```
+
+This function returns a `Promise` with platform-dependent detail:
+
+iOS (detailed):
+- `totalAuthChallenges`
+- `totalPinned`
+- `totalBlocked`
+- `sessionsWithPinning`
+- `sessionsWithoutPinning`
+- `unpinnedSessions`
+
+Android (baseline compatibility payload):
+- `totalAuthChallenges`
+- `totalPinned`
+- `totalBlocked`
+- `sessionsWithPinning`
+- `sessionsWithoutPinning`
+- `unpinnedSessions`
+- `platform` (currently `"android"`)
+- `note` (diagnostic limitations note)
+
+Use this method to confirm that enabling additional networking SDKs did not unexpectedly break your Approov interception expectations.
+
 ## setInstallAttrsInToken
 Sets an [install attributes token](https://ext.approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular
 app installation for future Approov token fetches. The token must be signed, within its
@@ -235,3 +451,5 @@ token will not use a cached version, so that this information can be transmitted
 ```Javascript
 ApproovService.setInstallAttrsInToken(attrs: string);
 ```
+
+This function returns a `Promise` that is resolved when the operation is completed.

@@ -27,8 +27,11 @@ import android.util.Log;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
+import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.modules.network.NetworkingModule;
 
@@ -41,6 +44,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Properties;
 import java.util.Map;
@@ -51,7 +55,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 // ApproovService wraps the underlying Approov SDK, provides network interceptors bridges to allow calls from Javascript
-public class ApproovService extends ReactContextBaseJavaModule {
+public class ApproovService extends ReactContextBaseJavaModule implements LifecycleEventListener {
     // logging tag
     private static final String TAG = "ApproovService";
 
@@ -149,6 +153,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
 
+    // React Native has used different field names across versions.
+    private static final String[] RN_CUSTOM_CLIENT_BUILDER_FIELD_NAMES = {
+            "customClientBuilder",
+            "sCustomClientBuilder"
+    };
+
+    // Lock used when reading/repairing RN global custom client builder state.
+    private final Object networkingBuilderLock = new Object();
+
+    // The Approov client builder instance that must remain installed.
+    private ApproovClientBuilder approovClientBuilder;
+
     /**
      * Sets the log level for Approov logging.
      *
@@ -167,7 +183,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void addAllowedDelegate(String delegatePattern) {
-        log(LOG_WARN, TAG, "addAllowedDelegate is iOS-only, ignoring on Android: " + delegatePattern);
+        log(LOG_WARN, TAG, "ApproovService: addAllowedDelegate is iOS-only, ignoring on Android: " + delegatePattern);
     }
 
     /**
@@ -177,7 +193,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setInterceptionMode(int mode) {
-        log(LOG_WARN, TAG, "setInterceptionMode is iOS-only, ignoring on Android: " + mode);
+        log(LOG_WARN, TAG, "ApproovService: setInterceptionMode is iOS-only, ignoring on Android: " + mode);
     }
 
     private void log(int level, String tag, String msg) {
@@ -312,6 +328,93 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Returns the currently installed React Native global custom client builder by
+     * reflection.
+     */
+    private NetworkingModule.CustomClientBuilder readCurrentNetworkingCustomClientBuilder() {
+        for (String fieldName : RN_CUSTOM_CLIENT_BUILDER_FIELD_NAMES) {
+            try {
+                Field field = NetworkingModule.class.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                Object value = field.get(null);
+                if ((value == null) || (value instanceof NetworkingModule.CustomClientBuilder)) {
+                    return (NetworkingModule.CustomClientBuilder) value;
+                }
+                log(LOG_WARN, TAG, "ApproovService: unexpected NetworkingModule custom builder type for field "
+                        + fieldName + ": " + value.getClass().getName());
+                return null;
+            } catch (NoSuchFieldException e) {
+                // Try next known field name.
+            } catch (Throwable t) {
+                log(LOG_WARN, TAG, "ApproovService: unable to inspect NetworkingModule custom builder field "
+                        + fieldName, t);
+                return null;
+            }
+        }
+
+        log(LOG_WARN, TAG, "ApproovService: unable to find NetworkingModule custom builder field; falling back to direct install");
+        return null;
+    }
+
+    private String builderName(NetworkingModule.CustomClientBuilder builder) {
+        return (builder == null) ? "<none>" : builder.getClass().getName();
+    }
+
+    /**
+     * Ensures Approov remains part of RN networking custom builder composition.
+     * If another SDK replaced the global builder, it is composed with Approov
+     * instead of being discarded.
+     */
+    private void installOrRepairNetworkingCustomClientBuilder(String source) {
+        synchronized (networkingBuilderLock) {
+            if (approovClientBuilder == null) {
+                return;
+            }
+
+            NetworkingModule.CustomClientBuilder currentBuilder = readCurrentNetworkingCustomClientBuilder();
+
+            if (currentBuilder == approovClientBuilder) {
+                return;
+            }
+
+            if (currentBuilder instanceof ApproovComposedClientBuilder) {
+                ApproovComposedClientBuilder composed = (ApproovComposedClientBuilder) currentBuilder;
+                if (composed.getApproovBuilder() == approovClientBuilder) {
+                    return;
+                }
+
+                // Replace stale Approov builder while preserving upstream behavior.
+                NetworkingModule.CustomClientBuilder repairedBuilder =
+                        new ApproovComposedClientBuilder(composed.getUpstreamBuilder(), approovClientBuilder);
+                NetworkingModule.setCustomClientBuilder(repairedBuilder);
+                log(LOG_INFO, TAG, "ApproovService: repaired composed custom client builder from " + source
+                        + " (upstream=" + builderName(composed.getUpstreamBuilder()) + ")");
+                return;
+            }
+
+            if (currentBuilder instanceof ApproovClientBuilder) {
+                // Replace stale Approov builder instance (e.g. after bridge reload).
+                NetworkingModule.setCustomClientBuilder(approovClientBuilder);
+                log(LOG_INFO, TAG, "ApproovService: replaced stale Approov custom client builder from " + source);
+                return;
+            }
+
+            NetworkingModule.CustomClientBuilder builderToInstall;
+            if (currentBuilder == null) {
+                builderToInstall = approovClientBuilder;
+            } else {
+                // Compose with existing builder so both effects are preserved.
+                builderToInstall = new ApproovComposedClientBuilder(currentBuilder, approovClientBuilder);
+            }
+
+            NetworkingModule.setCustomClientBuilder(builderToInstall);
+            log(LOG_INFO, TAG, "ApproovService: installed RN custom client builder from " + source
+                    + " (previous=" + builderName(currentBuilder)
+                    + ", installed=" + builderName(builderToInstall) + ")");
+        }
+    }
+
+    /**
      * Creates a new ApproovService that wraps the underlying Approov SDK and
      * provides a bridge
      * to Javascript methods.
@@ -376,16 +479,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } else
             log(LOG_INFO, TAG, "started");
 
-        // set the custom Approov OkHttp client builder in the React Native networking
-        // stack
-        // TODO(android-hardening): RN only supports one global custom builder.
-        // Implement a composition strategy so Approov cannot be silently replaced if
-        // another module calls NetworkingModule.setCustomClientBuilder later.
-        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this);
-        NetworkingModule.setCustomClientBuilder(clientBuilder);
+        // Build once and keep this instance as the required Approov contribution.
+        approovClientBuilder = new ApproovClientBuilder(this);
+
+        // RN exposes a single global custom builder hook. Compose with any existing
+        // builder so Approov coexists with other SDKs rather than silently replacing
+        // them (or being replaced by them).
+        installOrRepairNetworkingCustomClientBuilder("service-init");
 
         // add the Approov client builder to any rn-fetch-blob instances
-        configureRNFetchBlobIfFound(clientBuilder);
+        configureRNFetchBlobIfFound(approovClientBuilder);
+
+        // Re-check builder composition when app returns to foreground, because some
+        // SDKs install their builders lazily after startup.
+        reactContext.addLifecycleEventListener(this);
     }
 
     /**
@@ -587,6 +694,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
             log(LOG_INFO, TAG, "ApproovService: ARC code unavailable");
             promise.resolve("");
         }
+    }
+
+    /**
+     * Gets pinning diagnostics. Android does not currently expose NSURLSession-style
+     * per-session pinning challenge callbacks, so this method returns API-compatible
+     * diagnostics with best-effort baseline values.
+     *
+     * @param promise to be fulfilled with the diagnostics map
+     */
+    @ReactMethod
+    public void getPinningDiagnostics(Promise promise) {
+        WritableMap diagnostics = new WritableNativeMap();
+        WritableArray unpinnedSessions = new WritableNativeArray();
+
+        diagnostics.putInt("totalAuthChallenges", 0);
+        diagnostics.putInt("totalPinned", 0);
+        diagnostics.putInt("totalBlocked", 0);
+        diagnostics.putInt("sessionsWithPinning", 0);
+        diagnostics.putInt("sessionsWithoutPinning", 0);
+        diagnostics.putArray("unpinnedSessions", unpinnedSessions);
+        diagnostics.putString("platform", "android");
+        diagnostics.putString("note", "limited diagnostics on Android");
+
+        promise.resolve(diagnostics);
     }
 
     /**
@@ -1303,6 +1434,24 @@ public class ApproovService extends ReactContextBaseJavaModule {
             else
                 // provide the custom JWT result
                 promise.resolve(result.getToken());
+        }
+    }
+
+    @Override
+    public void onHostResume() {
+        installOrRepairNetworkingCustomClientBuilder("host-resume");
+    }
+
+    @Override
+    public void onHostPause() {
+        // no-op
+    }
+
+    @Override
+    public void onHostDestroy() {
+        ReactApplicationContext context = getReactApplicationContext();
+        if (context != null) {
+            context.removeLifecycleEventListener(this);
         }
     }
 }

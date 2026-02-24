@@ -33,9 +33,14 @@ export declare class ApproovService {
   static getLastARC(): Promise<String>;
   static setInstallAttrsInToken(attrs: string): Promise<void>;
   static getPinningDiagnostics(): Promise<{
+    totalAuthChallenges: number;
+    totalPinned: number;
+    totalBlocked: number;
     sessionsWithPinning: number;
     sessionsWithoutPinning: number;
     unpinnedSessions: Array<{ sessionId: string; requestCount: number }>;
+    platform?: string;
+    note?: string;
   }>;
 }
 import { ApproovProvider } from "./approov-provider";

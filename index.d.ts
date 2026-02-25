@@ -1,6 +1,7 @@
 export declare class ApproovService {
   static initialize(config: string): Promise<void>;
   static setProceedOnNetworkFail(): void;
+  static setUseApproovStatusIfNoToken(shouldUse: boolean): void;
   static setLogLevel(level: number): void;
   static addAllowedDelegate(delegatePattern: string): void;
   static Log: {
@@ -18,17 +19,7 @@ export declare class ApproovService {
   static removeSubstitutionHeader(header: string): void;
   static addSubstitutionQueryParam(key: string): void;
   static removeSubstitutionQueryParam(key: string): void;
-  /**
-   * Sets the configuration for message signing.
-   * 
-   * @param config the configuration object
-   */
-  static setMessageSigningConfig(config: {
-    alg?: string;
-    headers?: string[];
-    addApproovTokenHeader?: boolean;
-    [key: string]: any;
-  }): void;
+
 
   static addExclusionURLRegex(urlRegex: string): void;
   static removeExclusionURLRegex(urlRegex: string): void;

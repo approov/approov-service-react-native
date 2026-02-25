@@ -191,7 +191,7 @@
              completionHandler:(void (^)(NSURLRequest *))completionHandler {
   // Sign the redirected request
   NSMutableURLRequest *mutableRequest = [request mutableCopy];
-  [[ApproovServiceMutatorBridge shared] signRequest:mutableRequest];
+  [[ApproovServiceMutatorBridge shared] processRequest:mutableRequest];
 
   if ([_originalDelegate respondsToSelector:@selector
                          (URLSession:

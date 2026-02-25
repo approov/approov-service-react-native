@@ -168,6 +168,12 @@ public class ApproovInterceptor implements Interceptor {
             addedTokenPrefix = approovService.getTokenPrefix();
             addedTokenValue = approovResults.getToken();
             request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
+        } else if ((approovResults.getToken() == null || approovResults.getToken().isEmpty())
+                && approovService.getUseApproovStatusIfNoToken()) {
+            addedTokenHeader = approovService.getTokenHeader();
+            addedTokenPrefix = approovService.getTokenPrefix();
+            addedTokenValue = approovResults.getStatus().toString();
+            request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
         }
 
         // we now deal with any header substitutions

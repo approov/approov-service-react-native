@@ -190,19 +190,27 @@ public class ApproovService extends ReactContextBaseJavaModule {
     private static int currentLogLevel = LOG_INFO;
 
     // The mutator instance used to control ApproovService behavior
-    private ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
+    private static ApproovServiceMutator serviceMutator;
+
+    static {
+        ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
+        signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+        serviceMutator = signer;
+    }
 
     /**
      * Sets the ApproovServiceMutator instance to handle configurations.
      *
      * @param mutator is the ApproovServiceMutator to use
      */
-    public void setServiceMutator(ApproovServiceMutator mutator) {
+    public static void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
             mutator = ApproovServiceMutator.DEFAULT;
         }
-        this.serviceMutator = mutator;
-        log(LOG_DEBUG, TAG, "Applied ApproovServiceMutator: " + mutator.toString());
+        serviceMutator = mutator;
+        if (currentLogLevel <= LOG_DEBUG) {
+            Log.d(TAG, "Applied ApproovServiceMutator: " + mutator.toString());
+        }
     }
 
     /**
@@ -210,7 +218,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *
      * @return the service mutator instance (never null)
      */
-    public ApproovServiceMutator getServiceMutator() {
+    public static ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
     }
 
@@ -1037,61 +1045,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Sets the configuration for message signing.
-     *
-     * @param config  is a dictionary of configuration options
-     * @param promise to be fulfilled when configured
-     */
-    @ReactMethod
-    public void setMessageSigningConfig(ReadableMap config, Promise promise) {
-        try {
-            ApproovDefaultMessageSigning.SignatureParametersFactory factory = ApproovDefaultMessageSigning
-                    .generateDefaultSignatureParametersFactory();
-
-            // Parsing Algorithm
-            if (config.hasKey("alg")) {
-                String alg = config.getString("alg");
-                if ("sha-256".equals(alg)) {
-                    factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true);
-                } else if ("sha-512".equals(alg)) {
-                    factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA512, true);
-                }
-            }
-
-            // Parsing Headers
-            if (config.hasKey("headers")) {
-                ReadableArray headers = config.getArray("headers");
-                if (headers != null) {
-                    List<String> headerList = new ArrayList<>();
-                    for (int i = 0; i < headers.size(); i++) {
-                        if (headers.getType(i) == ReadableType.String) {
-                            headerList.add(headers.getString(i));
-                        }
-                    }
-                    if (!headerList.isEmpty()) {
-                        factory.addOptionalHeaders(headerList.toArray(new String[0]));
-                    }
-                }
-            }
-
-            // Parsing Header Configs
-            if (config.hasKey("addApproovTokenHeader")) {
-                factory.setAddApproovTokenHeader(config.getBoolean("addApproovTokenHeader"));
-            }
-
-            // Create signer and set as mutator
-            ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
-            signer.setDefaultFactory(factory);
-            setServiceMutator(signer);
-
-            log(LOG_INFO, TAG, "setMessageSigningConfig configured");
-            promise.resolve(null);
-        } catch (Exception e) {
-            promise.reject("setMessageSigningConfig", "Error: " + e.getMessage(), getErrorUserInfo(false));
-        }
-    }
-
-    /**
      * Callback handler for prefetching. We simply log as we don't need the token
      * itself, as it will be returned as a cached value on a subsequent token fetch.
      */
@@ -1497,7 +1450,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 if (name.equals("io.approov.reactnative.ApproovInterceptor"))
                     isInterceptorPresent = true;
             }
-            
+
             for (Interceptor interceptor : client.networkInterceptors()) {
                 String name = interceptor.getClass().getName();
                 interceptors.pushString(name);
@@ -1520,28 +1473,34 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Updates the OkHttpClient factory to ensure Approov is being used. This checks if the current
-     * OkHttpClient is already using Approov and if not then it creates a new OkHttpClient that
-     * includes the Approov protection and sets this as the default shared client. This is useful
-     * if the OkHttpClient has been overwritten by another library (such as a 3rd party SDK).
+     * Updates the OkHttpClient factory to ensure Approov is being used. This checks
+     * if the current
+     * OkHttpClient is already using Approov and if not then it creates a new
+     * OkHttpClient that
+     * includes the Approov protection and sets this as the default shared client.
+     * This is useful
+     * if the OkHttpClient has been overwritten by another library (such as a 3rd
+     * party SDK).
      * 
-     * @param wrapExisting is true if the existing OkHttpClient should be wrapped, false to start fresh
-     * @param promise to be fulfilled with the result
+     * @param wrapExisting is true if the existing OkHttpClient should be wrapped,
+     *                     false to start fresh
+     * @param promise      to be fulfilled with the result
      */
     @ReactMethod
     public void updateClientFactory(boolean wrapExisting, Promise promise) {
         try {
             // we obtain the NetworkingModule and the current client it is using
             NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
-            OkHttpClient currentClient = OkHttpClientProvider.getOkHttpClient(); 
+            OkHttpClient currentClient = OkHttpClientProvider.getOkHttpClient();
 
-            // if we are wrapping the existing client then we use it as the basis for the new one
+            // if we are wrapping the existing client then we use it as the basis for the
+            // new one
             OkHttpClient.Builder builder;
             if (wrapExisting)
                 builder = currentClient.newBuilder();
             else
                 builder = new OkHttpClient.Builder();
-            
+
             // add the Approov protection to the builder
             ApproovClientBuilder approovBuilder;
             if (wrapExisting)
@@ -1549,7 +1508,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             else
                 approovBuilder = new ApproovClientBuilder(this, null);
             approovBuilder.apply(builder);
-            
+
             // build the new client
             OkHttpClient newClient = builder.build();
 
@@ -1561,7 +1520,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 }
             });
 
-            // we also need to use reflection to set the client on the NetworkingModule since it has
+            // we also need to use reflection to set the client on the NetworkingModule
+            // since it has
             // already grasped a reference to the previous client
             try {
                 Field clientField = NetworkingModule.class.getDeclaredField("mClient");
@@ -1569,11 +1529,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 clientField.set(networkingModule, newClient);
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "Failed to update NetworkingModule client: " + e.getMessage());
-                // we determine this is not a fatal error as the provider update should work for future requests
+                // we determine this is not a fatal error as the provider update should work for
+                // future requests
             }
 
             log(LOG_INFO, TAG, "updateClientFactory: success");
-            promise.resolve(true); 
+            promise.resolve(true);
         } catch (Exception e) {
             promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
         }

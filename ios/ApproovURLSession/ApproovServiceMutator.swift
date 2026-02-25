@@ -209,6 +209,9 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
+            if ApproovService.sharedUseApproovStatusIfNoToken() {
+                return true
+            }
             if !ApproovService.sharedProceedOnNetworkFailure() {
                 throw ApproovServiceError.networkingError(message: "Approov token fetch for \(url): " +
                                                    Approov.string(from: status))

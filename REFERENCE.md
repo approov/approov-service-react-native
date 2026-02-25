@@ -24,6 +24,8 @@ ApproovService.initialize(config: string);
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
 ## setProceedOnNetworkFail
+*OBSOLETE:* Do not use this method.
+
 Indicates that the network interceptor should proceed anyway if it is not possible to obtain an Approov token due to a networking failure. If this is called then the backend API can receive calls without the expected Approov token header being added, or without header/query parameter substitutions being made. This should only ever be used if there is some particular reason, perhaps due to local network conditions, that you believe that traffic to the Approov cloud service will be particularly problematic.
 
 ```Javascript
@@ -33,6 +35,35 @@ ApproovService.setProceedOnNetworkFail();
 Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
+
+## setUseApproovStatusIfNoToken
+Sets a flag indicating if the Approov fetch status should be used as the token header value if the actual token fetch fails or returns an empty token. This allows your backend to distinguish between different failure reasons (e.g., `NO_NETWORK`, `MITM_DETECTED`) even when the `Approov-Token` would otherwise be empty or missing.
+
+```Javascript
+ApproovService.setUseApproovStatusIfNoToken(shouldUse: boolean);
+```
+
+When enabled, if the Approov token fetch fails or returns an empty token, the `Approov-Token` header will be populated with the status string (with the configured prefix) instead of being left empty.
+
+## setLogLevel
+Sets the logging level for the native Approov SDK integration. This governs how much information is printed to the native console (Android Logcat or iOS OSLog/console).
+
+```Javascript
+ApproovService.setLogLevel(level: number);
+```
+
+The `level` should be one of the constants provided in `ApproovService.Log` (e.g., `ApproovService.Log.DEBUG`, `ApproovService.Log.INFO`, `ApproovService.Log.WARN`, `ApproovService.Log.ERROR`, `ApproovService.Log.EXTREME`, or `ApproovService.Log.NONE`).
+
+## addAllowedDelegate
+Registers a custom `NSURLSessionDelegate` class name (or a regex pattern matching class names) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
+
+```Javascript
+ApproovService.addAllowedDelegate(delegatePattern: string);
+```
+
+* `delegatePattern` (string): The exact class name or a regular expression string matching the class name of the delegate you wish to intercept.
+
+This method only affects the iOS networking stack; it is a no-op on Android.
 
 ## setSuppressLoggingUnknownURL
 Indicates that logging should be suppressed for requests to domains that have not been added in Approov. These requests would normally cause a `UNKNOWN_URL` (Android) or `unknown URL` (iOS) to be generated. Use this option if you wish to reduce the amount of logging being generated.
@@ -235,3 +266,29 @@ token will not use a cached version, so that this information can be transmitted
 ```Javascript
 ApproovService.setInstallAttrsInToken(attrs: string);
 ```
+
+## getPinningDiagnostics
+Returns an object containing detailed diagnostics about the current state of certificate pinning and SDK interception. On Android, this specifically checks the `OkHttpClient` to ensure the `ApproovInterceptor` and `ApproovCertificatePinner` are active. On iOS, it provides statistics about the currently pinned and unpinned `NSURLSession` instances.
+
+```Javascript
+ApproovService.getPinningDiagnostics();
+```
+
+This function returns a `Promise` resolving to an object with the following structure:
+* `isInterceptorPresent` (boolean): (Android only) True if the Approov HTTP interceptor is configured.
+* `isPinnerPresent` (boolean): (Android only) True if the Approov Certificate Pinner is configured.
+* `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
+* `sessionsWithPinning` (number): (iOS only) The number of `NSURLSession` instances currently protected by Approov pinning.
+* `sessionsWithoutPinning` (number): (iOS only) The number of `NSURLSession` instances currently active without Approov pinning.
+* `unpinnedSessions` (Array<{ sessionId: string; requestCount: number }>): (iOS only) Details of active sessions not currently intercepted.
+
+## updateClientFactory
+Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.
+
+```Javascript
+ApproovService.updateClientFactory(wrapExisting: boolean);
+```
+
+* `wrapExisting` (boolean): If `true`, Approov will copy the existing client and its interceptors, preserving the functionality of the other SDK. If `false`, a completely fresh OkHttpClient is built. Usually, you should pass `true`.
+
+This function returns a `Promise` that resolves to a boolean `true` when the operation is successfully completed.

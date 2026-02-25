@@ -94,6 +94,11 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// @return YES if proceed on network fail is enabled
 + (BOOL)sharedProceedOnNetworkFailure;
 
+/// Returns the current state of use Approov status if no token.
+///
+/// @return YES if use Approov status if no token is enabled
++ (BOOL)sharedUseApproovStatusIfNoToken;
+
 /// Returns the current exclusion URL regexs.
 ///
 /// @return a set of exclusion URL regexs

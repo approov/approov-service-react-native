@@ -372,7 +372,8 @@ static dispatch_once_t _onceToken = 0;
             // Sign the request using the Swift Bridge
             NSMutableURLRequest *mutableRequest =
                 [[result request] mutableCopy];
-            [[ApproovServiceMutatorBridge shared] signRequest:mutableRequest];
+            [[ApproovServiceMutatorBridge shared]
+                processRequest:mutableRequest];
 
             // proceed with the task using the updated request
             return RSSWCallOriginal(mutableRequest);

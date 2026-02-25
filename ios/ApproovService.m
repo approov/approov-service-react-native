@@ -114,6 +114,10 @@ BOOL pendingPrefetch = NO;
 // Approov token
 BOOL proceedOnNetworkFail = NO;
 
+// YES if the status should be used as the token header value if the token is
+// empty
+BOOL useApproovStatusIfNoToken = NO;
+
 // YES if no logging should be output on unknown (or excluded) URLs
 BOOL suppressLoggingUnknownURL = NO;
 
@@ -418,6 +422,17 @@ RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
 }
 
 /**
+ * Sets a flag indicating if the Approov fetch status should be used as the
+ * token header value if the actual token fetch fails or returns an empty token.
+ *
+ * @param shouldUse is YES if the status should be used as the token value
+ */
+RCT_EXPORT_METHOD(setUseApproovStatusIfNoToken : (BOOL)shouldUse) {
+  ApproovLogD(@"setUseApproovStatusIfNoToken %@", shouldUse ? @"YES" : @"NO");
+  useApproovStatusIfNoToken = shouldUse;
+}
+
+/**
  * Sets a development key indicating that the app is a development version and
  * it should pass attestation even if the app is not registered or it is running
  * on an emulator. The development key value can be rotated at any point in the
@@ -564,16 +579,6 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
     [substitutionQueryParams removeObject:key];
   }
   ApproovLogI(@"removeSubstitutionQueryParam %@", key);
-}
-
-/**
- * Sets the configuration for message signing.
- *
- * @param config is a dictionary of configuration options
- */
-RCT_EXPORT_METHOD(setMessageSigningConfig : (NSDictionary *)config) {
-  [[ApproovServiceMutatorBridge shared] configure:config];
-  ApproovLogI(@"setMessageSigningConfig called");
 }
 
 /**
@@ -1102,8 +1107,17 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     @synchronized(approovTokenPrefix) {
       tokenPrefix = approovTokenPrefix;
     }
-    NSString *value =
-        [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
+    NSString *value = @"";
+    if (useApproovStatusIfNoToken &&
+        (!result.token || result.token.length == 0)) {
+      value = [NSString
+          stringWithFormat:@"%@%@", tokenPrefix,
+                           [Approov
+                               stringFromApproovTokenFetchStatus:result
+                                                                     .status]];
+    } else {
+      value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
+    }
     [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
     break;
   }
@@ -1538,6 +1552,10 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 + (BOOL)sharedProceedOnNetworkFailure {
   return proceedOnNetworkFail;
+}
+
++ (BOOL)sharedUseApproovStatusIfNoToken {
+  return useApproovStatusIfNoToken;
 }
 
 + (NSMutableSet<NSString *> *)sharedExclusionURLRegexs {

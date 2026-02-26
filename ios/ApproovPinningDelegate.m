@@ -118,7 +118,7 @@
  * outcome of the decision
  */
 - (void)URLSession:(NSURLSession *)session
-               dataTask:(NSURLSessionDataTask *)dataTask
+                  task:(NSURLSessionTask *)task
     didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
@@ -147,13 +147,14 @@
   } else {
     // Forward non-server-trust challenges to the original delegate if possible.
     if ([_originalDelegate respondsToSelector:@selector
-                           (URLSession:
-                                  dataTask:didReceiveChallenge:
+                           (URLSession:task:didReceiveChallenge:
                                       completionHandler:)]) {
-      [_originalDelegate URLSession:session
-                           dataTask:dataTask
-                 didReceiveChallenge:challenge
-                   completionHandler:completionHandler];
+      id<NSURLSessionTaskDelegate> taskDelegate =
+          (id<NSURLSessionTaskDelegate>)_originalDelegate;
+      [taskDelegate URLSession:session
+                          task:task
+            didReceiveChallenge:challenge
+              completionHandler:completionHandler];
     } else {
       completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
     }
@@ -227,11 +228,15 @@
           respondsToSelector:@selector(URLSession:
                                              task:didSendBodyData:totalBytesSent
                                                  :totalBytesExpectedToSend:)])
-    [_originalDelegate URLSession:session
-                             task:task
-                  didSendBodyData:bytesSent
-                   totalBytesSent:totalBytesSent
-         totalBytesExpectedToSend:totalBytesExpectedToSend];
+    {
+      id<NSURLSessionTaskDelegate> taskDelegate =
+          (id<NSURLSessionTaskDelegate>)_originalDelegate;
+      [taskDelegate URLSession:session
+                          task:task
+               didSendBodyData:bytesSent
+                totalBytesSent:totalBytesSent
+      totalBytesExpectedToSend:totalBytesExpectedToSend];
+    }
 }
 
 /**
@@ -249,11 +254,15 @@
                          (URLSession:
                                 task:willPerformHTTPRedirection:newRequest
                                     :completionHandler:)])
-    [_originalDelegate URLSession:session
-                              task:task
-        willPerformHTTPRedirection:response
-                        newRequest:request
-                 completionHandler:completionHandler];
+    {
+      id<NSURLSessionTaskDelegate> taskDelegate =
+          (id<NSURLSessionTaskDelegate>)_originalDelegate;
+      [taskDelegate URLSession:session
+                          task:task
+    willPerformHTTPRedirection:response
+                    newRequest:request
+             completionHandler:completionHandler];
+    }
   else
     completionHandler(request);
 }
@@ -272,10 +281,14 @@
   if ([_originalDelegate respondsToSelector:@selector
                          (URLSession:
                              dataTask:didReceiveResponse:completionHandler:)])
-    [_originalDelegate URLSession:session
-                         dataTask:dataTask
-               didReceiveResponse:response
-                completionHandler:completionHandler];
+    {
+      id<NSURLSessionDataDelegate> dataDelegate =
+          (id<NSURLSessionDataDelegate>)_originalDelegate;
+      [dataDelegate URLSession:session
+                      dataTask:dataTask
+            didReceiveResponse:response
+             completionHandler:completionHandler];
+    }
   else
     completionHandler(NSURLSessionResponseAllow);
 }
@@ -291,9 +304,11 @@
     didReceiveData:(NSData *)data {
   if ([_originalDelegate
           respondsToSelector:@selector(URLSession:dataTask:didReceiveData:)])
-    [_originalDelegate URLSession:session
-                         dataTask:dataTask
-                   didReceiveData:data];
+    {
+      id<NSURLSessionDataDelegate> dataDelegate =
+          (id<NSURLSessionDataDelegate>)_originalDelegate;
+      [dataDelegate URLSession:session dataTask:dataTask didReceiveData:data];
+    }
 }
 
 /**
@@ -307,7 +322,11 @@
     didCompleteWithError:(NSError *)error {
   if ([_originalDelegate
           respondsToSelector:@selector(URLSession:task:didCompleteWithError:)])
-    [_originalDelegate URLSession:session task:task didCompleteWithError:error];
+    {
+      id<NSURLSessionTaskDelegate> taskDelegate =
+          (id<NSURLSessionTaskDelegate>)_originalDelegate;
+      [taskDelegate URLSession:session task:task didCompleteWithError:error];
+    }
   if (error) {
     ApproovLogE(@"session task completed with error: %@",
                 error.debugDescription);
@@ -328,6 +347,68 @@
   if (error) {
     ApproovLogE(@"session did become invalid with error: %@",
                 error.debugDescription);
+  }
+}
+
+/**
+ * Tells the delegate that a download task has finished downloading.
+ * This is simply passed to the original delegate.
+ */
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+didFinishDownloadingToURL:(NSURL *)location {
+  if ([_originalDelegate
+          respondsToSelector:@selector(URLSession:downloadTask:
+                                                  didFinishDownloadingToURL:)]) {
+    id<NSURLSessionDownloadDelegate> downloadDelegate =
+        (id<NSURLSessionDownloadDelegate>)_originalDelegate;
+    [downloadDelegate URLSession:session
+                    downloadTask:downloadTask
+       didFinishDownloadingToURL:location];
+  }
+}
+
+/**
+ * Periodically informs the delegate of download progress.
+ * This is simply passed to the original delegate.
+ */
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+      didWriteData:(int64_t)bytesWritten
+ totalBytesWritten:(int64_t)totalBytesWritten
+totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite {
+  if ([_originalDelegate
+          respondsToSelector:@selector(URLSession:downloadTask:didWriteData:
+                                                  totalBytesWritten:
+                                                  totalBytesExpectedToWrite:)]) {
+    id<NSURLSessionDownloadDelegate> downloadDelegate =
+        (id<NSURLSessionDownloadDelegate>)_originalDelegate;
+    [downloadDelegate URLSession:session
+                    downloadTask:downloadTask
+                    didWriteData:bytesWritten
+               totalBytesWritten:totalBytesWritten
+       totalBytesExpectedToWrite:totalBytesExpectedToWrite];
+  }
+}
+
+/**
+ * Tells the delegate that a download task has resumed.
+ * This is simply passed to the original delegate.
+ */
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+ didResumeAtOffset:(int64_t)fileOffset
+expectedTotalBytes:(int64_t)expectedTotalBytes {
+  if ([_originalDelegate
+          respondsToSelector:@selector(URLSession:downloadTask:
+                                               didResumeAtOffset:
+                                           expectedTotalBytes:)]) {
+    id<NSURLSessionDownloadDelegate> downloadDelegate =
+        (id<NSURLSessionDownloadDelegate>)_originalDelegate;
+    [downloadDelegate URLSession:session
+                    downloadTask:downloadTask
+               didResumeAtOffset:fileOffset
+              expectedTotalBytes:expectedTotalBytes];
   }
 }
 

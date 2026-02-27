@@ -124,6 +124,10 @@ BOOL suppressLoggingUnknownURL = NO;
 // header that will be added to Approov enabled requests
 NSString *approovTokenHeader = @"Approov-Token";
 
+// default header that will carry any optional Approov TraceID debug value from
+// the SDK
+NSString *approovTraceIDHeader = @"Approov-TraceID";
+
 // any prefix to be added before the Approov token, such as "Bearer "
 NSString *approovTokenPrefix = @"";
 
@@ -503,6 +507,20 @@ RCT_EXPORT_METHOD(setTokenHeader : (NSString *)header prefix : (NSString *)
     approovTokenPrefix = prefix;
   }
   ApproovLogI(@"setTokenHeader %@, %@", header, prefix);
+}
+
+RCT_EXPORT_METHOD(setTraceIDHeader : (NSString *)header) {
+  @synchronized(approovTraceIDHeader) {
+    approovTraceIDHeader = header;
+  }
+  ApproovLogI(@"setTraceIDHeader %@", header);
+}
+
+RCT_EXPORT_METHOD(getTraceIDHeader : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  @synchronized(approovTraceIDHeader) {
+    resolve(approovTraceIDHeader);
+  }
 }
 
 /**
@@ -1119,6 +1137,15 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
       value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
     }
     [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
+
+    NSString *traceIDHeader;
+    @synchronized(approovTraceIDHeader) {
+      traceIDHeader = approovTraceIDHeader;
+    }
+    NSString *traceID = [result traceID];
+    if (traceIDHeader != nil && traceID != nil && traceID.length > 0) {
+      [updatedRequest setValue:traceID forHTTPHeaderField:traceIDHeader];
+    }
     break;
   }
   case ApproovTokenFetchStatusUnknownURL:
@@ -1556,6 +1583,18 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 + (BOOL)sharedUseApproovStatusIfNoToken {
   return useApproovStatusIfNoToken;
+}
+
++ (NSString *)sharedTokenHeader {
+  @synchronized(approovTokenHeader) {
+    return approovTokenHeader;
+  }
+}
+
++ (NSString *)sharedTraceIDHeader {
+  @synchronized(approovTraceIDHeader) {
+    return approovTraceIDHeader;
+  }
 }
 
 + (NSMutableSet<NSString *> *)sharedExclusionURLRegexs {

@@ -176,6 +176,13 @@ public class ApproovInterceptor implements Interceptor {
             request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
         }
 
+        String traceIDHeader = approovService.getTraceIDHeader();
+        String traceID = approovResults.getTraceID();
+        if ((traceIDHeader != null) && (traceID != null) && !traceID.isEmpty()) {
+            addedTraceIDHeader = traceIDHeader;
+            request = request.newBuilder().header(traceIDHeader, traceID).build();
+        }
+
         // we now deal with any header substitutions
         Map<String, String> subsHeaders = approovService.getSubstitutionHeaders();
         List<String> substitutedHeaders = new ArrayList<>();
@@ -244,6 +251,7 @@ public class ApproovInterceptor implements Interceptor {
         try {
             ApproovRequestMutations mutations = new ApproovRequestMutations();
             mutations.setTokenHeaderKey(addedTokenHeader);
+            mutations.setTraceIDHeaderKey(addedTraceIDHeader);
             mutations.setSubstitutionHeaderKeys(substitutedHeaders);
             mutations.setSubstitutionQueryParamResults(currentURL, substitutedQueryParams);
             request = mutator.handleInterceptorProcessedRequest(approovService, request, mutations);

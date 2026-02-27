@@ -494,12 +494,10 @@ public class SignatureParametersFactory {
             }
         }
 
-        if let algorithm = bodyDigestAlgorithm {
-            if bodyDigestRequired {
-                let bodyDigestCreated = try generateBodyDigest(provider: provider, requestParameters: requestParameters)
-                if !bodyDigestCreated {
-                    throw ApproovServiceError.permanentError(message: "Failed to create required body digest")
-                }
+        if bodyDigestAlgorithm != nil {
+            let bodyDigestCreated = try generateBodyDigest(provider: provider, requestParameters: requestParameters)
+            if !bodyDigestCreated && bodyDigestRequired {
+                throw ApproovServiceError.permanentError(message: "Failed to create required body digest")
             }
         }
 

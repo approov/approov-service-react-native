@@ -14,6 +14,8 @@ export declare class ApproovService {
   }
   static setSuppressLoggingUnknownURL(): void;
   static setTokenHeader(header: string, prefix: string): void;
+  static setTraceIDHeader(header: string): void;
+  static getTraceIDHeader(): Promise<String>;
   static setBindingHeader(header: string): void;
   static addSubstitutionHeader(header: string, requiredPrefix: string): void;
   static removeSubstitutionHeader(header: string): void;

@@ -85,6 +85,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // header that will be added to Approov enabled requests
     private static final String APPROOV_TOKEN_HEADER = "Approov-Token";
 
+    // default header that will carry any optional Approov TraceID debug value from
+    // the SDK
+    private static final String APPROOV_TRACE_ID_HEADER = "Approov-TraceID";
+
     // any prefix to be added before the Approov token, such as "Bearer "
     private static final String APPROOV_TOKEN_PREFIX = "";
 
@@ -155,6 +159,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // header to be used to send Approov tokens
     private String approovTokenHeader;
+
+    // header used to send any optional Approov TraceID debug value provided by the
+    // SDK
+    private String approovTraceIDHeader;
 
     // any prefix String to be added before the transmitted Approov token
     private String approovTokenPrefix;
@@ -378,6 +386,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         proceedOnNetworkFail = false;
         suppressLoggingUnknownURL = false;
         approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         substitutionHeaders = new HashMap<>();
@@ -795,6 +804,41 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public synchronized String getTokenHeader() {
         return approovTokenHeader;
+    }
+
+    /**
+     * Sets the header name that is used to pass any optional Approov TraceID debug
+     * value. By default the TraceID is provided on "Approov-TraceID" if one is
+     * available. Passing null disables adding the TraceID header.
+     *
+     * @param header is the name of the header on which to place the Approov
+     *               TraceID, or null to disable the header
+     */
+    @ReactMethod
+    public synchronized void setTraceIDHeader(String header) {
+        log(LOG_DEBUG, TAG, "setTraceIDHeader " + header);
+        approovTraceIDHeader = header;
+    }
+
+    /**
+     * Provides the Approov TraceID header.
+     * 
+     * @param promise React Native promise to resolve with the TraceID header
+     */
+    @ReactMethod
+    public void getTraceIDHeader(Promise promise) {
+        promise.resolve(getTraceIDHeader());
+    }
+
+    /**
+     * Gets the name of the header that is used to hold the optional Approov
+     * TraceID.
+     *
+     * @return String the name of the header used for the Approov TraceID, or
+     *         null if disabled
+     */
+    public synchronized String getTraceIDHeader() {
+        return approovTraceIDHeader;
     }
 
     /**

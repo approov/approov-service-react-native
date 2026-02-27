@@ -13,10 +13,15 @@ import Foundation
         super.init()
     }
     
-    @objc public func processRequest(_ request: NSMutableURLRequest) {
+    @objc public func processRequest(_ request: NSMutableURLRequest, tokenHeader: String?, traceIDHeader: String?) {
         let urlRequest = request as URLRequest
         let changes = ApproovRequestMutations()
-        changes.setTokenHeaderKey("Approov-Token")
+        if let th = tokenHeader {
+            changes.setTokenHeaderKey(th)
+        }
+        if let traceTh = traceIDHeader {
+            changes.setTraceIDHeaderKey(traceTh)
+        }
         
         do {
             let processedRequest = try serviceMutator.handleInterceptorProcessedRequest(urlRequest, changes: changes)

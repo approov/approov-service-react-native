@@ -64,9 +64,75 @@
     _approovService = approovService;
     _originalDelegate = delegate;
   }
-  ApproovLogI(@"pinning NSURLSessionDelegate: %@",
-              NSStringFromClass([delegate class]));
+  ApproovLogI(@"ApproovService pinning NSURLSessionDelegate: %@",
+              delegate ? NSStringFromClass([delegate class]) : @"<nil>");
   return self;
+}
+
+/**
+ * Forwards authentication challenges to the wrapped delegate when available.
+ * Data-task callback is preferred for data tasks, then task-level, then
+ * session-level.
+ */
+- (void)
+forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
+                                         task:(NSURLSessionTask *_Nullable)task
+                                    challenge:(NSURLAuthenticationChallenge *)challenge
+                            completionHandler:
+                                (void (^)(NSURLSessionAuthChallengeDisposition
+                                              disposition,
+                                          NSURLCredential *credential))
+                                    completionHandler
+                                challengeType:(NSString *)challengeType {
+  NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
+  NSString *delegateClassName =
+      _originalDelegate ? NSStringFromClass([_originalDelegate class]) : @"<nil>";
+
+  if ((task != nil) && [task isKindOfClass:[NSURLSessionDataTask class]] &&
+      [_originalDelegate respondsToSelector:@selector
+                         (URLSession:dataTask:didReceiveChallenge:
+                                         completionHandler:)]) {
+    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to data task "
+                @"delegate %@",
+                challengeType, host, delegateClassName);
+    [_originalDelegate URLSession:session
+                         dataTask:(NSURLSessionDataTask *)task
+               didReceiveChallenge:challenge
+                completionHandler:completionHandler];
+    return;
+  }
+
+  if ((task != nil) && [_originalDelegate respondsToSelector:@selector
+                                      (URLSession:task:didReceiveChallenge:
+                                                 completionHandler:)]) {
+    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to task "
+                @"delegate %@",
+                challengeType, host, delegateClassName);
+    id<NSURLSessionTaskDelegate> taskDelegate =
+        (id<NSURLSessionTaskDelegate>)_originalDelegate;
+    [taskDelegate URLSession:session
+                        task:task
+          didReceiveChallenge:challenge
+            completionHandler:completionHandler];
+    return;
+  }
+
+  if ([_originalDelegate respondsToSelector:@selector
+                         (URLSession:didReceiveChallenge:
+                                       completionHandler:)]) {
+    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to session "
+                @"delegate %@",
+                challengeType, host, delegateClassName);
+    [_originalDelegate URLSession:session
+               didReceiveChallenge:challenge
+                 completionHandler:completionHandler];
+    return;
+  }
+
+  ApproovLogI(@"ApproovService no original delegate challenge handler for %@ "
+              @"on %@, using default handling",
+              challengeType, host);
+  completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
 }
 
 /**
@@ -85,10 +151,13 @@
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
                     NSURLCredential *credential))completionHandler {
-  ApproovLogI(@"session task received authentication challenge");
+  NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
+  NSString *authMethod =
+      challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
+  ApproovLogI(@"ApproovService received task challenge %@ for %@",
+              authMethod, host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-    NSString *host = challenge.protectionSpace.host;
     ApproovTrustDecision trustDecision =
         [_approovService verifyPins:challenge.protectionSpace.serverTrust
                             forHost:host];
@@ -99,16 +168,25 @@
     }
 
     if (trustDecision == ApproovTrustDecisionBlock) {
-      ApproovLogW(@"PINNING BLOCKED connection to %@", host);
+      ApproovLogW(@"ApproovService PINNING BLOCKED connection to %@", host);
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogI(@"Pinning allowed connection to %@", host);
-      completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+      ApproovLogI(@"ApproovService pinning allowed connection to %@, chaining "
+                  @"server-trust challenge to original delegate",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:dataTask
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust"];
     }
   } else {
-    // Non-server-trust challenges handling
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    [self forwardChallengeToOriginalDelegateForSession:session
+                                                  task:dataTask
+                                             challenge:challenge
+                                     completionHandler:completionHandler
+                                         challengeType:@"non-server-trust"];
   }
 }
 
@@ -129,10 +207,13 @@
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
                     NSURLCredential *credential))completionHandler {
-  ApproovLogI(@"session received authentication challenge (session-level)");
+  NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
+  NSString *authMethod =
+      challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
+  ApproovLogI(@"ApproovService received session challenge %@ for %@",
+              authMethod, host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-    NSString *host = challenge.protectionSpace.host;
     ApproovTrustDecision trustDecision =
         [_approovService verifyPins:challenge.protectionSpace.serverTrust
                             forHost:host];
@@ -143,16 +224,28 @@
     }
 
     if (trustDecision == ApproovTrustDecisionBlock) {
-      ApproovLogW(@"PINNING BLOCKED connection to %@ (session-level)", host);
+      ApproovLogW(
+          @"ApproovService PINNING BLOCKED connection to %@ (session-level)",
+          host);
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogI(@"Pinning allowed connection to %@ (session-level)", host);
-      completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+      ApproovLogI(@"ApproovService pinning allowed connection to %@ "
+                  @"(session-level), chaining server-trust challenge to "
+                  @"original delegate",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:nil
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust"];
     }
   } else {
-    // Non-server-trust challenges handling
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    [self forwardChallengeToOriginalDelegateForSession:session
+                                                  task:nil
+                                             challenge:challenge
+                                     completionHandler:completionHandler
+                                         challengeType:@"non-server-trust"];
   }
 }
 

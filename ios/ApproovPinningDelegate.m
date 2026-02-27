@@ -71,8 +71,7 @@
 
 /**
  * Forwards authentication challenges to the wrapped delegate when available.
- * Data-task callback is preferred for data tasks, then task-level, then
- * session-level.
+ * Task-level callback is preferred when a task is available, then session-level.
  */
 - (void)
 forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
@@ -87,20 +86,6 @@ forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *delegateClassName =
       _originalDelegate ? NSStringFromClass([_originalDelegate class]) : @"<nil>";
-
-  if ((task != nil) && [task isKindOfClass:[NSURLSessionDataTask class]] &&
-      [_originalDelegate respondsToSelector:@selector
-                         (URLSession:dataTask:didReceiveChallenge:
-                                         completionHandler:)]) {
-    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to data task "
-                @"delegate %@",
-                challengeType, host, delegateClassName);
-    [_originalDelegate URLSession:session
-                         dataTask:(NSURLSessionDataTask *)task
-               didReceiveChallenge:challenge
-                completionHandler:completionHandler];
-    return;
-  }
 
   if ((task != nil) && [_originalDelegate respondsToSelector:@selector
                                       (URLSession:task:didReceiveChallenge:

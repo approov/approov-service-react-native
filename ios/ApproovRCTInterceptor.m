@@ -373,7 +373,9 @@ static dispatch_once_t _onceToken = 0;
             NSMutableURLRequest *mutableRequest =
                 [[result request] mutableCopy];
             [[ApproovServiceMutatorBridge shared]
-                processRequest:mutableRequest];
+                processRequest:mutableRequest
+                   tokenHeader:[ApproovService sharedTokenHeader]
+                 traceIDHeader:[ApproovService sharedTraceIDHeader]];
 
             // proceed with the task using the updated request
             return RSSWCallOriginal(mutableRequest);

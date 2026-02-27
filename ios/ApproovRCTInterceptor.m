@@ -215,6 +215,14 @@ static dispatch_once_t _onceToken = 0;
                                     (unsigned long)value.length];
 }
 
+/**
+ * Diagnostic helper for swizzle verification.
+ *
+ * For a concrete session instance, this compares the selector implementation
+ * pointer on the runtime class versus NSURLSession. If they differ, the
+ * concrete class overrides the selector and swizzling only NSURLSession is not
+ * sufficient to observe task creation.
+ */
 - (void)logSessionMethodResolution:(NSURLSession *)session
                            selector:(SEL)selector
                               label:(NSString *)label {
@@ -233,6 +241,15 @@ static dispatch_once_t _onceToken = 0;
       overridesBase ? @"yes" : @"no", sessionImp, baseImp);
 }
 
+/**
+ * Returns the set of session classes that can own task selectors at runtime.
+ *
+ * On modern iOS, NSURLSession factory methods often return private subclasses
+ * such as __NSURLSessionLocal. Those classes may implement dataTask/uploadTask
+ * selectors directly, which bypasses swizzles installed only on NSURLSession.
+ * We resolve private classes dynamically so this remains safe across SDK
+ * versions where a class may be absent or renamed.
+ */
 - (NSArray<Class> *)sessionClassesForTaskSwizzling {
   NSMutableArray<Class> *classes = [NSMutableArray array];
   NSArray<NSString *> *candidateClassNames = @[
@@ -374,6 +391,9 @@ static dispatch_once_t _onceToken = 0;
             session = RSSWCallOriginal(configuration, pinningDelegate, queue);
             __weak NSURLSession *weakSession = session;
 
+            // Record where task selectors are implemented for this concrete
+            // session instance. These logs make it clear why task swizzles
+            // must be installed on runtime subclasses as well as NSURLSession.
             ApproovLogI(@"created pinned session %p class=%@ for delegate %@",
                         session, NSStringFromClass([session class]),
                         delegateClassName);
@@ -477,6 +497,9 @@ static dispatch_once_t _onceToken = 0;
  */
 - (void)swizzleRCTSessionDataTasks {
   __block ApproovRCTInterceptor *interceptor = self;
+  // Install identical swizzles on all resolved session classes so request
+  // interception works regardless of whether selectors are implemented on
+  // NSURLSession itself or on a concrete runtime subclass.
   for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
     ApproovLogI(@"installing dataTask swizzles on class %@",
                 NSStringFromClass(sessionClass));
@@ -584,6 +607,8 @@ static dispatch_once_t _onceToken = 0;
  */
 - (void)swizzleRCTSessionUploadTasks {
   __block ApproovRCTInterceptor *interceptor = self;
+  // Mirror dataTask coverage for upload APIs because SDK delegates may use
+  // either family depending on their transport implementation.
   for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
     ApproovLogI(@"installing uploadTask swizzles on class %@",
                 NSStringFromClass(sessionClass));
@@ -826,6 +851,8 @@ static dispatch_once_t _onceToken = 0;
       @[ @"invalidateAndCancel", @"finishTasksAndInvalidate" ];
 
   for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
+    // Use the same class set as task swizzling so pinned session registry
+    // cleanup still runs when private session subclasses invalidate.
     ApproovLogI(@"installing invalidation swizzles on class %@",
                 NSStringFromClass(sessionClass));
     for (NSString *selectorName in invalidationSelectors) {

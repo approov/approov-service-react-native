@@ -92,7 +92,7 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// Returns the current state of proceed on network fail.
 ///
 /// @return YES if proceed on network fail is enabled
-+ (BOOL)sharedProceedOnNetworkFailure;
+// + (BOOL)sharedProceedOnNetworkFailure;
 
 + (BOOL)sharedUseApproovStatusIfNoToken;
 

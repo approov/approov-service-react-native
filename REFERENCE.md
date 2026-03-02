@@ -24,17 +24,11 @@ ApproovService.initialize(config: string);
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
 ## setProceedOnNetworkFail
-*OBSOLETE:* Do not use this method.
-
-Indicates that the network interceptor should proceed anyway if it is not possible to obtain an Approov token due to a networking failure. If this is called then the backend API can receive calls without the expected Approov token header being added, or without header/query parameter substitutions being made. This should only ever be used if there is some particular reason, perhaps due to local network conditions, that you believe that traffic to the Approov cloud service will be particularly problematic.
+*OBSOLETE:* Do not use this method. It is deprecated and does nothing.
 
 ```Javascript
 ApproovService.setProceedOnNetworkFail();
 ```
-
-Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
-
-You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## setUseApproovStatusIfNoToken
 Sets a flag indicating if the Approov fetch status should be used as the token header value if the actual token fetch fails or returns an empty token. This allows your backend to distinguish between different failure reasons (e.g., `NO_NETWORK`, `MITM_DETECTED`) even when the `Approov-Token` would otherwise be empty or missing.

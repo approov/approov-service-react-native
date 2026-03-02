@@ -110,9 +110,8 @@ NSString *initialConfigString = nil;
 // initialization
 BOOL pendingPrefetch = NO;
 
-// YES if the interceptor should proceed on network failures and not add an
-// Approov token
-BOOL proceedOnNetworkFail = NO;
+// proceedOnNetworkFail has been removed; network failure handling is now
+// controlled entirely via ApproovServiceMutator
 
 // YES if the status should be used as the token header value if the token is
 // empty
@@ -411,18 +410,14 @@ RCT_EXPORT_METHOD(setInstallAttrsInToken : (NSString *)attrs resolver : (
 }
 
 /**
- * Indicates that requests should proceed anyway if it is not possible to obtain
- * an Approov token due to a networking failure. If this is called then the
- * backend API can receive calls without the expected Approov token header being
- * added, or without header/query parameter substitutions being made. Note that
- * this should be used with caution because it may allow a connection to be
- * established before any dynamic pins have been received via Approov, thus
- * potentially opening the channel to a MitM.
+ * @deprecated This method has no effect. Network failure handling is now
+ * controlled entirely via ApproovServiceMutator. Custom behaviour for
+ * NO_NETWORK, POOR_NETWORK and MITM_DETECTED can be implemented by overriding
+ * handleInterceptorFetchTokenResult in a custom mutator.
  */
 RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
-  // no need to synchronize on this
-  proceedOnNetworkFail = YES;
-  ApproovLogI(@"proceedOnNetworkFail");
+  ApproovLogI(@"setProceedOnNetworkFail: deprecated no-op - use "
+              @"ApproovServiceMutator instead");
 }
 
 /**
@@ -1114,8 +1109,47 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
 
   // process the token fetch result
   ApproovTokenFetchStatus status = [result status];
-  switch (status) {
-  case ApproovTokenFetchStatusSuccess: {
+
+  // Call the mutator for anything other than success, unknown URL, and
+  // unprotected URL - it decides whether to proceed or block the request
+  if ((status != ApproovTokenFetchStatusSuccess) &&
+      (status != ApproovTokenFetchStatusUnknownURL) &&
+      (status != ApproovTokenFetchStatusUnprotectedURL)) {
+    @try {
+      NSError *mutatorError = nil;
+      BOOL shouldProceed = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorFetchTokenResult:result
+                                        url:host
+                               errorPointer:&mutatorError];
+
+      // If mutator returned false, block the request as appropriate
+      if (!shouldProceed) {
+        if (status == ApproovTokenFetchStatusNoNetwork ||
+            status == ApproovTokenFetchStatusPoorNetwork ||
+            status == ApproovTokenFetchStatusMITMDetected) {
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionRetry
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
+        } else {
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionFail
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
+        }
+      }
+      // If shouldProceed is YES, we fall through below to add headers
+    } @catch (NSException *exception) {
+      return [ApproovInterceptorResult
+          createWithRequest:updatedRequest
+                 withAction:ApproovInterceptorActionFail
+                withMessage:exception.reason];
+    }
+  }
+
+  if (status == ApproovTokenFetchStatusSuccess) {
     // add the Approov token to the required header
     NSString *tokenHeader;
     @synchronized(approovTokenHeader) {
@@ -1146,56 +1180,25 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     if (traceIDHeader != nil && traceID != nil && traceID.length > 0) {
       [updatedRequest setValue:traceID forHTTPHeaderField:traceIDHeader];
     }
-    break;
-  }
-  case ApproovTokenFetchStatusUnknownURL:
-  case ApproovTokenFetchStatusUnprotectedURL:
-  case ApproovTokenFetchStatusNoApproovService:
-    // in these cases we continue without adding an Approov token
-    break;
-  case ApproovTokenFetchStatusNoNetwork:
-  case ApproovTokenFetchStatusPoorNetwork:
-  case ApproovTokenFetchStatusMITMDetected:
-  default:
-    // check if the request should proceed based on the token fetch result
-    @try {
-      NSError *mutatorError = nil;
-      BOOL shouldProceed = [[ApproovServiceMutatorBridge shared]
-          handleInterceptorFetchTokenResult:result
-                                        url:host
-                                      error:&mutatorError];
-
-      if (shouldProceed) {
-        // If mutator says proceed, we fallback to our normal success block
-        // without tokens
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionProceed
-                  withMessage:[Approov
-                                  stringFromApproovTokenFetchStatus:status]];
-      } else {
-        // If Mutator returned false or threw error, map to standard failures
-        if (status == ApproovTokenFetchStatusNoNetwork ||
-            status == ApproovTokenFetchStatusPoorNetwork ||
-            status == ApproovTokenFetchStatusMITMDetected) {
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionRetry
-                    withMessage:[Approov
-                                    stringFromApproovTokenFetchStatus:status]];
-        } else {
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionFail
-                    withMessage:[Approov
-                                    stringFromApproovTokenFetchStatus:status]];
-        }
+  } else if ((status != ApproovTokenFetchStatusNoApproovService) &&
+             (status != ApproovTokenFetchStatusUnknownURL) &&
+             (status != ApproovTokenFetchStatusUnprotectedURL)) {
+    // We are proceeding (allowed by mutator) with a failure status.
+    // Add the status string to the Approov token header if
+    // useApproovStatusIfNoToken is set, so callers can observe it.
+    if (useApproovStatusIfNoToken) {
+      NSString *tokenHeader;
+      @synchronized(approovTokenHeader) {
+        tokenHeader = approovTokenHeader;
       }
-    } @catch (NSException *exception) {
-      return [ApproovInterceptorResult
-          createWithRequest:updatedRequest
-                 withAction:ApproovInterceptorActionFail
-                withMessage:exception.reason];
+      NSString *tokenPrefix;
+      @synchronized(approovTokenPrefix) {
+        tokenPrefix = approovTokenPrefix;
+      }
+      NSString *value = [NSString
+          stringWithFormat:@"%@%@", tokenPrefix,
+                           [Approov stringFromApproovTokenFetchStatus:status]];
+      [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
     }
   }
 
@@ -1250,17 +1253,14 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
                  (status == ApproovTokenFetchStatusPoorNetwork) ||
                  (status == ApproovTokenFetchStatusMITMDetected)) {
         // we are unable to get the secure string due to network conditions so
-        // the request can be retried by the user later - unless overridden
-        if (!proceedOnNetworkFail) {
-          NSString *detail = [NSString
-              stringWithFormat:@"Header substitution network error: %@",
-                               [Approov
-                                   stringFromApproovTokenFetchStatus:status]];
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionRetry
-                    withMessage:detail];
-        }
+        NSString *detail = [NSString
+            stringWithFormat:@"Header substitution network error: %@",
+                             [Approov
+                                 stringFromApproovTokenFetchStatus:status]];
+        return [ApproovInterceptorResult
+            createWithRequest:updatedRequest
+                   withAction:ApproovInterceptorActionRetry
+                  withMessage:detail];
       } else if (status != ApproovTokenFetchStatusUnknownKey) {
         // we have failed to get a secure string with a more serious permanent
         // error
@@ -1333,17 +1333,14 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
                  (status == ApproovTokenFetchStatusPoorNetwork) ||
                  (status == ApproovTokenFetchStatusMITMDetected)) {
         // we are unable to get the secure string due to network conditions so
-        // the request can be retried by the user later - unless overridden
-        if (!proceedOnNetworkFail) {
-          NSString *detail = [NSString
-              stringWithFormat:
-                  @"Approov query parameter substitution network error: %@",
-                  [Approov stringFromApproovTokenFetchStatus:status]];
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionRetry
-                    withMessage:detail];
-        }
+        NSString *detail = [NSString
+            stringWithFormat:
+                @"Approov query parameter substitution network error: %@",
+                [Approov stringFromApproovTokenFetchStatus:status]];
+        return [ApproovInterceptorResult
+            createWithRequest:updatedRequest
+                   withAction:ApproovInterceptorActionRetry
+                  withMessage:detail];
       } else if (status != ApproovTokenFetchStatusUnknownKey) {
         // we have failed to get a secure string with a more serious permanent
         // error
@@ -1603,10 +1600,6 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
   ApproovLogE(@"verifyPins for %@ failed to match one of %d pins", host,
               [pinsForHost count]);
   return ApproovTrustDecisionBlock;
-}
-
-+ (BOOL)sharedProceedOnNetworkFailure {
-  return proceedOnNetworkFail;
 }
 
 + (BOOL)sharedUseApproovStatusIfNoToken {

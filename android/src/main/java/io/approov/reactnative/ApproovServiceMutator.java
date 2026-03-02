@@ -227,9 +227,6 @@ public interface ApproovServiceMutator {
             case MITM_DETECTED:
                 if (service.getUseApproovStatusIfNoToken())
                     return true;
-                if (!service.isProceedOnNetworkFail())
-                    throw new ApproovNetworkException(status,
-                            "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
@@ -272,9 +269,6 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                if (!service.isProceedOnNetworkFail())
-                    throw new ApproovNetworkException(status,
-                            "Header substitution for " + header + ": " + status.toString());
                 return false;
             case UNKNOWN_KEY:
                 return false;
@@ -316,9 +310,6 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                if (!service.isProceedOnNetworkFail())
-                    throw new ApproovNetworkException(status,
-                            "Query parameter substitution for " + queryKey + ": " + status.toString());
                 return false;
             case UNKNOWN_KEY:
                 return false;

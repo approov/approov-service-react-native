@@ -1,5 +1,8 @@
 export declare class ApproovService {
   static initialize(config: string): Promise<void>;
+  /**
+   * @deprecated This function is a no-op and has no effect.
+   */
   static setProceedOnNetworkFail(): void;
   static setUseApproovStatusIfNoToken(shouldUse: boolean): void;
   static setLogLevel(level: number): void;

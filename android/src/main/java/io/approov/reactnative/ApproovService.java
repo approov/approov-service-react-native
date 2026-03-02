@@ -125,12 +125,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // initialization
     private boolean pendingPrefetch;
 
-    // true if the interceptor should proceed on network failures and not add an
-    // Approov token
-    private boolean proceedOnNetworkFail;
-
-    // true if the interceptor should proceed on network failures and not add an
-    // Approov token and instead add the Approov status
+    // application config options
     private boolean useApproovStatusIfNoToken;
 
     /**
@@ -383,7 +378,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         applicationContext = reactContext;
         earliestNetworkRequestTime = 0;
         pendingPrefetch = false;
-        proceedOnNetworkFail = false;
         suppressLoggingUnknownURL = false;
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
@@ -709,30 +703,29 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Indicates that requests should proceed anyway if it is not possible to obtain
-     * an Approov token
-     * due to a networking failure. If this is called then the backend API can
-     * receive calls without the
-     * expected Approov token header being added, or without header/query parameter
-     * substitutions being
-     * made. Note that this should be used with caution because it may allow a
-     * connection to be established
-     * before any dynamic pins have been received via Approov, thus potentially
-     * opening the channel to a MitM.
+     * Sets a flag indicating if the network interceptor should allow requests when
+     * the Approov token fetch fails
+     * due to a networking issue. If this is set then the request is allowed to
+     * proceed without adding a token,
+     * which means the app can use its own user feedback if the backend cannot be
+     * reached. In this case, we
+     * simply log an info message indicating that this function was called, but it
+     * is no longer used.
      */
     @ReactMethod
     public synchronized void setProceedOnNetworkFail() {
-        log(LOG_DEBUG, TAG, "setProceedOnNetworkFail");
-        proceedOnNetworkFail = true;
+        log(LOG_DEBUG, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
     }
 
     /**
      * Determines if requests should proceed on a network fail or not.
      * 
      * @return true if requests should proceed after a network fail
+     * @deprecated Always returns false
      */
+    @Deprecated
     public synchronized boolean isProceedOnNetworkFail() {
-        return proceedOnNetworkFail;
+        return false;
     }
 
     /**

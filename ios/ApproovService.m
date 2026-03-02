@@ -1156,19 +1156,47 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
   case ApproovTokenFetchStatusNoNetwork:
   case ApproovTokenFetchStatusPoorNetwork:
   case ApproovTokenFetchStatusMITMDetected:
-    // unless we are proceeding on network fail, we throw an exception if we are
-    // unable to get an Approov token due to network conditions
-    if (!proceedOnNetworkFail)
+  default:
+    // check if the request should proceed based on the token fetch result
+    @try {
+      NSError *mutatorError = nil;
+      BOOL shouldProceed = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorFetchTokenResult:result
+                                        url:host
+                                      error:&mutatorError];
+
+      if (shouldProceed) {
+        // If mutator says proceed, we fallback to our normal success block
+        // without tokens
+        return [ApproovInterceptorResult
+            createWithRequest:updatedRequest
+                   withAction:ApproovInterceptorActionProceed
+                  withMessage:[Approov
+                                  stringFromApproovTokenFetchStatus:status]];
+      } else {
+        // If Mutator returned false or threw error, map to standard failures
+        if (status == ApproovTokenFetchStatusNoNetwork ||
+            status == ApproovTokenFetchStatusPoorNetwork ||
+            status == ApproovTokenFetchStatusMITMDetected) {
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionRetry
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
+        } else {
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionFail
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
+        }
+      }
+    } @catch (NSException *exception) {
       return [ApproovInterceptorResult
           createWithRequest:updatedRequest
-                 withAction:ApproovInterceptorActionRetry
-                withMessage:[Approov stringFromApproovTokenFetchStatus:status]];
-  default:
-    // we have a more permanent error from the Approov SDK
-    return [ApproovInterceptorResult
-        createWithRequest:updatedRequest
-               withAction:ApproovInterceptorActionFail
-              withMessage:[Approov stringFromApproovTokenFetchStatus:status]];
+                 withAction:ApproovInterceptorActionFail
+                withMessage:exception.reason];
+    }
   }
 
   // we just return early with anything other than a success or unprotected URL

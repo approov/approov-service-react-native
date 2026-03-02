@@ -27,7 +27,19 @@
 #import "ApproovPinningDelegate.h"
 #import "ApproovUtils.h"
 #import "RSSwizzle.h"
+#import <React/RCTBridgeModule.h>
+
+// Import the auto-generated Swift header for the bridge module
+#if __has_include(                                                             \
+    <approov_service_react_native/approov_service_react_native-Swift.h>)
+#import <approov_service_react_native/approov_service_react_native-Swift.h>
+#elif __has_include("approov_service_react_native-Swift.h")
 #import "approov_service_react_native-Swift.h"
+#else
+// Fallback if the module name is different
+#import <approov_service_react_native_Swift.h>
+#endif
+#import "ApproovService.h"
 #import <objc/runtime.h>
 
 // MARK: - Session Interception Mode
@@ -211,8 +223,8 @@ static dispatch_once_t _onceToken = 0;
   if (value.length == 0) {
     return @"empty";
   }
-  return [NSString stringWithFormat:@"present(len=%lu)",
-                                    (unsigned long)value.length];
+  return [NSString
+      stringWithFormat:@"present(len=%lu)", (unsigned long)value.length];
 }
 
 /**
@@ -224,21 +236,22 @@ static dispatch_once_t _onceToken = 0;
  * sufficient to observe task creation.
  */
 - (void)logSessionMethodResolution:(NSURLSession *)session
-                           selector:(SEL)selector
-                              label:(NSString *)label {
+                          selector:(SEL)selector
+                             label:(NSString *)label {
   Class sessionClass = [session class];
   Method sessionMethod = class_getInstanceMethod(sessionClass, selector);
   Method baseMethod = class_getInstanceMethod([NSURLSession class], selector);
   IMP sessionImp =
       sessionMethod != NULL ? method_getImplementation(sessionMethod) : NULL;
-  IMP baseImp = baseMethod != NULL ? method_getImplementation(baseMethod) : NULL;
+  IMP baseImp =
+      baseMethod != NULL ? method_getImplementation(baseMethod) : NULL;
   BOOL overridesBase =
       (sessionImp != NULL && baseImp != NULL && sessionImp != baseImp);
-  ApproovLogI(
-      @"session selector map [%@] class=%@ selector=%@ "
-      @"overridesNSURLSession=%@ sessionImp=%p baseImp=%p",
-      label, NSStringFromClass(sessionClass), NSStringFromSelector(selector),
-      overridesBase ? @"yes" : @"no", sessionImp, baseImp);
+  ApproovLogI(@"session selector map [%@] class=%@ selector=%@ "
+              @"overridesNSURLSession=%@ sessionImp=%p baseImp=%p",
+              label, NSStringFromClass(sessionClass),
+              NSStringFromSelector(selector), overridesBase ? @"yes" : @"no",
+              sessionImp, baseImp);
 }
 
 /**
@@ -252,11 +265,8 @@ static dispatch_once_t _onceToken = 0;
  */
 - (NSArray<Class> *)sessionClassesForTaskSwizzling {
   NSMutableArray<Class> *classes = [NSMutableArray array];
-  NSArray<NSString *> *candidateClassNames = @[
-    @"NSURLSession",
-    @"__NSURLSessionLocal",
-    @"__NSCFURLSession"
-  ];
+  NSArray<NSString *> *candidateClassNames =
+      @[ @"NSURLSession", @"__NSURLSessionLocal", @"__NSCFURLSession" ];
 
   for (NSString *candidateClassName in candidateClassNames) {
     Class sessionClass = NSClassFromString(candidateClassName);
@@ -296,10 +306,9 @@ static dispatch_once_t _onceToken = 0;
   NSMutableURLRequest *finalRequest = nil;
   if (result.action == ApproovInterceptorActionProceed) {
     finalRequest = [result.request mutableCopy];
-    [[ApproovServiceMutatorBridge shared]
-        processRequest:finalRequest
-           tokenHeader:tokenHeader
-         traceIDHeader:traceIDHeader];
+    [[ApproovServiceMutatorBridge shared] processRequest:finalRequest
+                                             tokenHeader:tokenHeader
+                                           traceIDHeader:traceIDHeader];
   }
 
   NSString *tokenAfterMutator =
@@ -399,27 +408,26 @@ static dispatch_once_t _onceToken = 0;
                         delegateClassName);
             [interceptor
                 logSessionMethodResolution:session
-                                   selector:@selector(dataTaskWithRequest:)
-                                      label:@"dataTaskWithRequest:"];
+                                  selector:@selector(dataTaskWithRequest:)
+                                     label:@"dataTaskWithRequest:"];
             [interceptor
-                logSessionMethodResolution:
-                    session
-                                   selector:@selector(dataTaskWithRequest:
-                                                           completionHandler:)
-                                      label:@"dataTaskWithRequest:completionHandler:"];
+                logSessionMethodResolution:session
+                                  selector:@selector(dataTaskWithRequest:
+                                                       completionHandler:)
+                                     label:@"dataTaskWithRequest:"
+                                           @"completionHandler:"];
             [interceptor
-                logSessionMethodResolution:
-                    session
-                                   selector:@selector(uploadTaskWithRequest:
-                                                           fromData:)
-                                      label:@"uploadTaskWithRequest:fromData:"];
+                logSessionMethodResolution:session
+                                  selector:@selector(uploadTaskWithRequest:
+                                                                  fromData:)
+                                     label:@"uploadTaskWithRequest:fromData:"];
             [interceptor
-                logSessionMethodResolution:
-                    session
-                                   selector:@selector(uploadTaskWithRequest:
-                                                           fromData:
-                                                           completionHandler:)
-                                      label:@"uploadTaskWithRequest:fromData:completionHandler:"];
+                logSessionMethodResolution:session
+                                  selector:@selector
+                                  (uploadTaskWithRequest:
+                                                fromData:completionHandler:)
+                                     label:@"uploadTaskWithRequest:fromData:"
+                                           @"completionHandler:"];
 
             // Register auth challenge callback
             // IMPORTANT: weakSession must be assigned BEFORE this block is
@@ -517,11 +525,11 @@ static dispatch_once_t _onceToken = 0;
           });
 
           if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"dataTaskWithRequest:"
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:@"dataTaskWithRequest:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
             switch ([result action]) {
             case ApproovInterceptorActionProceed: {
               return RSSWCallOriginal([result request]);
@@ -544,9 +552,10 @@ static dispatch_once_t _onceToken = 0;
           } else {
             // if the data task creation is for a different (unpinned) session
             // then we don't add Approov
-            ApproovLogI(@"skipping dataTaskWithRequest for unregistered session "
-                        @"%p %@ %@",
-                        self, request.HTTPMethod, request.URL);
+            ApproovLogI(
+                @"skipping dataTaskWithRequest for unregistered session "
+                @"%p %@ %@",
+                self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request);
           }
         }),
@@ -556,9 +565,9 @@ static dispatch_once_t _onceToken = 0;
         sessionClass, @selector(dataTaskWithRequest:completionHandler:),
         RSSWReturnType(NSURLSessionDataTask *),
         RSSWArguments(NSURLRequest *_Nonnull request,
-                      void (^_Nullable completionHandler)
-                          (NSData *_Nullable, NSURLResponse *_Nullable,
-                           NSError *_Nullable)),
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
         RSSWReplacement({
           ApproovLogI(@"observed dataTaskWithRequest:completionHandler: for "
                       @"session %p %@",
@@ -570,7 +579,8 @@ static dispatch_once_t _onceToken = 0;
 
           if (metadata != nil) {
             ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"dataTaskWithRequest:completionHandler:"
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"dataTaskWithRequest:completionHandler:"
                                                          session:self
                                                         metadata:metadata
                                                          request:request];
@@ -589,10 +599,9 @@ static dispatch_once_t _onceToken = 0;
                                withMessage:[result message]];
             }
           } else {
-            ApproovLogI(
-                @"skipping dataTaskWithRequest:completionHandler: for "
-                @"unregistered session %p %@ %@",
-                self, request.HTTPMethod, request.URL);
+            ApproovLogI(@"skipping dataTaskWithRequest:completionHandler: for "
+                        @"unregistered session %p %@ %@",
+                        self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request, completionHandler);
           }
         }),
@@ -619,9 +628,10 @@ static dispatch_once_t _onceToken = 0;
         RSSWArguments(NSURLRequest *_Nonnull request,
                       NSData *_Nullable bodyData),
         RSSWReplacement({
-          ApproovLogI(@"observed uploadTaskWithRequest:fromData: for session %p "
-                      @"%@",
-                      self, request.URL);
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromData: for session %p "
+              @"%@",
+              self, request.URL);
           __block SessionMetadata *metadata = nil;
           dispatch_sync(interceptor->_sessionRegistryQueue, ^{
             metadata = [interceptor->_pinnedSessions objectForKey:self];
@@ -629,7 +639,8 @@ static dispatch_once_t _onceToken = 0;
 
           if (metadata != nil) {
             ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"uploadTaskWithRequest:fromData:"
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithRequest:fromData:"
                                                          session:self
                                                         metadata:metadata
                                                          request:request];
@@ -660,10 +671,11 @@ static dispatch_once_t _onceToken = 0;
         sessionClass,
         @selector(uploadTaskWithRequest:fromData:completionHandler:),
         RSSWReturnType(NSURLSessionUploadTask *),
-        RSSWArguments(NSURLRequest *_Nonnull request, NSData *_Nullable bodyData,
-                      void (^_Nullable completionHandler)
-                          (NSData *_Nullable, NSURLResponse *_Nullable,
-                           NSError *_Nullable)),
+        RSSWArguments(NSURLRequest *_Nonnull request,
+                      NSData *_Nullable bodyData,
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
         RSSWReplacement({
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromData:completionHandler: "
@@ -675,11 +687,12 @@ static dispatch_once_t _onceToken = 0;
           });
 
           if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"uploadTaskWithRequest:fromData:completionHandler:"
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:
+                    @"uploadTaskWithRequest:fromData:completionHandler:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
             switch ([result action]) {
             case ApproovInterceptorActionProceed:
               return RSSWCallOriginal([result request], bodyData,
@@ -710,9 +723,10 @@ static dispatch_once_t _onceToken = 0;
         RSSWReturnType(NSURLSessionUploadTask *),
         RSSWArguments(NSURLRequest *_Nonnull request, NSURL *_Nullable fileURL),
         RSSWReplacement({
-          ApproovLogI(@"observed uploadTaskWithRequest:fromFile: for session %p "
-                      @"%@",
-                      self, request.URL);
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromFile: for session %p "
+              @"%@",
+              self, request.URL);
           __block SessionMetadata *metadata = nil;
           dispatch_sync(interceptor->_sessionRegistryQueue, ^{
             metadata = [interceptor->_pinnedSessions objectForKey:self];
@@ -720,7 +734,8 @@ static dispatch_once_t _onceToken = 0;
 
           if (metadata != nil) {
             ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"uploadTaskWithRequest:fromFile:"
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithRequest:fromFile:"
                                                          session:self
                                                         metadata:metadata
                                                          request:request];
@@ -748,12 +763,13 @@ static dispatch_once_t _onceToken = 0;
         0, NULL);
 
     RSSwizzleInstanceMethod(
-        sessionClass, @selector(uploadTaskWithRequest:fromFile:completionHandler:),
+        sessionClass,
+        @selector(uploadTaskWithRequest:fromFile:completionHandler:),
         RSSWReturnType(NSURLSessionUploadTask *),
         RSSWArguments(NSURLRequest *_Nonnull request, NSURL *_Nullable fileURL,
-                      void (^_Nullable completionHandler)
-                          (NSData *_Nullable, NSURLResponse *_Nullable,
-                           NSError *_Nullable)),
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
         RSSWReplacement({
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromFile:completionHandler: "
@@ -765,11 +781,12 @@ static dispatch_once_t _onceToken = 0;
           });
 
           if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"uploadTaskWithRequest:fromFile:completionHandler:"
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:
+                    @"uploadTaskWithRequest:fromFile:completionHandler:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
             switch ([result action]) {
             case ApproovInterceptorActionProceed:
               return RSSWCallOriginal([result request], fileURL,
@@ -809,7 +826,8 @@ static dispatch_once_t _onceToken = 0;
 
           if (metadata != nil) {
             ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:@"uploadTaskWithStreamedRequest:"
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithStreamedRequest:"
                                                          session:self
                                                         metadata:metadata
                                                          request:request];
@@ -857,8 +875,8 @@ static dispatch_once_t _onceToken = 0;
                 NSStringFromClass(sessionClass));
     for (NSString *selectorName in invalidationSelectors) {
       RSSwizzleInstanceMethod(
-          sessionClass, NSSelectorFromString(selectorName), RSSWReturnType(void),
-          RSSWArguments(), RSSWReplacement({
+          sessionClass, NSSelectorFromString(selectorName),
+          RSSWReturnType(void), RSSWArguments(), RSSWReplacement({
             // Thread-safe cleanup
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
               SessionMetadata *metadata =

@@ -24,7 +24,15 @@
 
 #import "ApproovPinningDelegate.h"
 #import "ApproovUtils.h"
+#if __has_include(                                                             \
+    <approov_service_react_native/approov_service_react_native-Swift.h>)
+#import <approov_service_react_native/approov_service_react_native-Swift.h>
+#elif __has_include("approov_service_react_native-Swift.h")
 #import "approov_service_react_native-Swift.h"
+#else
+// Fallback if the module name is different
+#import <approov_service_react_native_Swift.h>
+#endif
 
 @interface PinningURLSessionDelegate ()
 
@@ -71,25 +79,31 @@
 
 /**
  * Forwards authentication challenges to the wrapped delegate when available.
- * Task-level callback is preferred when a task is available, then session-level.
+ * Task-level callback is preferred when a task is available, then
+ * session-level.
  */
-- (void)
-forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
-                                         task:(NSURLSessionTask *_Nullable)task
-                                    challenge:(NSURLAuthenticationChallenge *)challenge
-                            completionHandler:
-                                (void (^)(NSURLSessionAuthChallengeDisposition
-                                              disposition,
-                                          NSURLCredential *credential))
-                                    completionHandler
-                                challengeType:(NSString *)challengeType {
+- (void)forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
+                                                task:(NSURLSessionTask
+                                                          *_Nullable)task
+                                           challenge:
+                                               (NSURLAuthenticationChallenge *)
+                                                   challenge
+                                   completionHandler:
+                                       (void (^)(
+                                           NSURLSessionAuthChallengeDisposition
+                                               disposition,
+                                           NSURLCredential *credential))
+                                           completionHandler
+                                       challengeType:(NSString *)challengeType {
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *delegateClassName =
-      _originalDelegate ? NSStringFromClass([_originalDelegate class]) : @"<nil>";
+      _originalDelegate ? NSStringFromClass([_originalDelegate class])
+                        : @"<nil>";
 
-  if ((task != nil) && [_originalDelegate respondsToSelector:@selector
-                                      (URLSession:task:didReceiveChallenge:
-                                                 completionHandler:)]) {
+  if ((task != nil) &&
+      [_originalDelegate respondsToSelector:@selector
+                         (URLSession:
+                                task:didReceiveChallenge:completionHandler:)]) {
     ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to task "
                 @"delegate %@",
                 challengeType, host, delegateClassName);
@@ -97,20 +111,19 @@ forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
         (id<NSURLSessionTaskDelegate>)_originalDelegate;
     [taskDelegate URLSession:session
                         task:task
-          didReceiveChallenge:challenge
-            completionHandler:completionHandler];
+         didReceiveChallenge:challenge
+           completionHandler:completionHandler];
     return;
   }
 
   if ([_originalDelegate respondsToSelector:@selector
-                         (URLSession:didReceiveChallenge:
-                                       completionHandler:)]) {
+                         (URLSession:didReceiveChallenge:completionHandler:)]) {
     ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to session "
                 @"delegate %@",
                 challengeType, host, delegateClassName);
     [_originalDelegate URLSession:session
-               didReceiveChallenge:challenge
-                 completionHandler:completionHandler];
+              didReceiveChallenge:challenge
+                completionHandler:completionHandler];
     return;
   }
 
@@ -139,8 +152,8 @@ forwardChallengeToOriginalDelegateForSession:(NSURLSession *)session
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *authMethod =
       challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
-  ApproovLogI(@"ApproovService received task challenge %@ for %@",
-              authMethod, host);
+  ApproovLogI(@"ApproovService received task challenge %@ for %@", authMethod,
+              host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
     ApproovTrustDecision trustDecision =

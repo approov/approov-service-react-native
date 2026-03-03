@@ -27,7 +27,12 @@
 #import "ApproovProps.h"
 #import "ApproovRCTInterceptor.h"
 #import "ApproovUtils.h"
+#if __has_include(                                                             \
+    <approov_service_react_native/approov_service_react_native-Swift.h>)
+#import <approov_service_react_native/approov_service_react_native-Swift.h>
+#else
 #import "approov_service_react_native-Swift.h"
+#endif
 #import <CommonCrypto/CommonCrypto.h>
 
 // Results generated as a result of a networking interception

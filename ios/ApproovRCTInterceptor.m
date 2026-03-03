@@ -27,14 +27,133 @@
 #import "ApproovPinningDelegate.h"
 #import "ApproovUtils.h"
 #import "RSSwizzle.h"
+#import <React/RCTBridgeModule.h>
 
-// remember the current NSURLSessions that are being processed
+// Import the auto-generated Swift header for the bridge module
+#if __has_include(                                                             \
+    <approov_service_react_native/approov_service_react_native-Swift.h>)
+#import <approov_service_react_native/approov_service_react_native-Swift.h>
+#elif __has_include("approov_service_react_native-Swift.h")
+#import "approov_service_react_native-Swift.h"
+#else
+// Fallback if the module name is different
+#import <approov_service_react_native_Swift.h>
+#endif
+#import "ApproovService.h"
+#import <objc/runtime.h>
+
+// MARK: - Session Interception Mode
+
+/// Defines how sessions are intercepted
+typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
+  SessionInterceptionModeAllowList, // Only intercept known delegates (default)
+  SessionInterceptionModeDenyList,  // Intercept all except known exclusions
+  SessionInterceptionModeAll        // Intercept everything
+};
+
+// MARK: - Session Metadata
+
+/// Metadata tracked for each intercepted session
+@interface SessionMetadata : NSObject
+@property(nonatomic, strong) NSString *delegateClassName;
+@property(nonatomic, strong) NSDate *createdAt;
+@property(nonatomic, assign) NSUInteger requestCount;
+
+// Pinning validation tracking
+@property(nonatomic, assign) NSUInteger authChallengeCount;
+@property(nonatomic, assign) NSUInteger pinnedChallengeCount;
+@property(nonatomic, assign) NSUInteger blockedChallengeCount;
+@property(nonatomic, strong) NSDate *lastAuthChallengeAt;
+@property(nonatomic, assign) BOOL pinningDelegateVerified;
+@end
+
+@implementation SessionMetadata
+@end
+
+// MARK: - Session Interception Policy
+
+/// Policy for determining which sessions to intercept
+@interface SessionInterceptionPolicy : NSObject
+@property(nonatomic, assign) SessionInterceptionMode mode;
+@property(nonatomic, strong) NSSet<NSString *> *allowedDelegates;
+@property(nonatomic, strong) NSSet<NSString *> *excludedDelegates;
+
+- (BOOL)shouldInterceptSessionWithDelegate:(NSString *)delegateClassName;
+- (BOOL)matchesPattern:(NSString *)className
+                 inSet:(NSSet<NSString *> *)patterns;
+@end
+
+@implementation SessionInterceptionPolicy
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    // Default: Allow known delegates (backward compatible)
+    _mode = SessionInterceptionModeAllowList;
+    _allowedDelegates = [NSSet setWithArray:@[
+      @"RCT*",                       // React Native (prefix match)
+      @"RNFetchBlobRequest",         // rn-fetch-blob
+      @"NRMAURLSessionTaskDelegate", // NewRelic
+      @"SentryNSURLSessionDelegate", // Sentry
+      @"Sentry*", // Sentry (prefix match for any Sentry delegates)
+      @"GDTCCTUploadOperation", // Firebase transport upload delegate
+    ]];
+    _excludedDelegates = [NSSet setWithArray:@[
+      @"RCTMultipartDataTask" // Bundle reload (excluded)
+    ]];
+  }
+  return self;
+}
+
+- (BOOL)shouldInterceptSessionWithDelegate:(NSString *)delegateClassName {
+  // Check exclusions first
+  if ([self matchesPattern:delegateClassName inSet:_excludedDelegates]) {
+    return NO;
+  }
+
+  switch (_mode) {
+  case SessionInterceptionModeAll:
+    return YES;
+
+  case SessionInterceptionModeDenyList:
+    return ![self matchesPattern:delegateClassName inSet:_excludedDelegates];
+
+  case SessionInterceptionModeAllowList:
+    return [self matchesPattern:delegateClassName inSet:_allowedDelegates];
+  }
+}
+
+- (BOOL)matchesPattern:(NSString *)className
+                 inSet:(NSSet<NSString *> *)patterns {
+  for (NSString *pattern in patterns) {
+    if ([pattern hasSuffix:@"*"]) {
+      // Prefix match
+      NSString *prefix = [pattern substringToIndex:pattern.length - 1];
+      if ([className hasPrefix:prefix])
+        return YES;
+    } else {
+      // Exact match
+      if ([className isEqualToString:pattern])
+        return YES;
+    }
+  }
+  return NO;
+}
+
+@end
+
+// MARK: - ApproovRCTInterceptor Implementation
+
 @implementation ApproovRCTInterceptor {
-  // any current ReactNative session
-  NSURLSession *_RNSession;
+  // Track all pinned sessions with metadata
+  NSMapTable<NSURLSession *, SessionMetadata *> *_pinnedSessions;
 
-  // any current RNFetchBlob session
-  NSURLSession *_BlobSession;
+  // Configuration for which sessions to intercept
+  SessionInterceptionPolicy *_policy;
+
+  // Thread safety
+  dispatch_queue_t _sessionRegistryQueue;
+  NSLock *_policyLock;
 }
 
 // the single shared intercetor for React Native
@@ -67,15 +186,154 @@ static dispatch_once_t _onceToken = 0;
     return self;
   }
   _approovService = approovService;
-  _RNSession = nil;
-  _BlobSession = nil;
+
+  // Thread-safe session registry using weak-to-strong map table
+  // #5)
+  _pinnedSessions = [NSMapTable weakToStrongObjectsMapTable];
+
+  // Serial queue for session registry operations
+  _sessionRegistryQueue = dispatch_queue_create("io.approov.sessionRegistry",
+                                                DISPATCH_QUEUE_SERIAL);
+
+  // Lock for policy updates
+  _policyLock = [[NSLock alloc] init];
+
+  // Initialize policy
+  _policy = [[SessionInterceptionPolicy alloc] init];
 
   // swizzle react native session creation methods
   [self swizzleRCTSessionCreation];
 
   // swizzle react native session data task creation methods
   [self swizzleRCTSessionDataTasks];
+
+  // swizzle upload task creation methods used by Firebase transport and others
+  [self swizzleRCTSessionUploadTasks];
+
+  // Swizzle session invalidation for cleanup
+  [self swizzleSessionInvalidation];
+
   return self;
+}
+
+- (NSString *)headerStateForValue:(NSString *)value {
+  if (value == nil) {
+    return @"missing";
+  }
+  if (value.length == 0) {
+    return @"empty";
+  }
+  return [NSString
+      stringWithFormat:@"present(len=%lu)", (unsigned long)value.length];
+}
+
+/**
+ * Diagnostic helper for swizzle verification.
+ *
+ * For a concrete session instance, this compares the selector implementation
+ * pointer on the runtime class versus NSURLSession. If they differ, the
+ * concrete class overrides the selector and swizzling only NSURLSession is not
+ * sufficient to observe task creation.
+ */
+- (void)logSessionMethodResolution:(NSURLSession *)session
+                          selector:(SEL)selector
+                             label:(NSString *)label {
+  Class sessionClass = [session class];
+  Method sessionMethod = class_getInstanceMethod(sessionClass, selector);
+  Method baseMethod = class_getInstanceMethod([NSURLSession class], selector);
+  IMP sessionImp =
+      sessionMethod != NULL ? method_getImplementation(sessionMethod) : NULL;
+  IMP baseImp =
+      baseMethod != NULL ? method_getImplementation(baseMethod) : NULL;
+  BOOL overridesBase =
+      (sessionImp != NULL && baseImp != NULL && sessionImp != baseImp);
+  ApproovLogI(@"session selector map [%@] class=%@ selector=%@ "
+              @"overridesNSURLSession=%@ sessionImp=%p baseImp=%p",
+              label, NSStringFromClass(sessionClass),
+              NSStringFromSelector(selector), overridesBase ? @"yes" : @"no",
+              sessionImp, baseImp);
+}
+
+/**
+ * Returns the set of session classes that can own task selectors at runtime.
+ *
+ * On modern iOS, NSURLSession factory methods often return private subclasses
+ * such as __NSURLSessionLocal. Those classes may implement dataTask/uploadTask
+ * selectors directly, which bypasses swizzles installed only on NSURLSession.
+ * We resolve private classes dynamically so this remains safe across SDK
+ * versions where a class may be absent or renamed.
+ */
+- (NSArray<Class> *)sessionClassesForTaskSwizzling {
+  NSMutableArray<Class> *classes = [NSMutableArray array];
+  NSArray<NSString *> *candidateClassNames =
+      @[ @"NSURLSession", @"__NSURLSessionLocal", @"__NSCFURLSession" ];
+
+  for (NSString *candidateClassName in candidateClassNames) {
+    Class sessionClass = NSClassFromString(candidateClassName);
+    if (sessionClass != Nil && ![classes containsObject:sessionClass]) {
+      [classes addObject:sessionClass];
+    }
+  }
+
+  return [classes copy];
+}
+
+- (ApproovInterceptorResult *)
+    prepareInterceptedResultForTaskType:(NSString *)taskType
+                                session:(NSURLSession *)session
+                               metadata:(SessionMetadata *)metadata
+                                request:(NSURLRequest *)request {
+  ApproovLogI(@"intercepting %@ %@ %@ for session %p (delegate: %@, requests: "
+              @"%lu)",
+              taskType, request.HTTPMethod, request.URL, session,
+              metadata.delegateClassName, (unsigned long)metadata.requestCount);
+
+  dispatch_async(_sessionRegistryQueue, ^{
+    metadata.requestCount++;
+  });
+
+  NSString *tokenHeader = [ApproovService sharedTokenHeader];
+  NSString *traceIDHeader = [ApproovService sharedTraceIDHeader];
+  NSString *tokenBefore = [request valueForHTTPHeaderField:tokenHeader];
+
+  ApproovInterceptorResult *result =
+      [self.approovService interceptRequest:request];
+  NSString *tokenAfterIntercept =
+      [result.request valueForHTTPHeaderField:tokenHeader];
+  NSString *traceAfterIntercept =
+      [result.request valueForHTTPHeaderField:traceIDHeader];
+
+  NSMutableURLRequest *finalRequest = nil;
+  if (result.action == ApproovInterceptorActionProceed) {
+    finalRequest = [result.request mutableCopy];
+    [[ApproovServiceMutatorBridge shared] processRequest:finalRequest
+                                             tokenHeader:tokenHeader
+                                           traceIDHeader:traceIDHeader];
+  }
+
+  NSString *tokenAfterMutator =
+      finalRequest ? [finalRequest valueForHTTPHeaderField:tokenHeader]
+                   : tokenAfterIntercept;
+  NSString *traceAfterMutator =
+      finalRequest ? [finalRequest valueForHTTPHeaderField:traceIDHeader]
+                   : traceAfterIntercept;
+
+  ApproovLogI(@"task mutation [%@] %@ token=%@->%@->%@ trace=%@->%@ action=%ld "
+              @"message=%@",
+              taskType, request.URL, [self headerStateForValue:tokenBefore],
+              [self headerStateForValue:tokenAfterIntercept],
+              [self headerStateForValue:tokenAfterMutator],
+              [self headerStateForValue:traceAfterIntercept],
+              [self headerStateForValue:traceAfterMutator], (long)result.action,
+              result.message);
+
+  if (finalRequest != nil) {
+    return [ApproovInterceptorResult createWithRequest:finalRequest
+                                            withAction:result.action
+                                           withMessage:result.message];
+  }
+
+  return result;
 }
 
 /**
@@ -100,12 +358,16 @@ static dispatch_once_t _onceToken = 0;
         NSURLSession *session;
         if (delegate != nil) {
           NSString *delegateClassName = NSStringFromClass([delegate class]);
-          ApproovLogD(@"checking session creation with %@ delegate",
+          ApproovLogI(@"checking session creation with %@ delegate",
                       delegateClassName);
-          if (([delegateClassName hasPrefix:@"RCT"] ||
-               [delegateClassName isEqual:@"RNFetchBlobRequest"] ||
-               [delegateClassName isEqual:@"NRMAURLSessionTaskDelegate"]) &&
-              ![delegateClassName isEqual:@"RCTMultipartDataTask"]) {
+          // Thread-safe policy check
+          BOOL shouldIntercept;
+          [interceptor->_policyLock lock];
+          shouldIntercept = [interceptor->_policy
+              shouldInterceptSessionWithDelegate:delegateClassName];
+          [interceptor->_policyLock unlock];
+
+          if (shouldIntercept) {
             // we have a delegate associated with React Native that we need to
             // handle (note we don't intercept the RCTMultipartDataTask since
             // this is specifically associated with bundle reload of Javascript
@@ -133,23 +395,98 @@ static dispatch_once_t _onceToken = 0;
                 [PinningURLSessionDelegate
                     createWithDelegate:delegate
                         approovService:interceptor.approovService];
-            session = RSSWCallOriginal(configuration, pinningDelegate, queue);
 
-            // remember this particular NSURLSession since it is one we should
-            // add Approov to. We only remember one for React Native at a time
-            // but this is okay given its session creation process. For
-            // rn-fetch-blob a new session is created for each request, so there
-            // is a very small chance of a race at this point but this would
-            // only result in a missing Approov token rather than a pinning
-            // vulnerability.
-            if ([delegateClassName hasPrefix:@"RCT"])
-              interceptor->_RNSession = session;
-            else
-              interceptor->_BlobSession = session;
+            // Create session FIRST so we can capture it in the callback
+            session = RSSWCallOriginal(configuration, pinningDelegate, queue);
+            __weak NSURLSession *weakSession = session;
+
+            // Record where task selectors are implemented for this concrete
+            // session instance. These logs make it clear why task swizzles
+            // must be installed on runtime subclasses as well as NSURLSession.
+            ApproovLogI(@"created pinned session %p class=%@ for delegate %@",
+                        session, NSStringFromClass([session class]),
+                        delegateClassName);
+            [interceptor
+                logSessionMethodResolution:session
+                                  selector:@selector(dataTaskWithRequest:)
+                                     label:@"dataTaskWithRequest:"];
+            [interceptor
+                logSessionMethodResolution:session
+                                  selector:@selector(dataTaskWithRequest:
+                                                       completionHandler:)
+                                     label:@"dataTaskWithRequest:"
+                                           @"completionHandler:"];
+            [interceptor
+                logSessionMethodResolution:session
+                                  selector:@selector(uploadTaskWithRequest:
+                                                                  fromData:)
+                                     label:@"uploadTaskWithRequest:fromData:"];
+            [interceptor
+                logSessionMethodResolution:session
+                                  selector:@selector
+                                  (uploadTaskWithRequest:
+                                                fromData:completionHandler:)
+                                     label:@"uploadTaskWithRequest:fromData:"
+                                           @"completionHandler:"];
+
+            // Register auth challenge callback
+            // IMPORTANT: weakSession must be assigned BEFORE this block is
+            // created
+            pinningDelegate.authChallengeCallback =
+                ^(NSString *host, ApproovTrustDecision decision) {
+                  dispatch_async(interceptor->_sessionRegistryQueue, ^{
+                    SessionMetadata *metadata =
+                        [interceptor->_pinnedSessions objectForKey:weakSession];
+                    if (metadata) {
+                      metadata.authChallengeCount++;
+                      metadata.lastAuthChallengeAt = [NSDate date];
+                      metadata.pinningDelegateVerified = YES;
+
+                      if (decision == ApproovTrustDecisionAllow) {
+                        metadata.pinnedChallengeCount++;
+                      } else {
+                        metadata.blockedChallengeCount++;
+                      }
+
+                      ApproovLogI(@"Session %p: auth challenge for %@ "
+                                  @"(decision: %d, total: %lu)",
+                                  weakSession, host, decision,
+                                  (unsigned long)metadata.authChallengeCount);
+                    } else {
+                      ApproovLogW(@"Auth challenge callback: session %p not "
+                                  @"found in registry",
+                                  weakSession);
+                    }
+                  });
+                };
+
+            // Store in registry with metadata
+            SessionMetadata *metadata = [[SessionMetadata alloc] init];
+            metadata.delegateClassName = delegateClassName;
+            metadata.createdAt = [NSDate date];
+            metadata.requestCount = 0;
+            metadata.authChallengeCount = 0;
+            metadata.pinnedChallengeCount = 0;
+            metadata.blockedChallengeCount = 0;
+            metadata.pinningDelegateVerified = NO;
+
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              [interceptor->_pinnedSessions setObject:metadata forKey:session];
+              ApproovLogI(@"Registered session %p (total: %lu)", session,
+                          (unsigned long)interceptor->_pinnedSessions.count);
+            });
 
             // provide the created session
             return session;
+          } else {
+            // Delegate was rejected by policy - log this for diagnostics
+            ApproovLogW(@"SKIPPING session creation with %@ delegate (not in "
+                        @"interception policy)",
+                        delegateClassName);
           }
+        } else {
+          // No delegate provided
+          ApproovLogD(@"session creation with nil delegate");
         }
 
         // if we don't want to intercept the session then we just call the
@@ -168,49 +505,564 @@ static dispatch_once_t _onceToken = 0;
  */
 - (void)swizzleRCTSessionDataTasks {
   __block ApproovRCTInterceptor *interceptor = self;
-  RSSwizzleInstanceMethod(
-      NSClassFromString(@"NSURLSession"), @selector(dataTaskWithRequest:),
-      RSSWReturnType(NSURLSessionDataTask *),
-      RSSWArguments(NSURLRequest *_Nonnull request), RSSWReplacement({
-        // check if the data task creation is for a current session that we have
-        // pinned
-        if ((self == interceptor->_RNSession) ||
-            (self == interceptor->_BlobSession)) {
-          // update the request to include Approov dealing with any failures -
-          // note that this part may block for the duration of the time it takes
-          // to fetch an Approov token but experiments indicate that this does
-          // not impact the behaviour of the React Native Javascript execution
-          ApproovLogD(@"intercepting data task %@ %@", request.HTTPMethod,
+  // Install identical swizzles on all resolved session classes so request
+  // interception works regardless of whether selectors are implemented on
+  // NSURLSession itself or on a concrete runtime subclass.
+  for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
+    ApproovLogI(@"installing dataTask swizzles on class %@",
+                NSStringFromClass(sessionClass));
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(dataTaskWithRequest:),
+        RSSWReturnType(NSURLSessionDataTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request), RSSWReplacement({
+          ApproovLogI(@"observed dataTaskWithRequest: for session %p %@", self,
                       request.URL);
-          ApproovInterceptorResult *result =
-              [interceptor.approovService interceptRequest:request];
-          switch ([result action]) {
-          case ApproovInterceptorActionProceed: {
-            // proceed with the task using the updated request
-            return RSSWCallOriginal(result.request);
+          // Thread-safe session lookup
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:@"dataTaskWithRequest:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed: {
+              return RSSWCallOriginal([result request]);
+            }
+            case ApproovInterceptorActionRetry: {
+              // return a task with 5xx error code suggesting retry
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            }
+            default: {
+              // return a task which fails indicating a more permanent issue
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+            }
+          } else {
+            // if the data task creation is for a different (unpinned) session
+            // then we don't add Approov
+            ApproovLogI(
+                @"skipping dataTaskWithRequest for unregistered session "
+                @"%p %@ %@",
+                self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request);
           }
-          case ApproovInterceptorActionRetry: {
-            // return a task with 5xx error code suggesting retry
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:503
-                             withMessage:[result message]];
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(dataTaskWithRequest:completionHandler:),
+        RSSWReturnType(NSURLSessionDataTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request,
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
+        RSSWReplacement({
+          ApproovLogI(@"observed dataTaskWithRequest:completionHandler: for "
+                      @"session %p %@",
+                      self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result =
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"dataTaskWithRequest:completionHandler:"
+                                                         session:self
+                                                        metadata:metadata
+                                                         request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request], completionHandler);
+            case ApproovInterceptorActionRetry:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping dataTaskWithRequest:completionHandler: for "
+                        @"unregistered session %p %@ %@",
+                        self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request, completionHandler);
           }
-          default: {
-            // return a task which fails indicating a more permanent issue
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                           withErrorCode:499
-                             withMessage:[result message]];
+        }),
+        0, NULL);
+  }
+}
+
+/**
+ * Swizzles NSURLSession upload task creation methods so SDKs that use upload
+ * tasks (for example Firebase transport delegates) also pass through request
+ * mutation and token/header logic.
+ */
+- (void)swizzleRCTSessionUploadTasks {
+  __block ApproovRCTInterceptor *interceptor = self;
+  // Mirror dataTask coverage for upload APIs because SDK delegates may use
+  // either family depending on their transport implementation.
+  for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
+    ApproovLogI(@"installing uploadTask swizzles on class %@",
+                NSStringFromClass(sessionClass));
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(uploadTaskWithRequest:fromData:),
+        RSSWReturnType(NSURLSessionUploadTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request,
+                      NSData *_Nullable bodyData),
+        RSSWReplacement({
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromData: for session %p "
+              @"%@",
+              self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result =
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithRequest:fromData:"
+                                                         session:self
+                                                        metadata:metadata
+                                                         request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request], bodyData);
+            case ApproovInterceptorActionRetry:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping uploadTaskWithRequest:fromData: for "
+                        @"unregistered session %p %@ %@",
+                        self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request, bodyData);
           }
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass,
+        @selector(uploadTaskWithRequest:fromData:completionHandler:),
+        RSSWReturnType(NSURLSessionUploadTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request,
+                      NSData *_Nullable bodyData,
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
+        RSSWReplacement({
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromData:completionHandler: "
+              @"for session %p %@",
+              self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:
+                    @"uploadTaskWithRequest:fromData:completionHandler:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request], bodyData,
+                                      completionHandler);
+            case ApproovInterceptorActionRetry:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(
+                @"skipping uploadTaskWithRequest:fromData:completionHandler: "
+                @"for unregistered session %p %@ %@",
+                self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request, bodyData, completionHandler);
           }
-        } else {
-          // if the data task creation is for a different (unpinned) session
-          // then we don't add Approov
-          return RSSWCallOriginal(request);
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(uploadTaskWithRequest:fromFile:),
+        RSSWReturnType(NSURLSessionUploadTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request, NSURL *_Nullable fileURL),
+        RSSWReplacement({
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromFile: for session %p "
+              @"%@",
+              self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result =
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithRequest:fromFile:"
+                                                         session:self
+                                                        metadata:metadata
+                                                         request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request], fileURL);
+            case ApproovInterceptorActionRetry:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping uploadTaskWithRequest:fromFile: for "
+                        @"unregistered session %p %@ %@",
+                        self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request, fileURL);
+          }
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass,
+        @selector(uploadTaskWithRequest:fromFile:completionHandler:),
+        RSSWReturnType(NSURLSessionUploadTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request, NSURL *_Nullable fileURL,
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
+        RSSWReplacement({
+          ApproovLogI(
+              @"observed uploadTaskWithRequest:fromFile:completionHandler: "
+              @"for session %p %@",
+              self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:
+                    @"uploadTaskWithRequest:fromFile:completionHandler:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request], fileURL,
+                                      completionHandler);
+            case ApproovInterceptorActionRetry:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(
+                @"skipping uploadTaskWithRequest:fromFile:completionHandler: "
+                @"for unregistered session %p %@ %@",
+                self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request, fileURL, completionHandler);
+          }
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(uploadTaskWithStreamedRequest:),
+        RSSWReturnType(NSURLSessionUploadTask *),
+        RSSWArguments(NSURLRequest *_Nonnull request), RSSWReplacement({
+          ApproovLogI(@"observed uploadTaskWithStreamedRequest: for session %p "
+                      @"%@",
+                      self, request.URL);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            ApproovInterceptorResult *result =
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"uploadTaskWithStreamedRequest:"
+                                                         session:self
+                                                        metadata:metadata
+                                                         request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result request]);
+            case ApproovInterceptorActionRetry:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping uploadTaskWithStreamedRequest: for "
+                        @"unregistered session %p %@ %@",
+                        self, request.HTTPMethod, request.URL);
+            return RSSWCallOriginal(request);
+          }
+        }),
+        0, NULL);
+  }
+}
+
+/**
+ * Swizzles the NSURLSession invalidation methods to clean up the session
+ * registry when sessions are invalidated. This prevents memory leaks and stale
+ * session tracking.
+ */
+- (void)swizzleSessionInvalidation {
+  __block ApproovRCTInterceptor *interceptor = self;
+
+  // Swizzle both invalidation methods
+  NSArray *invalidationSelectors =
+      @[ @"invalidateAndCancel", @"finishTasksAndInvalidate" ];
+
+  for (Class sessionClass in [self sessionClassesForTaskSwizzling]) {
+    // Use the same class set as task swizzling so pinned session registry
+    // cleanup still runs when private session subclasses invalidate.
+    ApproovLogI(@"installing invalidation swizzles on class %@",
+                NSStringFromClass(sessionClass));
+    for (NSString *selectorName in invalidationSelectors) {
+      RSSwizzleInstanceMethod(
+          sessionClass, NSSelectorFromString(selectorName),
+          RSSWReturnType(void), RSSWArguments(), RSSWReplacement({
+            // Thread-safe cleanup
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              SessionMetadata *metadata =
+                  [interceptor->_pinnedSessions objectForKey:self];
+              if (metadata) {
+                ApproovLogD(@"Removing invalidated session %p (served %lu "
+                            @"requests, %lu auth challenges)",
+                            self, (unsigned long)metadata.requestCount,
+                            (unsigned long)metadata.authChallengeCount);
+                [interceptor->_pinnedSessions removeObjectForKey:self];
+              }
+            });
+            RSSWCallOriginal();
+          }),
+          0, NULL);
+    }
+  }
+}
+
+// MARK: - Configuration API Implementations
+
++ (void)setInterceptionMode:(NSInteger)mode {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    _sharedInterceptor->_policy.mode = (SessionInterceptionMode)mode;
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Interception mode set to %ld", (long)mode);
+  }
+}
+
++ (void)addAllowedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *allowed =
+        [_sharedInterceptor->_policy.allowedDelegates mutableCopy];
+    [allowed addObject:delegatePattern];
+    _sharedInterceptor->_policy.allowedDelegates = [allowed copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Added allowed delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)addExcludedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *excluded =
+        [_sharedInterceptor->_policy.excludedDelegates mutableCopy];
+    [excluded addObject:delegatePattern];
+    _sharedInterceptor->_policy.excludedDelegates = [excluded copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Added excluded delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)removeAllowedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *allowed =
+        [_sharedInterceptor->_policy.allowedDelegates mutableCopy];
+    [allowed removeObject:delegatePattern];
+    _sharedInterceptor->_policy.allowedDelegates = [allowed copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Removed allowed delegate pattern: %@", delegatePattern);
+  }
+}
+
++ (void)removeExcludedDelegate:(NSString *)delegatePattern {
+  if (_sharedInterceptor) {
+    [_sharedInterceptor->_policyLock lock];
+    NSMutableSet *excluded =
+        [_sharedInterceptor->_policy.excludedDelegates mutableCopy];
+    [excluded removeObject:delegatePattern];
+    _sharedInterceptor->_policy.excludedDelegates = [excluded copy];
+    [_sharedInterceptor->_policyLock unlock];
+    ApproovLogI(@"Removed excluded delegate pattern: %@", delegatePattern);
+  }
+}
+
+// MARK: - Diagnostic API Implementations
+
++ (NSDictionary *)getSessionDiagnostics {
+  if (!_sharedInterceptor) {
+    return @{@"error" : @"Interceptor not initialized"};
+  }
+
+  __block NSMutableArray *sessions = [NSMutableArray array];
+  __block NSUInteger totalRequests = 0;
+
+  dispatch_sync(_sharedInterceptor->_sessionRegistryQueue, ^{
+    NSEnumerator *sessionEnum =
+        [_sharedInterceptor->_pinnedSessions keyEnumerator];
+    NSURLSession *session;
+    while ((session = [sessionEnum nextObject])) {
+      SessionMetadata *metadata =
+          [_sharedInterceptor->_pinnedSessions objectForKey:session];
+      if (metadata) {
+        totalRequests += metadata.requestCount;
+        [sessions addObject:@{
+          @"sessionPointer" : [NSString stringWithFormat:@"%p", session],
+          @"delegateClassName" : metadata.delegateClassName,
+          @"createdAt" : [NSString stringWithFormat:@"%@", metadata.createdAt],
+          @"requestCount" : @(metadata.requestCount),
+          @"authChallengeCount" : @(metadata.authChallengeCount),
+          @"pinnedChallengeCount" : @(metadata.pinnedChallengeCount),
+          @"blockedChallengeCount" : @(metadata.blockedChallengeCount),
+          @"pinningDelegateVerified" : @(metadata.pinningDelegateVerified)
+        }];
+      }
+    }
+  });
+
+  return @{
+    @"totalSessions" : @(sessions.count),
+    @"totalRequests" : @(totalRequests),
+    @"sessions" : sessions
+  };
+}
+
++ (NSDictionary *)getPinningDiagnostics {
+  if (!_sharedInterceptor) {
+    return @{@"error" : @"Interceptor not initialized"};
+  }
+
+  __block NSUInteger totalAuthChallenges = 0;
+  __block NSUInteger totalPinned = 0;
+  __block NSUInteger totalBlocked = 0;
+  __block NSUInteger sessionsWithPinning = 0;
+  __block NSUInteger sessionsWithoutPinning = 0;
+  __block NSMutableArray *unpinnedSessions = [NSMutableArray array];
+
+  dispatch_sync(_sharedInterceptor->_sessionRegistryQueue, ^{
+    NSEnumerator *sessionEnum =
+        [_sharedInterceptor->_pinnedSessions keyEnumerator];
+    NSURLSession *session;
+    while ((session = [sessionEnum nextObject])) {
+      SessionMetadata *metadata =
+          [_sharedInterceptor->_pinnedSessions objectForKey:session];
+      if (metadata) {
+        totalAuthChallenges += metadata.authChallengeCount;
+        totalPinned += metadata.pinnedChallengeCount;
+        totalBlocked += metadata.blockedChallengeCount;
+
+        if (metadata.requestCount > 0 && !metadata.pinningDelegateVerified) {
+          sessionsWithoutPinning++;
+          [unpinnedSessions addObject:@{
+            @"sessionPointer" : [NSString stringWithFormat:@"%p", session],
+            @"delegateClassName" : metadata.delegateClassName,
+            @"requestCount" : @(metadata.requestCount)
+          }];
+        } else if (metadata.pinningDelegateVerified) {
+          sessionsWithPinning++;
         }
-      }),
-      0, NULL);
+      }
+    }
+  });
+
+  return @{
+    @"totalAuthChallenges" : @(totalAuthChallenges),
+    @"totalPinned" : @(totalPinned),
+    @"totalBlocked" : @(totalBlocked),
+    @"sessionsWithPinning" : @(sessionsWithPinning),
+    @"sessionsWithoutPinning" : @(sessionsWithoutPinning),
+    @"unpinnedSessions" : unpinnedSessions
+  };
+}
+
++ (void)validatePinningIsActive {
+  NSDictionary *pinningDiag = [self getPinningDiagnostics];
+  NSNumber *sessionsWithoutPinning = pinningDiag[@"sessionsWithoutPinning"];
+  NSArray *unpinnedSessions = pinningDiag[@"unpinnedSessions"];
+
+  if ([sessionsWithoutPinning integerValue] > 0) {
+    ApproovLogW(@"WARNING: %@ session(s) have made requests but pinning was "
+                @"NOT verified!",
+                sessionsWithoutPinning);
+    for (NSDictionary *session in unpinnedSessions) {
+      ApproovLogW(@"  - Session %@ (delegate: %@, requests: %@)",
+                  session[@"sessionPointer"], session[@"delegateClassName"],
+                  session[@"requestCount"]);
+    }
+    ApproovLogW(@"This may indicate that pinning is being bypassed. "
+                @"Investigate immediately!");
+  } else {
+    ApproovLogI(
+        @"Pinning validation: All active sessions have verified pinning ✓");
+  }
 }
 
 @end

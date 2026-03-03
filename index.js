@@ -1,3 +1,4 @@
+
 /*
  * MIT License
  *
@@ -20,7 +21,34 @@
  */
 
 import { NativeModules } from 'react-native'
-const { ApproovService } = NativeModules
+
+const NativeApproovService = NativeModules.ApproovService
+
+// Use a Proxy so all native module methods are accessible regardless of
+// enumerability. Spreading NativeApproovService in New Architecture loses
+// non-enumerable Proxy-trapped methods (e.g. setUseApproovStatusIfNoToken).
+const ApproovService = new Proxy(NativeApproovService || {}, {
+    get(target, prop) {
+        if (prop === 'setProceedOnNetworkFail') {
+            return () => {
+                // No-op for backwards compatibility. This function no longer does anything.
+                console.warn('ApproovService.setProceedOnNetworkFail() is deprecated and has no effect.')
+            }
+        }
+        return target[prop]
+    }
+})
+
+// Add log levels
+ApproovService.Log = {
+    EXTREME: 0,
+    DEBUG: 1,
+    INFO: 2,
+    WARN: 3,
+    ERROR: 4,
+    NONE: 5
+}
+
 import { ApproovProvider, useApproov } from './approov-provider'
 import { ApproovMonitor } from './approov-monitor'
 

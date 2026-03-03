@@ -134,7 +134,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * 
      * @param useApproovStatusIfNoToken is the flag value
      */
-    public synchronized void setUseApproovStatusIfNoToken(boolean useApproovStatusIfNoToken) {
+    public synchronized void setUseApproovStatusIfNoTokenInternal(boolean useApproovStatusIfNoToken) {
         this.useApproovStatusIfNoToken = useApproovStatusIfNoToken;
     }
 
@@ -715,6 +715,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public synchronized void setProceedOnNetworkFail() {
         log(LOG_DEBUG, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
+    }
+
+    /**
+     * Sets a flag indicating if the Approov fetch status should be used as the
+     * token header value if the actual token fetch fails or returns an empty token.
+     *
+     * @param shouldUse is true if the status should be used as the token value
+     */
+    @ReactMethod
+    public synchronized void setUseApproovStatusIfNoToken(boolean shouldUse) {
+        log(LOG_DEBUG, TAG, "setUseApproovStatusIfNoToken " + shouldUse);
+        setUseApproovStatusIfNoTokenInternal(shouldUse);
     }
 
     /**

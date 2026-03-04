@@ -22,6 +22,7 @@ Pod::Spec.new do |s|
   s.swift_version = "5.0"
   # s.exclude_files = "ios/Approov.xcframework/**/*"
   s.requires_arc = true
+  s.static_framework = true
   s.pod_target_xcconfig = { 
     'DEFINES_MODULE' => 'YES',
     'FRAMEWORK_SEARCH_PATHS' => '$(PODS_CONFIGURATION_BUILD_DIR)/approov-ios-sdk',
@@ -37,5 +38,5 @@ Pod::Spec.new do |s|
   s.dependency 'swift-http-structured-headers', '~> 1.4.0'
   s.frameworks = 'Approov'
 
-  s.dependency "React"
+  s.dependency "React-Core"
 end

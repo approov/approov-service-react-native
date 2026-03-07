@@ -1027,7 +1027,7 @@ static dispatch_once_t _onceToken = 0;
     IMP currentIMP = method_getImplementation(m);
     IMP recordedIMP = [snapshot[key] pointerValue];
     if (currentIMP != recordedIMP) {
-      ApproovLogW(@"IMP CONFLICT: %@ was %p at install time, now %p — "
+      ApproovLogE(@"IMP CONFLICT: %@ was %p at install time, now %p — "
                   @"another SDK may have swizzled over our hook",
                   key, recordedIMP, currentIMP);
       conflicts++;
@@ -1038,7 +1038,7 @@ static dispatch_once_t _onceToken = 0;
     ApproovLogD(@"IMP integrity check passed: all %lu hooks intact",
                 (unsigned long)snapshot.count);
   } else {
-    ApproovLogW(@"IMP integrity check: %lu conflict(s) detected out of %lu "
+    ApproovLogE(@"IMP integrity check: %lu conflict(s) detected out of %lu "
                 @"hooks — intercepted requests may be invisible",
                 (unsigned long)conflicts, (unsigned long)snapshot.count);
   }

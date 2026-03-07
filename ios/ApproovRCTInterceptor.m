@@ -154,6 +154,10 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
   // Thread safety
   dispatch_queue_t _sessionRegistryQueue;
   NSLock *_policyLock;
+
+  // IMP integrity tracking: maps "ClassName.selectorName" -> recorded IMP
+  NSMutableDictionary<NSString *, NSValue *> *_installedIMPs;
+  NSLock *_impTrackingLock;
 }
 
 // the single shared intercetor for React Native
@@ -197,6 +201,10 @@ static dispatch_once_t _onceToken = 0;
 
   // Lock for policy updates
   _policyLock = [[NSLock alloc] init];
+
+  // IMP integrity tracking
+  _installedIMPs = [[NSMutableDictionary alloc] init];
+  _impTrackingLock = [[NSLock alloc] init];
 
   // Initialize policy
   _policy = [[SessionInterceptionPolicy alloc] init];
@@ -476,6 +484,10 @@ static dispatch_once_t _onceToken = 0;
                           (unsigned long)interceptor->_pinnedSessions.count);
             });
 
+            // Verify IMP integrity when new sessions are registered
+            // (detects if another SDK has overwritten our swizzles)
+            [interceptor verifyIMPIntegrity];
+
             // provide the created session
             return session;
           } else {
@@ -606,6 +618,105 @@ static dispatch_once_t _onceToken = 0;
           }
         }),
         0, NULL);
+
+    // Swizzle URL-based convenience methods that bypass
+    // dataTaskWithRequest:
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(dataTaskWithURL:),
+        RSSWReturnType(NSURLSessionDataTask *),
+        RSSWArguments(NSURL *_Nonnull url), RSSWReplacement({
+          ApproovLogI(@"observed dataTaskWithURL: for session %p %@", self,
+                      url);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            NSURLRequest *request = [NSURLRequest requestWithURL:url];
+            ApproovInterceptorResult *result = [interceptor
+                prepareInterceptedResultForTaskType:@"dataTaskWithURL:"
+                                            session:self
+                                           metadata:metadata
+                                            request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result.request URL]);
+            case ApproovInterceptorActionRetry:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping dataTaskWithURL: for unregistered session "
+                        @"%p %@",
+                        self, url);
+            return RSSWCallOriginal(url);
+          }
+        }),
+        0, NULL);
+
+    RSSwizzleInstanceMethod(
+        sessionClass, @selector(dataTaskWithURL:completionHandler:),
+        RSSWReturnType(NSURLSessionDataTask *),
+        RSSWArguments(NSURL *_Nonnull url,
+                      void (^_Nullable completionHandler)(
+                          NSData *_Nullable, NSURLResponse *_Nullable,
+                          NSError *_Nullable)),
+        RSSWReplacement({
+          ApproovLogI(@"observed dataTaskWithURL:completionHandler: for "
+                      @"session %p %@",
+                      self, url);
+          __block SessionMetadata *metadata = nil;
+          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+            metadata = [interceptor->_pinnedSessions objectForKey:self];
+          });
+
+          if (metadata != nil) {
+            NSURLRequest *request = [NSURLRequest requestWithURL:url];
+            ApproovInterceptorResult *result =
+                [interceptor prepareInterceptedResultForTaskType:
+                                 @"dataTaskWithURL:completionHandler:"
+                                                         session:self
+                                                        metadata:metadata
+                                                         request:request];
+            switch ([result action]) {
+            case ApproovInterceptorActionProceed:
+              return RSSWCallOriginal([result.request URL], completionHandler);
+            case ApproovInterceptorActionRetry:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:503
+                               withMessage:[result message]];
+            default:
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                             withErrorCode:499
+                               withMessage:[result message]];
+            }
+          } else {
+            ApproovLogI(@"skipping dataTaskWithURL:completionHandler: for "
+                        @"unregistered session %p %@",
+                        self, url);
+            return RSSWCallOriginal(url, completionHandler);
+          }
+        }),
+        0, NULL);
+
+    // Record IMPs after swizzles are installed for integrity checking
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(dataTaskWithRequest:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(dataTaskWithRequest:completionHandler:)];
+    [self recordIMPForClass:sessionClass selector:@selector(dataTaskWithURL:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(dataTaskWithURL:completionHandler:)];
   }
 }
 
@@ -853,7 +964,85 @@ static dispatch_once_t _onceToken = 0;
           }
         }),
         0, NULL);
+
+    // Record IMPs for upload task selectors
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(uploadTaskWithRequest:fromData:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector
+                   (uploadTaskWithRequest:fromData:completionHandler:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(uploadTaskWithRequest:fromFile:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector
+                   (uploadTaskWithRequest:fromFile:completionHandler:)];
+    [self recordIMPForClass:sessionClass
+                   selector:@selector(uploadTaskWithStreamedRequest:)];
   }
+}
+
+// MARK: - IMP Integrity Tracking
+
+/**
+ * Records the current IMP for a class/selector pair after our swizzle is
+ * installed.  If another SDK later overwrites the IMP we can detect it.
+ */
+- (void)recordIMPForClass:(Class)cls selector:(SEL)sel {
+  Method m = class_getInstanceMethod(cls, sel);
+  if (m == NULL)
+    return;
+  IMP imp = method_getImplementation(m);
+  NSString *key = [NSString stringWithFormat:@"%@.%@", NSStringFromClass(cls),
+                                             NSStringFromSelector(sel)];
+  [_impTrackingLock lock];
+  _installedIMPs[key] = [NSValue valueWithPointer:imp];
+  [_impTrackingLock unlock];
+  ApproovLogD(@"IMP recorded: %@ = %p", key, imp);
+}
+
+/**
+ * Verifies that IMPs have not been overwritten since we installed our swizzles.
+ * Logs a warning for every mismatch and returns the count of conflicts found.
+ */
+- (NSUInteger)verifyIMPIntegrity {
+  NSUInteger conflicts = 0;
+  [_impTrackingLock lock];
+  NSDictionary<NSString *, NSValue *> *snapshot = [_installedIMPs copy];
+  [_impTrackingLock unlock];
+
+  for (NSString *key in snapshot) {
+    // Parse "ClassName.selectorName"
+    NSRange dot = [key rangeOfString:@"."];
+    if (dot.location == NSNotFound)
+      continue;
+    NSString *className = [key substringToIndex:dot.location];
+    NSString *selectorName = [key substringFromIndex:dot.location + 1];
+    Class cls = NSClassFromString(className);
+    SEL sel = NSSelectorFromString(selectorName);
+    if (cls == Nil)
+      continue;
+    Method m = class_getInstanceMethod(cls, sel);
+    if (m == NULL)
+      continue;
+    IMP currentIMP = method_getImplementation(m);
+    IMP recordedIMP = [snapshot[key] pointerValue];
+    if (currentIMP != recordedIMP) {
+      ApproovLogW(@"IMP CONFLICT: %@ was %p at install time, now %p — "
+                  @"another SDK may have swizzled over our hook",
+                  key, recordedIMP, currentIMP);
+      conflicts++;
+    }
+  }
+
+  if (conflicts == 0) {
+    ApproovLogD(@"IMP integrity check passed: all %lu hooks intact",
+                (unsigned long)snapshot.count);
+  } else {
+    ApproovLogW(@"IMP integrity check: %lu conflict(s) detected out of %lu "
+                @"hooks — intercepted requests may be invisible",
+                (unsigned long)conflicts, (unsigned long)snapshot.count);
+  }
+  return conflicts;
 }
 
 /**
@@ -1063,6 +1252,17 @@ static dispatch_once_t _onceToken = 0;
     ApproovLogI(
         @"Pinning validation: All active sessions have verified pinning ✓");
   }
+}
+
++ (NSDictionary *)getIMPIntegrityDiagnostics {
+  if (!_sharedInterceptor) {
+    return @{@"error" : @"Interceptor not initialized"};
+  }
+  NSUInteger conflicts = [_sharedInterceptor verifyIMPIntegrity];
+  return @{
+    @"conflicts" : @(conflicts),
+    @"status" : conflicts == 0 ? @"all hooks intact" : @"CONFLICTS DETECTED"
+  };
 }
 
 @end

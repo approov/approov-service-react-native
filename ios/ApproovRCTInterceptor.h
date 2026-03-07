@@ -72,6 +72,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// Validates that pinning is active and logs warnings if not
 + (void)validatePinningIsActive;
 
+/// Returns IMP integrity diagnostics — detects if another SDK has
+/// overwritten our swizzled method implementations
++ (NSDictionary *)getIMPIntegrityDiagnostics;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -7,6 +7,7 @@ export declare class ApproovService {
   static setProceedOnNetworkFail(): void;
   static setUseApproovStatusIfNoToken(shouldUse: boolean): void;
   static setLogLevel(level: number): void;
+  static logMessage(message: string, level?: number): void;
   static addAllowedDelegate(delegatePattern: string): void;
   static Log: {
     EXTREME: number;

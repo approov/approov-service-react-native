@@ -1665,4 +1665,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
             }
         }).start();
     }
+
+    /**
+     * Exposes the native Approov logging facility to Javascript.
+     * 
+     * @param message the string message to log natively
+     * @param level   the integer log level (e.g., ApproovService.Log.INFO)
+     */
+    @ReactMethod
+    public void logMessage(String message, Integer level) {
+        int mappedLevel = (level != null) ? level : LOG_INFO;
+        log(mappedLevel, TAG, "JS: " + (message != null ? message : "null"));
+    }
 }

@@ -39,11 +39,17 @@ const ApproovProvider = ({ config, onInit, children }) => {
     ApproovService.initialize(config)
       .then(() => {
         setStatus({ approovReady: true, approovError: null })
+        if (ApproovService.logMessage) {
+          ApproovService.logMessage("React Native: ApproovService.initialize() promise resolved successfully.", 2 /* INFO */);
+        }
       })
       .catch((error) => {
         // This is a runtime error so set in context so program can notify user
         // Most common cause is a missing config string.
         setStatus({ approovReady: false, approovError: error })
+        if (ApproovService.logMessage) {
+          ApproovService.logMessage("React Native: ApproovService.initialize() promise rejected: " + error.message, 4 /* ERROR */);
+        }
       })
   }, [])
 

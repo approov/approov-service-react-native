@@ -1723,4 +1723,19 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
       });
 }
 
+/**
+ * Exposes the native Approov logging facility to Javascript.
+ *
+ * @param message the string message to log natively
+ * @param level   the integer log level (e.g., ApproovLogLevelInfo)
+ */
+RCT_EXPORT_METHOD(logMessage : (NSString *)message level : (NSInteger)level) {
+  ApproovLogLevel logLevel = (ApproovLogLevel)level;
+  if (logLevel < ApproovLogLevelExtreme || logLevel > ApproovLogLevelNone) {
+    logLevel = ApproovLogLevelInfo;
+  }
+
+  ApproovLogI(logLevel, @"JS: %@", message ? message : @"null");
+}
+
 @end

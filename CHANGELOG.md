@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 
+## [3.5.10]
+- **Robust iOS Interception**: Refactored the iOS networking interceptor to leverage Objective-C `+load` method swizzling. This mathematically guarantees that Approov installs its `NSURLSession` hooks *before* the React Native JS Bridge finishes initializing, preventing any early network requests from missing protection.
+- **dataTaskWithURL Coverage**: Added swizzle interception for `dataTaskWithURL:` on iOS, ensuring that 3rd party native React Native modules (like image downloaders or video players) that bypass the standard `NSMutableURLRequest` flow are still funneled through the Approov core.
+- **Initialization Race Conditions Fixed**: Removed `Thread.sleep` blocking loops in the Android OkHttp interceptor and iOS `NSURLSession` interceptor that were originally intended to wait for JS React Native initialization. Both platforms now dynamically check the `isInitialized()` state, falling back gracefully with a one-time critical error log if the developer forgets to await startup.
+- **Trace ID Documentation**: Documented the `setTraceIDHeader` and `getTraceIDHeader` JS/native bridging methods in `REFERENCE.md`.
+- **Developer Documentation Guides**: Significantly expanded `ARCHITECTURE.md` and `TROUBLESHOOTING.md` to explain 3rd party SDK conflicts (Android OkHttp factory overrides, iOS custom delegates), how to diagnose them via native logs/stats, and exact workflows to safely resolve them during integration.
+
 ## [3.5.9]
 - **iOS Bridging Header Fix**: Resolved an issue where React Native apps failed to compile with the error `'approov_service_react_native-Swift.h' file not found`. The import now correctly prefers modular framework headers (`<approov_service_react_native/approov_service_react_native-Swift.h>`) and falls back to the quoted header when needed during CocoaPods compilation.
 - **iOS Dynamic Framework Support**: Added `s.static_framework = true` and `s.dependency "React-Core"` to the `approov-service-react-native.podspec`. This prevents `_RCTRegisterModule` linker errors when consumers explicitly enable `use_frameworks! :linkage => :dynamic` in their Podfile, ensuring broad compatibility across standard and dynamic React Native setups.

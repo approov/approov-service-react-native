@@ -1,8 +1,9 @@
 # Approov Service for React Native
 
-A wrapper for the [Approov SDK](https://github.com/approov/approov-ios-sdk) to enable easy integration when using [`React native`](https://reactnative.dev/) for making the API calls that you wish to protect with Approov. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
+A wrapper for the [Approov SDK](https://github.com/approov/approov-ios-sdk) to enable easy integration when using [`React Native`](https://reactnative.dev/) for making the API calls that you wish to protect with Approov using `fetch()` or similar. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
 
 For more detailed information, please refer to the following documentation:
+* **[ARCHITECTURE.md](ARCHITECTURE.md)**: A deep dive into the service layer's network interception design on iOS and Android, race conditions, interference from 3rd party SDKs, and the `fetchWithApproov` alternative.
 * **[USAGE.md](USAGE.md)**: Detailed instructions on using the various features of the Approov Service, including message signing, token binding, and custom networks mutators.
 * **[REFERENCE.md (Interface)](REFERENCE.md)**: The complete API reference for the React Native `ApproovService` interface, describing all available methods and error types.
 * **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: A guide providing solutions to common errors and compilation issues you may encounter during setup and integration.

@@ -1187,7 +1187,7 @@ static dispatch_once_t _onceToken = 0;
         ApproovLogE(@"IMP RECOVERY EXHAUSTED: %@ has been re-swizzled %lu "
                     @"times — giving up. Conflicting SDK: %@ (%@). "
                     @"Customer must disable network instrumentation in %@",
-                    key, (unsigned long)kMaxReswizzleAttempts, conflictingLib,
+                    key, (unsigned long)maxAttempts, conflictingLib,
                     conflictingSymbol, conflictingLib);
       }
     }

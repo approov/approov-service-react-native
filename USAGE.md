@@ -50,7 +50,16 @@ async function bootstrapAppAndFetch() {
     // 1. Wait for Approov to finish initializing its Native modules
     await ApproovService.initialize("<your-config-string>");
     
-    // 2. Now it is 100% safe to fetch; the session is securely protected
+    // 2. CRITICAL ON ANDROID: Verify the OkHttpClient hasn't been overwritten 
+    // by another third-party SDK before making your very first fetch request.
+    const status = await ApproovService.getPinningDiagnostics();
+    if (status && status.isInterceptorPresent === false) {
+      console.warn("Approov Interceptor is missing! Healing Android OkHttpClient...");
+      // Re-inject the protection onto the tampered client
+      await ApproovService.updateClientFactory(true);
+    }
+    
+    // 3. Now it is 100% safe to fetch; the session is securely protected
     const response = await fetch("https://api.example.com/secure-data");
     // ...
   } catch (error) {
@@ -58,6 +67,11 @@ async function bootstrapAppAndFetch() {
   }
 }
 ```
+
+### Pre-Flight Native Network Health Check (Android)
+React Native heavily optimizes Android networking by using a single, globally shared `OkHttpClient`. If another observability or analytics SDK (e.g., Datadog, New Relic) initializes *after* Approov does, that SDK might programmatically overwrite the networking factory, completely stripping away the Approov protection without throwing an error.
+
+For robust Android deployments, it is **highly recommended** to perform the `ApproovService.getPinningDiagnostics()` health-check exactly once, just before you execute the very first API request of the application session, as demonstrated in Option 2 above. If the interceptor is missing, calling `ApproovService.updateClientFactory(true)` will instantly heal the active client, preserving the foreign SDK's hooks while adding the Approov protection back on top.
 
 ## Message Signing
 

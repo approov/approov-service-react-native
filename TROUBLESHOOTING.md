@@ -12,7 +12,7 @@ React Native on Android relies on a single, shared instance of `OkHttpClient` pr
 **The Problem**: Because this is a singleton factory, any native SDK (for example, analytics, performance monitoring libraries, or secondary networking libraries) can call `OkHttpClientProvider.setOkHttpClientFactory()` to inject its own custom HTTP client. If this happens *after* Approov has been initialized, the new factory will overwrite the Approov-protected client, causing all subsequent React Native `fetch()` calls to be sent without Approov tokens or certificate pinning.
 
 **The Solution (`getPinningDiagnostics` & `updateClientFactory`)**:
-To combat this dynamic environment, we provide diagnostic and healing methods. You should routinely check the health of your networking stack before making the initial API call protected by Approov.
+To combat this dynamic environment, we provide diagnostic and healing methods. **It is crucial that this native pre-flight check is performed exactly once, BEFORE the very first `fetch()` or `axios` request is made in your application.**
 
 ```javascript
 import { ApproovService } from '@approov/approov-service-react-native';

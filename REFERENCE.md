@@ -91,6 +91,24 @@ ApproovService.setTokenHeader(header: string, prefix: string);
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
+## setTraceIDHeader
+Sets a header to be used to include a trace ID in subsequent network requests. If a header is set, then a random identifier is added to the request headers when an Approov token is fetched natively, to uniquely identify the request for diagnostic purposes.
+
+```Javascript
+ApproovService.setTraceIDHeader(header: string);
+```
+
+You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`.
+
+## getTraceIDHeader
+Gets the trace ID header that was previously set by `setTraceIDHeader` or through the configuration properties.
+
+```Javascript
+ApproovService.getTraceIDHeader();
+```
+
+This function returns a `Promise` providing the result.
+
 ## setBindingHeader
 Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then a hash of the header value is included in the issued Approov tokens to bind them to the value. This may then be verified by the backend API integration.
 

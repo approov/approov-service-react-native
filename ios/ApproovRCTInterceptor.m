@@ -183,7 +183,21 @@ static dispatch_once_t _onceToken = 0;
   dispatch_once(&_onceToken, ^{
     _sharedInterceptor = [[self alloc] initWithApproovService:approovService];
   });
+  if (_sharedInterceptor.approovService == nil) {
+    _sharedInterceptor->_approovService = approovService;
+  }
   return _sharedInterceptor;
+}
+
+/**
+ * Early initialization for swizzling interception.
+ * This ensures Approov is installed into the objective-c runtime
+ * before other observability SDKs can hook the networking stack.
+ */
++ (void)load {
+  dispatch_once(&_onceToken, ^{
+    _sharedInterceptor = [[self alloc] initWithApproovService:nil];
+  });
 }
 
 /**
@@ -501,18 +515,19 @@ static dispatch_once_t _onceToken = 0;
             return session;
           } else {
             // Delegate was rejected by policy - log this for diagnostics
-            ApproovLogW(@"SKIPPING session creation with %@ delegate (not in "
-                        @"interception policy)",
-                        delegateClassName);
+            session = RSSWCallOriginal(configuration, delegate, queue);
+            ApproovLogW(
+                @"SKIPPING session creation %p with %@ delegate (not in "
+                @"interception policy)",
+                session, delegateClassName);
+            return session;
           }
         } else {
           // No delegate provided
-          ApproovLogD(@"session creation with nil delegate");
+          session = RSSWCallOriginal(configuration, delegate, queue);
+          ApproovLogD(@"session creation %p with nil delegate", session);
+          return session;
         }
-
-        // if we don't want to intercept the session then we just call the
-        // original method unmodified
-        return RSSWCallOriginal(configuration, delegate, queue);
       }));
 #pragma clang diagnostic pop
 

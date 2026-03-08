@@ -24,6 +24,7 @@
 
 #import "ApproovService.h"
 #import "Approov/Approov.h"
+#import "ApproovPinningDelegate.h"
 #import "ApproovProps.h"
 #import "ApproovRCTInterceptor.h"
 #import "ApproovUtils.h"
@@ -1034,6 +1035,12 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     // wait until any initial fetch time is reached
     BOOL waitForReady = YES;
     while (waitForReady) {
+      // if initialization has completed then we can proceed
+      if (isInitialized) {
+        waitForReady = NO;
+        break;
+      }
+
       NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
       NSTimeInterval earliestTime = 0.0;
       @synchronized(earliestNetworkRequestTimeLock) {
@@ -1043,6 +1050,14 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
         waitForReady = NO;
       else {
         // sleep for a short period to block this request thread
+        static BOOL hasLoggedInitWarning = NO;
+        if (!hasLoggedInitWarning) {
+          ApproovLogE(
+              @"Approov initialization is delaying a network request! A native "
+              @"thread is sleeping. You MUST await ApproovService.initialize() "
+              @"or use the useApproov() hook before calling fetch().");
+          hasLoggedInitWarning = YES;
+        }
         ApproovLogI(@"request paused: %@", url);
         [NSThread sleepForTimeInterval:0.1];
       }
@@ -1644,6 +1659,68 @@ RCT_EXPORT_METHOD(updateClientFactory : (BOOL)wrapExisting resolve : (
 
 + (NSString *)getAccountMessageSignature:(NSString *)message {
   return [Approov getMessageSignature:message];
+}
+
+RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
+                      options resolver : (RCTPromiseResolveBlock)
+                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  // 1. Run in background to avoid blocking the JS thread (fetchTokenAndWait is
+  // blocking)
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // 2. Build the basic request from JS inputs
+        NSMutableURLRequest *request =
+            [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+        request.HTTPMethod = options[@"method"] ?: @"GET";
+        request.allHTTPHeaderFields = options[@"headers"];
+        if (options[@"body"]) {
+          request.HTTPBody =
+              [options[@"body"] dataUsingEncoding:NSUTF8StringEncoding];
+        }
+
+        // 3. Add ALL Approov protections (Token, Signature, TraceIDs, Headers)
+        ApproovInterceptorResult *result = [self interceptRequest:request];
+        if (result.action == ApproovInterceptorActionFail) {
+          reject(@"approov_error", result.message, nil);
+          return;
+        }
+
+        // 4. Create an isolated, unswizzled NSURLSession with our Pinning
+        // Delegate
+        PinningURLSessionDelegate *pinningDelegate =
+            [[PinningURLSessionDelegate alloc] initWithDelegate:nil
+                                                 approovService:self];
+        NSURLSession *session = [NSURLSession
+            sessionWithConfiguration:[NSURLSessionConfiguration
+                                         defaultSessionConfiguration]
+                            delegate:pinningDelegate
+                       delegateQueue:nil];
+
+        // 5. Execute the highly protected request natively
+        NSURLSessionDataTask *task = [session
+            dataTaskWithRequest:result.request
+              completionHandler:^(NSData *data, NSURLResponse *response,
+                                  NSError *error) {
+                if (error) {
+                  reject(@"network_error", error.localizedDescription, error);
+                  return;
+                }
+
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                NSString *bodyString =
+                    [[NSString alloc] initWithData:data
+                                          encoding:NSUTF8StringEncoding];
+
+                // 6. Return the response back to JavaScript
+                resolve(@{
+                  @"status" : @(httpResponse.statusCode),
+                  @"headers" : httpResponse.allHeaderFields ?: @{},
+                  @"body" : bodyString ?: @""
+                });
+              }];
+
+        [task resume];
+      });
 }
 
 @end

@@ -1588,4 +1588,81 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
+
+    /**
+     * Performs a secure fetch bypassing any global OkHttpClient interceptors.
+     * It creates an isolated OkHttpClient explicitly populated with the Approov
+     * interceptor and certificate pinner, ensuring other SDKs cannot interfere.
+     *
+     * @param url     the requested URL
+     * @param options dictionary containing headers, body, method, etc.
+     * @param promise promise to be fulfilled with the response
+     */
+    @ReactMethod
+    public void fetchWithApproov(String url, ReadableMap options, Promise promise) {
+        // Run network operation in a background thread to avoid blocking JS
+        new Thread(() -> {
+            try {
+                // 1. Build the explicit OkHttp request
+                Request.Builder requestBuilder = new Request.Builder().url(url);
+                
+                String method = "GET";
+                if (options != null && options.hasKey("method")) {
+                    method = options.getString("method");
+                }
+                
+                okhttp3.RequestBody requestBody = null;
+                if (options != null && options.hasKey("body")) {
+                    String bodyString = options.getString("body");
+                    requestBody = okhttp3.RequestBody.create(null, bodyString);
+                }
+                
+                // Add headers if provided
+                if (options != null && options.hasKey("headers")) {
+                    ReadableMap headersMap = options.getMap("headers");
+                    if (headersMap != null) {
+                        for (Map.Entry<String, Object> entry : headersMap.toHashMap().entrySet()) {
+                            if (entry.getValue() instanceof String) {
+                                requestBuilder.addHeader(entry.getKey(), (String) entry.getValue());
+                            }
+                        }
+                    }
+                }
+                
+                requestBuilder.method(method, requestBody);
+                Request request = requestBuilder.build();
+
+                // 2. Build the cleanly isolated Approov OkHttpClient
+                OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
+                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
+                approovBuilder.apply(clientBuilder);
+                OkHttpClient secureClient = clientBuilder.build();
+
+                // 3. Execute request safely
+                Response response = secureClient.newCall(request).execute();
+
+                // 4. Format the response for React Native
+                WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
+                responseMap.putInt("status", response.code());
+                
+                WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
+                for (String headerName : response.headers().names()) {
+                    responseHeaders.putString(headerName, response.header(headerName));
+                }
+                responseMap.putMap("headers", responseHeaders);
+                
+                if (response.body() != null) {
+                    responseMap.putString("body", response.body().string());
+                } else {
+                    responseMap.putString("body", "");
+                }
+                
+                promise.resolve(responseMap);
+                
+            } catch (Exception e) {
+                log(LOG_ERROR, TAG, "fetchWithApproov failed: " + e.getMessage());
+                promise.reject("network_error", e.getMessage(), e);
+            }
+        }).start();
+    }
 }

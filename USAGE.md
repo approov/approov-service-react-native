@@ -2,6 +2,63 @@
 
 This document describes the features and functionality of the Approov Service for React Native. It provides details on how to interact with the service layer and customize its behavior to suit your application's needs.
 
+## ⚠️ Critical: Initialization Timing & Network Requests
+
+The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic. 
+
+If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, the native interceptor will bypass that specific request without adding an Approov token or enforcing TLS pinning.
+
+To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
+
+### Option 1: Using the `useApproov()` Hook (Recommended)
+If you are using the `<ApproovProvider>` wrapper at the root of your app, the provider automatically handles initialization. You can use the `useApproov()` hook in your child components to wait until Approov is fully ready before fetching data or rendering.
+
+```javascript
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { useApproov } from '@approov/react-native-approov';
+
+const MainScreen = () => {
+  // Extract the async initialization state
+  const { approovReady, approovError } = useApproov();
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    // Only fetch your critical API data once Approov is definitively initialized
+    if (approovReady && !approovError) {
+      fetch("https://api.example.com/data")
+        .then(res => res.json())
+        .then(setData);
+    }
+  }, [approovReady, approovError]);
+
+  if (approovError) return <Text>Approov failed to start</Text>;
+  if (!approovReady) return <ActivityIndicator size="large" />; 
+
+  return <View> /* Render your data */ </View>;
+}
+```
+
+### Option 2: Awaiting the Promise (For Headless/Service logic)
+If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
+
+```javascript
+import { ApproovService } from '@approov/react-native-approov';
+
+async function bootstrapAppAndFetch() {
+  try {
+    // 1. Wait for Approov to finish initializing its Native modules
+    await ApproovService.initialize("<your-config-string>");
+    
+    // 2. Now it is 100% safe to fetch; the session is securely protected
+    const response = await fetch("https://api.example.com/secure-data");
+    // ...
+  } catch (error) {
+    console.error("Failed to initialize Approov", error);
+  }
+}
+```
+
 ## Message Signing
 
 It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:
@@ -44,6 +101,38 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
 When enabled, if the Approov token fetch fails or returns an empty token, the `Approov-Token` header will be populated with the status string (with the configured prefix) instead of being left empty.
+
+## Using `fetchWithApproov` (Alternative to Swizzling)
+
+By default, the `@approov/approov-service-react-native` package uses **swizzling (iOS)** and **OkHttpClient factory overrides (Android)** to automatically intercept all React Native `fetch()` calls and inject Approov tokens.
+
+However, in some complex applications, other observability SDKs (like New Relic, Datadog, or Firebase) might aggressively hook into the same networking layer in a way that conflicts with or bypasses Approov's security checks.
+
+If you encounter such conflicts, you can use the `ApproovService.fetchWithApproov` API. This is a JavaScript drop-in replacement that mimics the standard `fetch` API, but executes natively on isolated, protected HTTP clients that cannot be interfered with by other React Native modules.
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+// Use it exactly like you would use standard `fetch`
+const response = await ApproovService.fetchWithApproov('https://api.yourdomain.com/data', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ key: 'value' })
+});
+
+const data = await response.json();
+```
+
+### Limitations of `fetchWithApproov`
+The `fetchWithApproov` wrapper is designed for standard JSON and Text API payloads. Because it uses an isolated backend rather than React Native's complex `NetworkingModule` bridged events, it does not support:
+- `FormData` streaming (e.g. uploading large images via URI)
+- `Blob` or `ArrayBuffer` bodies
+- Request cancellation via `AbortController`
+- Streaming enormous files (the entire response is buffered into memory).
+
+For critical security and authentication calls, `fetchWithApproov` provides guaranteed protection.
 
 ---
 

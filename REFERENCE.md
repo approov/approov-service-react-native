@@ -23,6 +23,18 @@ ApproovService.initialize(config: string);
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
+## fetchWithApproov
+Provides a drop-in replacement for the standard JavaScript API `fetch()`, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs. 
+
+```Javascript
+ApproovService.fetchWithApproov(input: string | Request, init?: RequestInit);
+```
+
+- `input` (string | Request): The URL to fetch, or a WHATWG `Request` object containing the URL and method.
+- `init` (RequestInit, optional): An options object containing standard fetch properties like `method`, `headers`, and `body`.
+
+This function returns a `Promise` that resolves to a standard WHATWG `Response` object. Note that because this wrapper is designed for standard JSON/Text API communication across the React Native bridge, it does not support streaming `FormData`, binary `Blob` bodies, or `AbortController` cancellation.
+
 ## setProceedOnNetworkFail
 *OBSOLETE:* Do not use this method. It is deprecated and does nothing.
 

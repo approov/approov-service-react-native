@@ -92,12 +92,23 @@ public class ApproovInterceptor implements Interceptor {
 
             // wait until any initial fetch time is reached
             boolean waitForReady = true;
+            boolean hasLoggedInitWarning = false;
             while (waitForReady) {
+                // if initialization has completed then we can proceed
+                if (approovService.isInitialized()) {
+                    waitForReady = false;
+                    break;
+                }
+                
                 long currentTime = System.currentTimeMillis();
                 long earliestTime = approovService.getEarliestNetworkRequestTime();
                 if (currentTime >= earliestTime)
                     waitForReady = false;
                 else {
+                    if (!hasLoggedInitWarning) {
+                        Log.e(TAG, "Approov initialization is delaying a network request! A native thread is sleeping. You MUST await ApproovService.initialize() or use the useApproov() hook before calling fetch().");
+                        hasLoggedInitWarning = true;
+                    }
                     // sleep for a short period to block this request thread
                     Log.d(TAG, "request paused: " + url);
                     try {

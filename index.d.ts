@@ -1,5 +1,6 @@
 export declare class ApproovService {
   static initialize(config: string): Promise<void>;
+  static fetchWithApproov(input: string | Request, init?: RequestInit): Promise<Response>;
   /**
    * @deprecated This function is a no-op and has no effect.
    */

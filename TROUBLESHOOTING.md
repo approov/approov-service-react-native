@@ -33,12 +33,12 @@ async function verifyNetworkingHealth() {
 ```
 
 ### iOS: Swizzling and Delegate Hijacking
-On iOS, React Native uses `NSURLSession` for networking. To intercept these requests, Approov uses "Method Swizzling" on the `RCTHTTPRequestHandler` to wrap the session delegate with an `ApproovPinningDelegate`.
+On iOS, React Native uses `NSURLSession` for networking. To intercept these requests, Approov uses "Method Swizzling" on the `RCTHTTPRequestHandler` to wrap the session delegate with an `ApproovPinningDelegate`. We perform this swizzling extremely early in the application lifecycle during `+load`.
 
-**The Problem**: Other native iOS SDKs often use swizzling to intercept network traffic as well. If another SDK swizzles the same methods or dynamically changes the `NSURLSessionDelegate` after the session is created, the Approov delegate might be entirely bypassed. Furthermore, if a third-party React Native library implements its own custom `NSURLSessionDelegate` class (instead of using the standard React Native ones), Approov will ignore it by default to prevent crashes.
+**The Problem**: Other native iOS SDKs often use swizzling to intercept network traffic as well. If another SDK swizzles the same methods after our `+load` execution, or dynamically changes the `NSURLSessionDelegate` after the session is created, the Approov delegate might be entirely bypassed. Furthermore, if a third-party React Native library implements its own custom `NSURLSessionDelegate` class (instead of using the standard React Native ones), Approov will ignore it by default to prevent crashes.
 
-**The Solution (`getPinningDiagnostics` & Log Analysis)**:
-Our diagnostics method provides realtime statistics on tracked sessions. Furthermore, the Xcode console logs are your best tool during development.
+**The Solution (`getPinningDiagnostics`, `fetchWithApproov` & Log Analysis)**:
+Our diagnostics method provides realtime statistics on tracked sessions. If your sessions are continuously bypassed, you can completely bypass the React Native `NetworkingModule` by switching those specific API calls to use `ApproovService.fetchWithApproov` instead. Furthermore, the Xcode console logs are your best tool during development.
 
 ```javascript
   const status = await ApproovService.getPinningDiagnostics();

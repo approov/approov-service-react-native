@@ -35,6 +35,65 @@ const ApproovService = new Proxy(NativeApproovService || {}, {
                 console.warn('ApproovService.setProceedOnNetworkFail() is deprecated and has no effect.')
             }
         }
+        if (prop === 'fetchWithApproov') {
+            return async (input, init = {}) => {
+                let url;
+                let options = { ...init };
+
+                // Handle if the first argument is a Request object
+                if (typeof input === 'object' && input instanceof Request) {
+                    url = input.url;
+                    options.method = options.method || input.method;
+
+                    // Extract headers from the Request object safely
+                    const requestHeaders = {};
+                    if (input.headers && typeof input.headers.forEach === 'function') {
+                        input.headers.forEach((value, key) => {
+                            requestHeaders[key] = value;
+                        });
+                    }
+
+                    // Merge with any headers provided in the init object
+                    const initHeaders = {};
+                    if (init.headers) {
+                        const h = new Headers(init.headers);
+                        h.forEach((value, key) => {
+                            initHeaders[key] = value;
+                        });
+                    }
+
+                    options.headers = { ...requestHeaders, ...initHeaders };
+
+                    // Note: This simple wrapper cannot easily extract a stream or FormData body 
+                    // from a Request object asynchronously in a synchronous-looking wrapper.
+                    // It relies on standard string/JSON bodies if passed. 
+                    if (!options.body && input._bodyText) {
+                        options.body = input._bodyText;
+                    }
+                } else {
+                    url = input;
+
+                    // Ensure headers are a plain object for the NativeBridge
+                    if (options.headers) {
+                        const plainHeaders = {};
+                        const h = new Headers(options.headers);
+                        h.forEach((value, key) => {
+                            plainHeaders[key] = value;
+                        });
+                        options.headers = plainHeaders;
+                    }
+                }
+
+                // Call the native implementation
+                const nativeResponse = await NativeApproovService.fetchWithApproov(url, options);
+
+                // Construct a WHATWG Response object to return
+                return new Response(nativeResponse.body, {
+                    status: nativeResponse.status,
+                    headers: new Headers(nativeResponse.headers || {})
+                });
+            }
+        }
         return target[prop]
     }
 })

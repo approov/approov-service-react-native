@@ -123,4 +123,16 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// @return the base64 encoded signature
 + (NSString *)getAccountMessageSignature:(NSString *)message;
 
+/// Performs a secure fetch bypassing any swizzling, applying Approov
+/// protections and pinning.
+///
+/// @param url the requested URL
+/// @param options dictionary containing headers, body, method, etc.
+/// @param resolve promise resolver
+/// @param reject promise rejecter
+- (void)fetchWithApproov:(NSString *)url
+                 options:(NSDictionary *)options
+                resolver:(RCTPromiseResolveBlock)resolve
+                rejecter:(RCTPromiseRejectBlock)reject;
+
 @end

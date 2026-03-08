@@ -291,6 +291,24 @@ token will not use a cached version, so that this information can be transmitted
 ApproovService.setInstallAttrsInToken(attrs: string);
 ```
 
+## setMaxReswizzleAttempts
+Sets the maximum number of times Approov should attempt to automatically re-swizzle its network interception hooks on iOS if it detects they have been hijacked or overwritten by another SDK (like Datadog or New Relic) at runtime.
+
+```javascript
+ApproovService.setMaxReswizzleAttempts(attempts)
+```
+
+- `attempts` (number): The maximum number of recovery attempts. Must be a positive integer or zero. The default value is 3.
+
+## getMaxReswizzleAttempts
+Gets the current maximum number of times Approov should attempt to automatically re-swizzle its network interception hooks on iOS.
+
+```javascript
+ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
+```
+
+- Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts.
+
 ## getPinningDiagnostics
 Returns an object containing detailed diagnostics about the current state of certificate pinning and SDK interception. On Android, this specifically checks the `OkHttpClient` to ensure the `ApproovInterceptor` and `ApproovCertificatePinner` are active. On iOS, it provides statistics about the currently pinned and unpinned `NSURLSession` instances.
 

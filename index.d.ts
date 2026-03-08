@@ -6,6 +6,22 @@ export declare class ApproovService {
    */
   static setProceedOnNetworkFail(): void;
   static setUseApproovStatusIfNoToken(shouldUse: boolean): void;
+  /**
+   * Sets the maximum number of times Approov should attempt to automatically
+   * re-swizzle its network interception hooks on iOS if it detects they have been
+   * hijacked or overwritten by another SDK at runtime.
+   *
+   * @param attempts the maximum number of recovery attempts (default is 3).
+   */
+  static setMaxReswizzleAttempts(attempts: number): void;
+
+  /**
+   * Gets the current maximum number of times Approov should attempt to
+   * automatically re-swizzle its network interception hooks on iOS.
+   *
+   * @return a promise resolving to the configured maximum reswizzle attempts
+   */
+  static getMaxReswizzleAttempts(): Promise<number>;
   static setLogLevel(level: number): void;
   static logMessage(message: string, level?: number): void;
   static addAllowedDelegate(delegatePattern: string): void;

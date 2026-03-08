@@ -37,8 +37,10 @@ On iOS, React Native uses `NSURLSession` for networking. To intercept these requ
 
 **The Problem**: Other native iOS SDKs often use swizzling to intercept network traffic as well. If another SDK swizzles the same methods after our `+load` execution, or dynamically changes the `NSURLSessionDelegate` after the session is created, the Approov delegate might be entirely bypassed. Furthermore, if a third-party React Native library implements its own custom `NSURLSessionDelegate` class (instead of using the standard React Native ones), Approov will ignore it by default to prevent crashes.
 
-**The Solution (`getPinningDiagnostics`, `fetchWithApproov` & Log Analysis)**:
-Our diagnostics method provides realtime statistics on tracked sessions. If your sessions are continuously bypassed, you can completely bypass the React Native `NetworkingModule` by switching those specific API calls to use `ApproovService.fetchWithApproov` instead. Furthermore, the Xcode console logs are your best tool during development.
+**The Solution (`getPinningDiagnostics`, Auto-Recovery, & Whitelisting)**:
+To combat this, the iOS interceptor actively monitors its execution chain. If it detects another SDK has swizzled over the top of the Approov hooks, it will attempt an **Auto-Recovery** by re-swizzling itself back to the top of the chain (up to 3 times by default, configurable via `ApproovService.setMaxReswizzleAttempts(attempts)`).
+
+If your sessions are continuously bypassed despite the auto-recovery, you can analyze the tracked sessions or completely bypass the React Native `NetworkingModule` by switching specific API calls to use `ApproovService.fetchWithApproov` instead. Furthermore, the Xcode console logs are your best tool during development.
 
 ```javascript
   const status = await ApproovService.getPinningDiagnostics();

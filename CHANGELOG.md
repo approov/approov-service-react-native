@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ## [3.5.10]
 - **Robust iOS Interception**: Refactored the iOS networking interceptor to leverage Objective-C `+load` method swizzling. This mathematically guarantees that Approov installs its `NSURLSession` hooks *before* the React Native JS Bridge finishes initializing, preventing any early network requests from missing protection.
+- **iOS Swizzle Auto-Recovery**: The iOS interceptor now actively monitors its hooks during execution. If a third-party SDK (like Datadog or New Relic) overwrites the Approov hooks at runtime, it will perform an auto-recovery by re-swizzling itself back to the top of the chain.
+- **Configurable Reswizzle Attempts**: Introduced `ApproovService.setMaxReswizzleAttempts(attempts)` and `ApproovService.getMaxReswizzleAttempts()` to allow developers to configure the number of times the iOS auto-recovery will trigger (defaults to 3).
 - **dataTaskWithURL Coverage**: Added swizzle interception for `dataTaskWithURL:` on iOS, ensuring that 3rd party native React Native modules (like image downloaders or video players) that bypass the standard `NSMutableURLRequest` flow are still funneled through the Approov core.
 - **Initialization Race Conditions Fixed**: Removed `Thread.sleep` blocking loops in the Android OkHttp interceptor and iOS `NSURLSession` interceptor that were originally intended to wait for JS React Native initialization. Both platforms now dynamically check the `isInitialized()` state, falling back gracefully with a one-time critical error log if the developer forgets to await startup.
 - **Trace ID Documentation**: Documented the `setTraceIDHeader` and `getTraceIDHeader` JS/native bridging methods in `REFERENCE.md`.

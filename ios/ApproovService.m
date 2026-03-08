@@ -438,6 +438,35 @@ RCT_EXPORT_METHOD(setUseApproovStatusIfNoToken : (BOOL)shouldUse) {
 }
 
 /**
+ * Sets the maximum number of times Approov should attempt to automatically
+ * re-swizzle its network interception hooks if it detects they have been
+ * hijacked or overwritten by another SDK (e.g. Datadog, New Relic) at runtime.
+ *
+ * @param attempts the maximum number of recovery attempts (default is 3).
+ */
+RCT_EXPORT_METHOD(setMaxReswizzleAttempts : (NSInteger)attempts) {
+  if (attempts < 0) {
+    ApproovLogE(@"setMaxReswizzleAttempts: ignoring invalid negative value %ld",
+                (long)attempts);
+    return;
+  }
+  ApproovLogD(@"setMaxReswizzleAttempts %ld", (long)attempts);
+  [ApproovRCTInterceptor setMaxReswizzleAttempts:attempts];
+}
+
+/**
+ * Gets the current maximum number of times Approov should attempt to
+ * automatically re-swizzle its network interception hooks.
+ *
+ * @param resolve promise to be fulfilled with the current attempts integer
+ * @param reject promise to be fulfilled if an error occurs
+ */
+RCT_EXPORT_METHOD(getMaxReswizzleAttempts : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@([ApproovRCTInterceptor maxReswizzleAttempts]));
+}
+
+/**
  * Sets a development key indicating that the app is a development version and
  * it should pass attestation even if the app is not registered or it is running
  * on an emulator. The development key value can be rotated at any point in the

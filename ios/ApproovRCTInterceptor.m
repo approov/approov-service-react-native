@@ -147,6 +147,25 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 
 @end
 
+// Global configuration variable for max reswizzle attempts (default is 3)
+static NSUInteger gMaxReswizzleAttempts = 3;
+
+// MARK: - Configuration Implementation
+
+@implementation ApproovRCTInterceptor (Configuration)
+
++ (void)setMaxReswizzleAttempts:(NSInteger)attempts {
+  if (attempts >= 0) {
+    gMaxReswizzleAttempts = (NSUInteger)attempts;
+  }
+}
+
++ (NSInteger)maxReswizzleAttempts {
+  return (NSInteger)gMaxReswizzleAttempts;
+}
+
+@end
+
 // MARK: - ApproovRCTInterceptor Implementation
 
 @implementation ApproovRCTInterceptor {
@@ -1100,7 +1119,7 @@ static dispatch_once_t _onceToken = 0;
  * Returns the count of conflicts found.
  */
 - (NSUInteger)verifyIMPIntegrity {
-  static const NSUInteger kMaxReswizzleAttempts = 3;
+  NSUInteger maxAttempts = [[self class] maxReswizzleAttempts];
   NSUInteger conflicts = 0;
   [_impTrackingLock lock];
   NSDictionary<NSString *, NSValue *> *snapshot = [_installedIMPs copy];
@@ -1148,11 +1167,10 @@ static dispatch_once_t _onceToken = 0;
 
       // Attempt auto re-swizzle recovery
       NSUInteger attempts = [_reswizzleAttempts[key] unsignedIntegerValue];
-      if (attempts < kMaxReswizzleAttempts) {
+      if (attempts < maxAttempts) {
         _reswizzleAttempts[key] = @(attempts + 1);
         ApproovLogE(@"IMP RECOVERY: re-swizzling %@ (attempt %lu of %lu)", key,
-                    (unsigned long)(attempts + 1),
-                    (unsigned long)kMaxReswizzleAttempts);
+                    (unsigned long)(attempts + 1), (unsigned long)maxAttempts);
 
         // Re-install our swizzle on top of theirs.
         // RSSwizzle appends to its internal block list, so a new call

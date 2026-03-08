@@ -1667,6 +1667,29 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * iOS-specific method to set the max reswizzle attempts.
+     * This is a no-op on Android since the OkHttp integration
+     * does not rely on method swizzling or +load races.
+     *
+     * @param attempts the maximum number of recovery attempts.
+     */
+    @ReactMethod
+    public void setMaxReswizzleAttempts(Integer attempts) {
+        log(LOG_DEBUG, TAG, "setMaxReswizzleAttempts: no-op on Android");
+    }
+
+    /**
+     * iOS-specific method to get the max reswizzle attempts.
+     * Always returns 0 on Android since swizzling is not used.
+     *
+     * @param promise promise to be fulfilled with 0
+     */
+    @ReactMethod
+    public void getMaxReswizzleAttempts(Promise promise) {
+        promise.resolve(0);
+    }
+
+    /**
      * Exposes the native Approov logging facility to Javascript.
      * 
      * @param message the string message to log natively

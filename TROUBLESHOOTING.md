@@ -52,8 +52,48 @@ During development, ensure `ApproovService.setLogLevel(ApproovService.Log.DEBUG)
 *   **SUCCESS (What you want to see)**: When an API request is made, look for logs from `ApproovPinningDelegate`. You should see successful pinning checks.
 *   **WARNING (What to look out for)**: If a custom network module is bypassing Approov, you will see a warning like: `SKIPPING session creation with <CustomDelegateClassName> delegate (not in interception policy)`. If you see this, and you *want* that traffic protected, you must explicitly add it using `ApproovService.addAllowedDelegate("<CustomDelegateClassName>")` before initialization.
 
-## 2. Using Diagnostics in Development
-It is highly recommended to integrate `ApproovService.getPinningDiagnostics()` during your development and QA phases. Add an alert or visual indicator in your staging builds if `isInterceptorPresent` is false or if `sessionsWithoutPinning` is unexpectedly high. This allows you to immediately identify conflicting SDKs as soon as they are added to the project.
+## 2. Developer Workflow: Verifying Integration & Resolving Conflicts
+
+When integrating Approov into a complex app already containing Analytics, Observability, or Performance SDKs, you must verify that none of those pre-existing SDKs are silently bypassing Approov. 
+
+We highly recommend building a temporary "Networking Health Check" into your application's startup sequence during development. This guarantees your iOS delegates and Android OkHttp factories are properly hooked before you release to production.
+
+Here is the step-by-step workflow to verify your integration and fix any conflicts you find:
+
+### Step 1: Run the Native Diagnostics
+Immediately after calling `ApproovService.initialize()`, execute the diagnostics check and log the output:
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+const status = await ApproovService.getPinningDiagnostics();
+console.log("Approov Native Networking Status:", JSON.stringify(status, null, 2));
+```
+
+### Step 2: Diagnose & Fix Android Overrides
+Look at the Android output from the diagnostics check:
+* **SUCCESS:** If `isInterceptorPresent: true` and `isPinnerPresent: true`, your Android integration is perfect. Approov tokens and certificate pins are actively protecting the global `fetch()` client.
+* **FAILURE:** If `isInterceptorPresent: false`, another Android SDK (e.g., Firebase, Datadog) has overwritten the React Native networking factory and severed Approov's hooks.
+* **THE FIX:** You must tell Approov to "heal" the factory. Wait for the conflicting SDK to finish initializing, and then execute:
+  ```javascript
+  // Re-injects Approov on top of the foreign SDK's modifications
+  await ApproovService.updateClientFactory(true); 
+  ```
+
+### Step 3: Diagnose & Fix iOS Custom Delegates
+Look at the iOS console logs (via Xcode or the Mac Console App) while your app makes network requests.
+* **SUCCESS:** You see logs from `ApproovPinningDelegate` confirming that the connection to your API domain is being secured and tokenized. If `status.sessionsWithPinning` is greater than `0`, the React Native hooks are active.
+* **FAILURE:** You see an explicit console warning: `SKIPPING session creation with <SomeThirdPartyDelegate> (not in interception policy)`. This means a native module inside your app is bypassing the standard React Native networking stack and using its own custom session.
+* **THE FIX:** If you *want* that specific traffic protected by Approov, you must explicitly whitelist that custom delegate class name *before* calling initialize:
+  ```javascript
+  // Tells the iOS hook it is safe to intercept this 3rd party session
+  ApproovService.addAllowedDelegate("SomeThirdPartyDelegate");
+  await ApproovService.initialize("<config>");
+  ```
+
+### Step 4: The Fallback (`fetchWithApproov`)
+If you have applied the fixes above, but highly aggressive 3rd party SDKs are still somehow mutating global traffic or actively stripping the `Approov-Token` header downstream, you can abandon global interception for specific, high-security endpoints. 
+
+Simply replace `fetch('https://api.mybank.com/transfer')` with `ApproovService.fetchWithApproov('https://api.mybank.com/transfer')`. This routes the payload through completely isolated, natively built OkHttp/NSURLSession instances that are entirely immune to global swizzling or factory overrides.
 
 ## 3. Practical Guide: Testing the Integration
 The ultimate test of the Approov integration is ensuring that certificate pinning blocks invalid connections. 

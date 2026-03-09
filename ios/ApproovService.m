@@ -1203,6 +1203,14 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
                      withAction:ApproovInterceptorActionRetry
                     withMessage:[Approov
                                     stringFromApproovTokenFetchStatus:status]];
+        } else if (status == ApproovTokenFetchStatusNoApproovService) {
+          // Default behavior for NO_APPROOV_SERVICE is to proceed without an
+          // Approov token unless a custom mutator chooses otherwise.
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionProceed
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
         } else {
           return [ApproovInterceptorResult
               createWithRequest:updatedRequest
@@ -1251,8 +1259,7 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     if (traceIDHeader != nil && traceID != nil && traceID.length > 0) {
       [updatedRequest setValue:traceID forHTTPHeaderField:traceIDHeader];
     }
-  } else if ((status != ApproovTokenFetchStatusNoApproovService) &&
-             (status != ApproovTokenFetchStatusUnknownURL) &&
+  } else if ((status != ApproovTokenFetchStatusUnknownURL) &&
              (status != ApproovTokenFetchStatusUnprotectedURL)) {
     // We are proceeding (allowed by mutator) with a failure status.
     // Add the status string to the Approov token header if

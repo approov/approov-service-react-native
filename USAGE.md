@@ -16,7 +16,7 @@ If you are using the `<ApproovProvider>` wrapper at the root of your app, the pr
 ```javascript
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { useApproov } from '@approov/react-native-approov';
+import { useApproov } from '@approov/approov-service-react-native';
 
 const MainScreen = () => {
   // Extract the async initialization state
@@ -43,7 +43,7 @@ const MainScreen = () => {
 If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
 
 ```javascript
-import { ApproovService } from '@approov/react-native-approov';
+import { ApproovService } from '@approov/approov-service-react-native';
 
 async function bootstrapAppAndFetch() {
   try {

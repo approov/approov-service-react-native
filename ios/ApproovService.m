@@ -1195,6 +1195,23 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
 
       // If mutator returned false, block the request as appropriate
       if (!shouldProceed) {
+        // If the mutator provided an explicit error, honor it rather than
+        // falling back to default status handling.
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = ApproovInterceptorActionFail;
+          if ([errorType isEqualToString:@"network"]) {
+            action = ApproovInterceptorActionRetry;
+          }
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+
         if (status == ApproovTokenFetchStatusNoNetwork ||
             status == ApproovTokenFetchStatusPoorNetwork ||
             status == ApproovTokenFetchStatusMITMDetected) {

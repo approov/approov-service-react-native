@@ -1301,7 +1301,7 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
   // we now deal with any header substitutions, which may require further
   // fetches but these should be using cached results
   for (NSString *header in subsHeaders) {
-    NSString *prefix = [substitutionHeaders objectForKey:header];
+    NSString *prefix = subsHeaders[header];
     NSString *value = [request valueForHTTPHeaderField:header];
     if ((value != nil) && (prefix != nil) && (value.length > prefix.length) &&
         (([prefix length] == 0) || [value hasPrefix:prefix])) {

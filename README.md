@@ -16,7 +16,7 @@ Add the Approov service layer to your existing App with the following command:
 npm install @approov/approov-service-react-native
 ```
 
-Note if you experience an error related to peer dependencies, then you can append the `--force` to install with your particular React Native version. The plugin supports version 0.75 or above.
+Note if you experience an error related to peer dependencies, then you can append the `--force` to install with your particular React Native version. The plugin supports version 0.76 or above.
 
 If you are installing into an Expo project then use:
 

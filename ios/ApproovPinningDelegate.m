@@ -41,7 +41,7 @@
 @property ApproovService *approovService;
 
 // the original delegate to which non-authentication calls are passed
-@property id<NSURLSessionDataDelegate> originalDelegate;
+@property(nullable) id<NSURLSessionDataDelegate> originalDelegate;
 
 @end
 
@@ -53,7 +53,7 @@
  * @param approovService is the ApproovService that will provide the pinning
  * information
  */
-+ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate>)delegate
++ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
                     approovService:(ApproovService *)approovService {
   return [[self alloc] initWithDelegate:delegate approovService:approovService];
 }
@@ -65,7 +65,7 @@
  * @param approovService is the ApproovService that will provide the pinning
  * information
  */
-- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
+- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
                   approovService:(ApproovService *)approovService {
   self = [super init];
   if (self) {

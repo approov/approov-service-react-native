@@ -1827,12 +1827,27 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
  * @param level   the integer log level (e.g., ApproovLogLevelInfo)
  */
 RCT_EXPORT_METHOD(logMessage : (NSString *)message level : (NSInteger)level) {
-  ApproovLogLevel logLevel = (ApproovLogLevel)level;
-  if (logLevel < ApproovLogLevelExtreme || logLevel > ApproovLogLevelNone) {
-    logLevel = ApproovLogLevelInfo;
+  NSString *msg = message ? message : @"null";
+  switch (level) {
+  case APPROOV_EXTREME:
+    ApproovLogX(@"JS: %@", msg);
+    break;
+  case APPROOV_DEBUG:
+    ApproovLogD(@"JS: %@", msg);
+    break;
+  case APPROOV_INFO:
+    ApproovLogI(@"JS: %@", msg);
+    break;
+  case APPROOV_WARN:
+    ApproovLogW(@"JS: %@", msg);
+    break;
+  case APPROOV_ERROR:
+    ApproovLogE(@"JS: %@", msg);
+    break;
+  default:
+    ApproovLogI(@"JS: %@", msg);
+    break;
   }
-
-  ApproovLogI(logLevel, @"JS: %@", message ? message : @"null");
 }
 
 @end

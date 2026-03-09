@@ -45,6 +45,13 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param mode 0=AllowList (default), 1=DenyList, 2=All
 + (void)setInterceptionMode:(NSInteger)mode;
 
+/// Sets the maximum number of times swizzle recovery can be attempted.
+/// @param attempts maximum attempts (must be >= 0)
++ (void)setMaxReswizzleAttempts:(NSInteger)attempts;
+
+/// Gets the configured maximum swizzle recovery attempts.
++ (NSInteger)maxReswizzleAttempts;
+
 /// Adds a delegate pattern to the allow list
 /// @param delegatePattern delegate class name or pattern (use * for wildcard)
 + (void)addAllowedDelegate:(NSString *)delegatePattern;

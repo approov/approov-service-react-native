@@ -80,7 +80,17 @@ export declare class ApproovService {
   }>;
   static updateClientFactory(wrapExisting: boolean): Promise<boolean>;
 }
-import { ApproovProvider } from "./approov-provider";
-import { ApproovMonitor } from "./approov-monitor";
-import { useApproov } from "./approov-provider";
-export { ApproovProvider, ApproovMonitor, useApproov };
+export interface ApproovProviderProps {
+  config: string;
+  onInit?: () => void | Promise<void>;
+  children?: React.ReactNode;
+}
+
+export declare const ApproovProvider: React.FC<ApproovProviderProps>;
+
+export declare function useApproov(): {
+  approovReady: boolean;
+  approovError: any;
+};
+
+export { ApproovMonitor };

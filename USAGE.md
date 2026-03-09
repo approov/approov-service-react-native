@@ -114,7 +114,7 @@ To enable this feature:
 ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
-When enabled, if the Approov token fetch fails or returns an empty token, the `Approov-Token` header will be populated with the status string (with the configured prefix) instead of being left empty.
+When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
 
 ## Using `fetchWithApproov` (Alternative to Swizzling)
 

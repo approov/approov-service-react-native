@@ -17,10 +17,16 @@ import Approov
     @objc public func processRequest(_ request: NSMutableURLRequest, tokenHeader: String?, traceIDHeader: String?) {
         let urlRequest = request as URLRequest
         let changes = ApproovRequestMutations()
-        if let th = tokenHeader {
+        if let th = tokenHeader,
+           let tokenValue = request.value(forHTTPHeaderField: th),
+           !tokenValue.isEmpty {
+            // Only sign token header when the request actually carries one.
             changes.setTokenHeaderKey(th)
         }
-        if let traceTh = traceIDHeader {
+        if let traceTh = traceIDHeader,
+           let traceValue = request.value(forHTTPHeaderField: traceTh),
+           !traceValue.isEmpty {
+            // Avoid requiring a trace component when the trace header is absent.
             changes.setTraceIDHeaderKey(traceTh)
         }
         

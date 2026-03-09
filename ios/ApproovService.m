@@ -281,12 +281,12 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * @return NSDictionary* to provide in an NSError
  */
 - (NSDictionary<NSErrorUserInfoKey, id> *)
-    rejectionUserInfo:(NSString *)
-         rejectionARC:(NSString *)rejectionReasons {
+    rejectionUserInfo:(NSString *)rejectionARC
+     rejectionReasons:(NSString *)rejectionReasons {
   NSMutableDictionary<NSErrorUserInfoKey, id> *error =
       [[NSMutableDictionary alloc] init];
   error[@"type"] = @"rejection";
-  error[@"rejectonARC"] = rejectionARC;
+  error[@"rejectionARC"] = rejectionARC;
   error[@"rejectionReasons"] = rejectionReasons;
   return error;
 }
@@ -719,7 +719,11 @@ RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
               [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];
@@ -902,7 +906,11 @@ RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
                     [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];
@@ -959,7 +967,11 @@ RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
                     [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];

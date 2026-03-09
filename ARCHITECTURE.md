@@ -98,7 +98,7 @@ Despite our robust hooking mechanisms, highly aggressive third-party SDKs might 
 To provide a guaranteed, conflict-free path for sensitive requests, we introduced the **`fetchWithApproov` API**.
 
 ### How it Fits as an Alternative
-`ApproovService.fetchWithApproov` is a JavaScript drop-in replacement for the standard `fetch()` API. Instead of routing through React Native's global `NetworkingModule` (which is subject to swizzling and OkHttp factory overrides), it bridges directly to isolated, natively protected HTTP clients:
+`ApproovService.fetchWithApproov` is a secure `fetch()`-compatible API for sensitive calls. Instead of routing through React Native's global `NetworkingModule` (which is subject to swizzling and OkHttp factory overrides), it bridges directly to isolated, natively protected HTTP clients:
 - On Android, it builds and utilizes an independent `OkHttpClient` configured directly with the native iOS `ApproovClientBuilder`.
 - On iOS, it uses a standalone `NSURLSession` with its own dedicated pinning delegate.
 
@@ -109,6 +109,7 @@ Because `fetchWithApproov` bypasses the core React Native networking bridge even
 - **No `FormData` Streaming:** It does not support streaming or uploading multipart `FormData` (e.g. uploading large images via URIs).
 - **No Binary `Blob` Support:** It cannot handle binary `Blob` or `ArrayBuffer` bodies natively; everything must be stringified or base64 encoded by the caller.
 - **No Request Cancellation:** It does not support the `AbortController` API to cancel inflight requests.
+- **No React Native Networking Event Model:** Features tied to RN `NetworkingModule`/`XMLHttpRequest` events (such as progress callbacks) are not available.
 - **Memory Buffering Constraints:** Large responses are buffered entirely in memory before crossing the React Native bridge, rather than streaming in chunks.
 
 As a result, `fetchWithApproov` is specifically designed for standard JSON / Text REST API payloads where guaranteed security is paramount, serving as a reliable fallback when global interception is untenable in complex app environments.

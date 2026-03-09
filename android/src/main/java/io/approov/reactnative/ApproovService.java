@@ -1615,6 +1615,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 if (options != null && options.hasKey("body")) {
                     String bodyString = options.getString("body");
                     requestBody = okhttp3.RequestBody.create(null, bodyString);
+                } else if (method.equalsIgnoreCase("POST") || method.equalsIgnoreCase("PUT") || 
+                           method.equalsIgnoreCase("PATCH") || method.equalsIgnoreCase("PROPPATCH")) {
+                    // OkHttp requires a non-null body for these methods
+                    requestBody = okhttp3.RequestBody.create(null, new byte[0]);
                 }
                 
                 // Add headers if provided

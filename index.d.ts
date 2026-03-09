@@ -72,8 +72,7 @@ export declare class ApproovService {
     sessionsWithPinning?: number;
     sessionsWithoutPinning?: number;
     unpinnedSessions?: Array<{
-      sessionId?: string;      // Legacy/Alias
-      sessionPointer?: string;  // iOS native pointer
+      sessionPointer?: string;
       delegateClassName?: string;
       requestCount: number;
     }>;

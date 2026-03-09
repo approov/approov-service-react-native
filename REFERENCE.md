@@ -322,7 +322,7 @@ This function returns a `Promise` resolving to an object with the following stru
 * `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
 * `sessionsWithPinning` (number): (iOS only) The number of `NSURLSession` instances currently protected by Approov pinning.
 * `sessionsWithoutPinning` (number): (iOS only) The number of `NSURLSession` instances currently active without Approov pinning.
-* `unpinnedSessions` (Array<{ sessionId: string; requestCount: number }>): (iOS only) Details of active sessions not currently intercepted.
+* `unpinnedSessions` (Array<{ sessionPointer: string; delegateClassName: string; requestCount: number }>): (iOS only) Details of sessions not intercepted (likely due to missing delegates).
 
 ## updateClientFactory
 Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.

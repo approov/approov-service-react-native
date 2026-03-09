@@ -58,9 +58,25 @@ export declare class ApproovService {
   static getLastARC(): Promise<String>;
   static setInstallAttrsInToken(attrs: string): Promise<void>;
   static getPinningDiagnostics(): Promise<{
-    sessionsWithPinning: number;
-    sessionsWithoutPinning: number;
-    unpinnedSessions: Array<{ sessionId: string; requestCount: number }>;
+    // Android specific
+    isInterceptorPresent?: boolean;
+    isPinnerPresent?: boolean;
+    interceptors?: string[];
+
+    // iOS specific
+    totalAuthChallenges?: number;
+    totalPinned?: number;
+    totalBlocked?: number;
+
+    // Joint or Platform-equivalent
+    sessionsWithPinning?: number;
+    sessionsWithoutPinning?: number;
+    unpinnedSessions?: Array<{
+      sessionId?: string;      // Legacy/Alias
+      sessionPointer?: string;  // iOS native pointer
+      delegateClassName?: string;
+      requestCount: number;
+    }>;
   }>;
   static updateClientFactory(wrapExisting: boolean): Promise<boolean>;
 }

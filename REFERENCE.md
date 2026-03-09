@@ -61,13 +61,13 @@ ApproovService.setLogLevel(level: number);
 The `level` should be one of the constants provided in `ApproovService.Log` (e.g., `ApproovService.Log.DEBUG`, `ApproovService.Log.INFO`, `ApproovService.Log.WARN`, `ApproovService.Log.ERROR`, `ApproovService.Log.EXTREME`, or `ApproovService.Log.NONE`).
 
 ## addAllowedDelegate
-Registers a custom `NSURLSessionDelegate` class name (or a regex pattern matching class names) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
+Registers a custom `NSURLSessionDelegate` class name (or a prefix pattern matching class names using a trailing `*`) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
 
 ```Javascript
 ApproovService.addAllowedDelegate(delegatePattern: string);
 ```
 
-* `delegatePattern` (string): The exact class name or a regular expression string matching the class name of the delegate you wish to intercept.
+* `delegatePattern` (string): The exact class name or a prefix string ending with `*` (e.g., `MySDK*`) matching the class name of the delegate you wish to intercept.
 
 This method only affects the iOS networking stack; it is a no-op on Android.
 

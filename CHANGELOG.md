@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 
-## [3.5.11]
+## [3.5.10]
 - **iOS Mutator Bridge Refinement**: Fixed a condition in the iOS mutator bridge where trace ID components were incorrectly required for signing even when the trace header was absent. Header mutation keys are now only set if the corresponding header is present and non-empty.
 - **Custom iOS Mutator Reliability**: Fixed an issue where custom iOS mutators could not reliably block requests during `NO_APPROOV_SERVICE` events. The native interceptor now correctly honors and propagates errors from the mutator bridge.
 - **Network-Risk Handling Standardized**: Refined the default mutator behavior on both Android and iOS to consistently block/retry for `NO_NETWORK`, `POOR_NETWORK`, and `MITM_DETECTED` statuses, independent of the `setUseApproovStatusIfNoToken` flag.
@@ -12,8 +12,6 @@ All notable changes to this project will be documented in this file.
 - **Android fetchWithApproov Fix**: Resolved an issue on Android where `fetchWithApproov` incorrectly handled POST/PUT request bodies in some scenarios.
 - **Simplified Cross-Platform API**: Added a no-op `addAllowedDelegate` method on Android to match the iOS bridge, ensuring JS-level calls are safe across both platforms.
 - **Documentation & Types Sync**: Synchronized `REFERENCE.md` and TypeScript definitions with actual native diagnostic payloads, improving accuracy for `getPinningDiagnostics`.
-
-- **Robust iOS Interception**: Refactored the iOS networking interceptor to leverage Objective-C `+load` method swizzling. This mathematically guarantees that Approov installs its `NSURLSession` hooks *before* the React Native JS Bridge finishes initializing, preventing any early network requests from missing protection.
 - **iOS Swizzle Auto-Recovery**: The iOS interceptor now actively monitors its hooks during execution. If a third-party SDK (like Datadog or New Relic) overwrites the Approov hooks at runtime, it will perform an auto-recovery by re-swizzling itself back to the top of the chain.
 - **Configurable Reswizzle Attempts**: Introduced `ApproovService.setMaxReswizzleAttempts(attempts)` and `ApproovService.getMaxReswizzleAttempts()` to allow developers to configure the number of times the iOS auto-recovery will trigger (defaults to 3).
 - **dataTaskWithURL Coverage**: Added swizzle interception for `dataTaskWithURL:` on iOS, ensuring that 3rd party native React Native modules (like image downloaders or video players) that bypass the standard `NSMutableURLRequest` flow are still funneled through the Approov core.

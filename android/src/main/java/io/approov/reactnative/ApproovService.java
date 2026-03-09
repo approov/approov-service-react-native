@@ -779,6 +779,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * iOS-specific delegate allow-list API.
+     * No-op on Android to keep the JS API surface cross-platform safe.
+     *
+     * @param delegatePattern the delegate class name pattern
+     */
+    @ReactMethod
+    public void addAllowedDelegate(String delegatePattern) {
+        log(LOG_DEBUG, TAG, "addAllowedDelegate: no-op on Android (" + delegatePattern + ")");
+    }
+
+    /**
      * Determines if requests should proceed on a network fail or not.
      * 
      * @return true if logging should be suppressed for unknown (and excluded) URLs.

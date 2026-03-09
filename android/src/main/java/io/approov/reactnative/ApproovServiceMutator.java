@@ -225,8 +225,6 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                if (service.getUseApproovStatusIfNoToken())
-                    return true;
                 throw new ApproovNetworkException(status,
                         "Approov token fetch for " + url + ": " + status.toString());
             case NO_APPROOV_SERVICE:

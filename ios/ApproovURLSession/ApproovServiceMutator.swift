@@ -209,9 +209,6 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
-            if ApproovService.sharedUseApproovStatusIfNoToken() {
-                return true
-            }
             return false
         case .noApproovService:
             if ApproovService.sharedUseApproovStatusIfNoToken() {

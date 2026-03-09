@@ -1615,9 +1615,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 if (options != null && options.hasKey("body")) {
                     String bodyString = options.getString("body");
                     requestBody = okhttp3.RequestBody.create(null, bodyString);
-                } else if (method.equalsIgnoreCase("POST") || method.equalsIgnoreCase("PUT") || 
-                           method.equalsIgnoreCase("PATCH") || method.equalsIgnoreCase("PROPPATCH")) {
-                    // OkHttp requires a non-null body for these methods
+                }
+                
+                // If the user has omitted a body, but the method is one that OkHttp requires 
+                // a body for (like POST/PUT/etc), we must provide an empty body instead of null
+                // to avoid an IllegalArgumentException. This does NOT clear existing content
+                // because it only runs if requestBody is still null.
+                if (requestBody == null && (method.equalsIgnoreCase("POST") || 
+                                           method.equalsIgnoreCase("PUT") || 
+                                           method.equalsIgnoreCase("PATCH") || 
+                                           method.equalsIgnoreCase("PROPPATCH"))) {
                     requestBody = okhttp3.RequestBody.create(null, new byte[0]);
                 }
                 

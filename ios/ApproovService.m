@@ -1731,8 +1731,22 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
 
         // 3. Add ALL Approov protections (Token, Signature, TraceIDs, Headers)
         ApproovInterceptorResult *result = [self interceptRequest:request];
-        if (result.action == ApproovInterceptorActionFail) {
-          reject(@"approov_error", result.message, nil);
+        switch (result.action) {
+        case ApproovInterceptorActionProceed:
+          break;
+        case ApproovInterceptorActionRetry:
+          // Mirror swizzled behavior and avoid sending any outbound request.
+          resolve(@{
+            @"status" : @503,
+            @"headers" : @{},
+            @"body" : result.message ?: @"Approov retry"
+          });
+          return;
+        case ApproovInterceptorActionFail:
+        default:
+          reject(@"approov_error",
+                 result.message ?: @"Approov request blocked by interceptor",
+                 nil);
           return;
         }
 

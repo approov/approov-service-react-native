@@ -1750,6 +1750,14 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
           return;
         }
 
+        // Apply mutator post-processing (e.g. message signing) to mirror the
+        // swizzled interception pipeline.
+        NSMutableURLRequest *finalRequest = [result.request mutableCopy];
+        [[ApproovServiceMutatorBridge shared]
+            processRequest:finalRequest
+               tokenHeader:[ApproovService sharedTokenHeader]
+             traceIDHeader:[ApproovService sharedTraceIDHeader]];
+
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate
         PinningURLSessionDelegate *pinningDelegate =
@@ -1763,7 +1771,7 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
 
         // 5. Execute the highly protected request natively
         NSURLSessionDataTask *task = [session
-            dataTaskWithRequest:result.request
+            dataTaskWithRequest:finalRequest
               completionHandler:^(NSData *data, NSURLResponse *response,
                                   NSError *error) {
                 if (error) {

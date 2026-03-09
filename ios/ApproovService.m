@@ -96,13 +96,13 @@ static NSString *const ConfigExtension = @"config";
 static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
 
 // lock object used during initialization
-id initializerLock = nil;
+static id initializerLock = nil;
 
 // keeps track of whether Approov is initialized
 BOOL isInitialized = NO;
 
 // lock object used for synchronizing the earliestNetworkRequestTime
-id earliestNetworkRequestTimeLock = nil;
+static id earliestNetworkRequestTimeLock = nil;
 
 // the earliest time that any network request will be allowed to avoid any
 // potential race conditions with Approov protected API calls being made before
@@ -185,6 +185,16 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
     }
   }
   return nil;
+}
+
+/**
+ * Class initialization called once.
+ */
++ (void)initialize {
+  if (self == [ApproovService class]) {
+    initializerLock = [NSObject new];
+    earliestNetworkRequestTimeLock = [NSObject new];
+  }
 }
 
 /**

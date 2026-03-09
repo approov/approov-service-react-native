@@ -1,5 +1,13 @@
 export declare class ApproovService {
   static initialize(config: string): Promise<void>;
+  /**
+   * Secure fetch-compatible API for sensitive requests.
+   *
+   * Note: this is a subset of full React Native fetch/NetworkingModule behavior.
+   * Use string bodies (JSON/text). Multipart FormData uploads, Blob/ArrayBuffer
+   * request bodies, AbortController cancellation, and RN progress/event hooks are
+   * not supported.
+   */
   static fetchWithApproov(input: string | Request, init?: RequestInit): Promise<Response>;
   /**
    * @deprecated This function is a no-op and has no effect.

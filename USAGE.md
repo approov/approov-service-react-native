@@ -122,7 +122,7 @@ By default, the `@approov/approov-service-react-native` package uses **swizzling
 
 However, in some complex applications, other observability SDKs (like New Relic, Datadog, or Firebase) might aggressively hook into the same networking layer in a way that conflicts with or bypasses Approov's security checks.
 
-If you encounter such conflicts, you can use the `ApproovService.fetchWithApproov` API. This is a JavaScript drop-in replacement that mimics the standard `fetch` API, but executes natively on isolated, protected HTTP clients that cannot be interfered with by other React Native modules.
+If you encounter such conflicts, you can use the `ApproovService.fetchWithApproov` API. It is a secure `fetch`-compatible API for sensitive calls, executed natively on isolated, protected HTTP clients that cannot be interfered with by other React Native modules.
 
 ```javascript
 import { ApproovService } from '@approov/approov-service-react-native';
@@ -140,11 +140,14 @@ const data = await response.json();
 ```
 
 ### Limitations of `fetchWithApproov`
-The `fetchWithApproov` wrapper is designed for standard JSON and Text API payloads. Because it uses an isolated backend rather than React Native's complex `NetworkingModule` bridged events, it does not support:
-- `FormData` streaming (e.g. uploading large images via URI)
-- `Blob` or `ArrayBuffer` bodies
+The `fetchWithApproov` wrapper is designed for standard JSON and text API payloads. Because it bypasses React Native's full `NetworkingModule` stack, it does not support:
+- Multipart form uploads (`FormData`, including file/URI-backed form parts)
+- Binary request bodies (`Blob` or `ArrayBuffer`)
 - Request cancellation via `AbortController`
-- Streaming enormous files (the entire response is buffered into memory).
+- React Native networking event model features (such as upload/download progress hooks)
+- Streaming enormous files (the entire response is buffered into memory)
+
+In practice, pass string bodies (`JSON.stringify(...)` or plain text) and use this API for security-critical REST calls rather than complex form/file transfer flows.
 
 For critical security and authentication calls, `fetchWithApproov` provides guaranteed protection.
 

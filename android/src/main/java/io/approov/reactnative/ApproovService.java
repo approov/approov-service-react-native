@@ -1558,10 +1558,15 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // if we are wrapping the existing client then we use it as the basis for the
             // new one
             OkHttpClient.Builder builder;
-            if (wrapExisting)
+            if (wrapExisting) {
                 builder = currentClient.newBuilder();
-            else
+                // OkHttp's newBuilder() clones the interceptor list, so remove any
+                // previously-added ApproovInterceptors to avoid stacking duplicate
+                // token-fetching and signature-generation on repeated recovery calls.
+                builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
+            } else {
                 builder = new OkHttpClient.Builder();
+            }
 
             // add the Approov protection to the builder
             ApproovClientBuilder approovBuilder;

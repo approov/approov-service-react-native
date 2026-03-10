@@ -33,6 +33,17 @@ import Approov
         do {
             let processedRequest = try serviceMutator.handleInterceptorProcessedRequest(urlRequest, changes: changes)
             
+            // Copy back all mutations from the processed request, not just headers.
+            // Custom mutators may modify URL, method, body, or timeout in addition
+            // to adding signature headers.
+            if let url = processedRequest.url {
+                request.url = url
+            }
+            if let method = processedRequest.httpMethod {
+                request.httpMethod = method
+            }
+            request.httpBody = processedRequest.httpBody
+            request.timeoutInterval = processedRequest.timeoutInterval
             if let allHeaders = processedRequest.allHTTPHeaderFields {
                 for (header, value) in allHeaders {
                     request.setValue(value, forHTTPHeaderField: header)

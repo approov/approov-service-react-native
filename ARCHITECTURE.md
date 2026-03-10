@@ -99,7 +99,7 @@ To provide a guaranteed, conflict-free path for sensitive requests, we introduce
 
 ### How it Fits as an Alternative
 `ApproovService.fetchWithApproov` is a secure `fetch()`-compatible API for sensitive calls. Instead of routing through React Native's global `NetworkingModule` (which is subject to swizzling and OkHttp factory overrides), it bridges directly to isolated, natively protected HTTP clients:
-- On Android, it builds and utilizes an independent `OkHttpClient` configured directly with the native iOS `ApproovClientBuilder`.
+- On Android, it builds and utilizes an independent `OkHttpClient` configured directly with the `ApproovClientBuilder`.
 - On iOS, it uses a standalone `NSURLSession` with its own dedicated pinning delegate.
 
 By completely bypassing the shared React Native networking stack, these isolated clients are immune to the global swizzling or factory overrides applied by other SDKs. For critical authentication or transaction endpoints, `fetchWithApproov` ensures 100% protection reliability.

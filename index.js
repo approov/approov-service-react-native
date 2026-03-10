@@ -81,7 +81,7 @@ const ApproovService = new Proxy(NativeApproovService || {}, {
                 let options = { ...init };
 
                 // Handle if the first argument is a Request object
-                if (typeof input === 'object' && input instanceof Request) {
+                if (typeof Request !== 'undefined' && typeof input === 'object' && input instanceof Request) {
                     url = input.url;
                     options.method = options.method || input.method;
 

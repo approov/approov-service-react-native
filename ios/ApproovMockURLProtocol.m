@@ -141,7 +141,7 @@
     queryStrings[key] = value;
   }
 
-  // extract code and msg values
+  // extract code value
   NSInteger code = [queryStrings[@"code"] intValue];
   // determine the response to be sent
   id<NSURLProtocolClient> client = [self client];

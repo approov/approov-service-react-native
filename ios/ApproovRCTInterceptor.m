@@ -1166,9 +1166,12 @@ static dispatch_once_t _onceToken = 0;
                   conflictingLib);
 
       // Attempt auto re-swizzle recovery
-      NSUInteger attempts = [_reswizzleAttempts[key] unsignedIntegerValue];
+      NSUInteger attempts = 0;
+      [_impTrackingLock lock];
+      attempts = [_reswizzleAttempts[key] unsignedIntegerValue];
       if (attempts < maxAttempts) {
         _reswizzleAttempts[key] = @(attempts + 1);
+        [_impTrackingLock unlock];
         ApproovLogE(@"IMP RECOVERY: re-swizzling %@ (attempt %lu of %lu)", key,
                     (unsigned long)(attempts + 1), (unsigned long)maxAttempts);
 
@@ -1184,6 +1187,7 @@ static dispatch_once_t _onceToken = 0;
           [self recordIMPForClass:cls selector:sel];
         }
       } else {
+        [_impTrackingLock unlock];
         ApproovLogE(@"IMP RECOVERY EXHAUSTED: %@ has been re-swizzled %lu "
                     @"times — giving up. Conflicting SDK: %@ (%@). "
                     @"Customer must disable network instrumentation in %@",

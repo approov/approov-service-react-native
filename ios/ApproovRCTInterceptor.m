@@ -1220,29 +1220,34 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request]);
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request]);
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request);
         }),
         0, NULL);
   } else if (sel == @selector(dataTaskWithRequest:completionHandler:)) {
@@ -1256,29 +1261,34 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request], completionHandler);
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request], completionHandler);
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request, completionHandler);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request, completionHandler);
         }),
         0, NULL);
   } else if (sel == @selector(dataTaskWithURL:)) {
@@ -1288,30 +1298,35 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      url);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            NSURLRequest *request = [NSURLRequest requestWithURL:url];
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result.request URL]);
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, url);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              NSURLRequest *request = [NSURLRequest requestWithURL:url];
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result.request URL]);
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(url);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(url);
         }),
         0, NULL);
   } else if (sel == @selector(dataTaskWithURL:completionHandler:)) {
@@ -1325,30 +1340,35 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      url);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            NSURLRequest *request = [NSURLRequest requestWithURL:url];
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result.request URL], completionHandler);
-            return [ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, url);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              NSURLRequest *request = [NSURLRequest requestWithURL:url];
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result.request URL], completionHandler);
+              return [ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(url, completionHandler);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(url, completionHandler);
         }),
         0, NULL);
 
@@ -1363,29 +1383,34 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request], bodyData);
-            return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request], bodyData);
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request, bodyData);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request, bodyData);
         }),
         0, NULL);
   } else if (sel == @selector(uploadTaskWithRequest:
@@ -1401,30 +1426,35 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request], bodyData,
-                                      completionHandler);
-            return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request], bodyData,
+                                        completionHandler);
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request, bodyData, completionHandler);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request, bodyData, completionHandler);
         }),
         0, NULL);
   } else if (sel == @selector(uploadTaskWithRequest:fromFile:)) {
@@ -1435,29 +1465,34 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request], fileURL);
-            return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request], fileURL);
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request, fileURL);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request, fileURL);
         }),
         0, NULL);
   } else if (sel == @selector(uploadTaskWithRequest:
@@ -1472,30 +1507,35 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request], fileURL,
-                                      completionHandler);
-            return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request], fileURL,
+                                        completionHandler);
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request, fileURL, completionHandler);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request, fileURL, completionHandler);
         }),
         0, NULL);
   } else if (sel == @selector(uploadTaskWithStreamedRequest:)) {
@@ -1505,29 +1545,34 @@ static dispatch_once_t _onceToken = 0;
           // Set recovery flag so original blocks skip double interception
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
-          ApproovLogI(@"observed %@ for session %p %@ [recovered]", label, self,
-                      request.URL);
-          __block SessionMetadata *metadata = nil;
-          dispatch_sync(interceptor->_sessionRegistryQueue, ^{
-            metadata = [interceptor->_pinnedSessions objectForKey:self];
-          });
-          if (metadata != nil) {
-            ApproovInterceptorResult *result =
-                [interceptor prepareInterceptedResultForTaskType:label
-                                                         session:self
-                                                        metadata:metadata
-                                                         request:request];
-            if ([result action] == ApproovInterceptorActionProceed)
-              return RSSWCallOriginal([result request]);
-            return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                createMockTaskForSession:self
-                          withStatusCode:([result action] ==
-                                          ApproovInterceptorActionRetry)
-                                             ? 503
-                                             : 499
-                             withMessage:[result message]];
+          @try {
+            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+                        self, request.URL);
+            __block SessionMetadata *metadata = nil;
+            dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+              metadata = [interceptor->_pinnedSessions objectForKey:self];
+            });
+            if (metadata != nil) {
+              ApproovInterceptorResult *result =
+                  [interceptor prepareInterceptedResultForTaskType:label
+                                                           session:self
+                                                          metadata:metadata
+                                                           request:request];
+              if ([result action] == ApproovInterceptorActionProceed)
+                return RSSWCallOriginal([result request]);
+              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
+                  createMockTaskForSession:self
+                            withStatusCode:([result action] ==
+                                            ApproovInterceptorActionRetry)
+                                               ? 503
+                                               : 499
+                               withMessage:[result message]];
+            }
+            return RSSWCallOriginal(request);
+          } @finally {
+            [NSThread.currentThread.threadDictionary
+                removeObjectForKey:kApproovRecoveryActiveKey];
           }
-          return RSSWCallOriginal(request);
         }),
         0, NULL);
   } else {

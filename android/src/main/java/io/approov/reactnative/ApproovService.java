@@ -1666,26 +1666,27 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
 
-                // 3. Execute request safely
-                Response response = secureClient.newCall(request).execute();
-
-                // 4. Format the response for React Native
-                WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
-                responseMap.putInt("status", response.code());
-                
-                WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
-                for (String headerName : response.headers().names()) {
-                    responseHeaders.putString(headerName, response.header(headerName));
+                // 3. Execute request safely and always close the response to release
+                // the underlying connection.
+                try (Response response = secureClient.newCall(request).execute()) {
+                    // 4. Format the response for React Native
+                    WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
+                    responseMap.putInt("status", response.code());
+                    
+                    WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
+                    for (String headerName : response.headers().names()) {
+                        responseHeaders.putString(headerName, response.header(headerName));
+                    }
+                    responseMap.putMap("headers", responseHeaders);
+                    
+                    if (response.body() != null) {
+                        responseMap.putString("body", response.body().string());
+                    } else {
+                        responseMap.putString("body", "");
+                    }
+                    
+                    promise.resolve(responseMap);
                 }
-                responseMap.putMap("headers", responseHeaders);
-                
-                if (response.body() != null) {
-                    responseMap.putString("body", response.body().string());
-                } else {
-                    responseMap.putString("body", "");
-                }
-                
-                promise.resolve(responseMap);
                 
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "fetchWithApproov failed: " + e.getMessage());

@@ -1566,8 +1566,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // add the Approov protection to the builder
             ApproovClientBuilder approovBuilder;
             if (wrapExisting)
+                // long-lived builder: registers as PinChangeListener for dynamic pin updates
                 approovBuilder = new ApproovClientBuilder(this, null); // interceptors are already in the builder
             else
+                // long-lived builder: registers as PinChangeListener for dynamic pin updates
                 approovBuilder = new ApproovClientBuilder(this, null);
             approovBuilder.apply(builder);
 
@@ -1658,7 +1660,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
+                // ephemeral builder: skip PinChangeListener to avoid leaking references on every fetch
+                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
 

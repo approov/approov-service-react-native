@@ -42,6 +42,8 @@ import com.facebook.react.modules.network.OkHttpClientFactory;
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
 import okhttp3.CertificatePinner;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import com.criticalblue.approovsdk.Approov;
 

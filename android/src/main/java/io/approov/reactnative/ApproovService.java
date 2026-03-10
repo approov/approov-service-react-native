@@ -1569,13 +1569,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
             }
 
             // add the Approov protection to the builder
-            ApproovClientBuilder approovBuilder;
-            if (wrapExisting)
-                // long-lived builder: registers as PinChangeListener for dynamic pin updates
-                approovBuilder = new ApproovClientBuilder(this, null); // interceptors are already in the builder
-            else
-                // long-lived builder: registers as PinChangeListener for dynamic pin updates
-                approovBuilder = new ApproovClientBuilder(this, null);
+            // updateClientFactory builds a one-shot recovered client snapshot, so the
+            // builder should not register as a PinChangeListener.
+            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
             approovBuilder.apply(builder);
 
             // build the new client

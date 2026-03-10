@@ -33,22 +33,28 @@ import Approov
         do {
             let processedRequest = try serviceMutator.handleInterceptorProcessedRequest(urlRequest, changes: changes)
             
-            // Copy back all mutations from the processed request, not just headers.
-            // Custom mutators may modify URL, method, body, or timeout in addition
-            // to adding signature headers.
+            // Copy back the mutable URLRequest state so custom mutators can change
+            // request behavior, not just add or update headers.
             if let url = processedRequest.url {
                 request.url = url
+            }
+            request.cachePolicy = processedRequest.cachePolicy
+            request.mainDocumentURL = processedRequest.mainDocumentURL
+            request.networkServiceType = processedRequest.networkServiceType
+            request.allowsCellularAccess = processedRequest.allowsCellularAccess
+            request.httpShouldHandleCookies = processedRequest.httpShouldHandleCookies
+            request.httpShouldUsePipelining = processedRequest.httpShouldUsePipelining
+            if #available(iOS 13.0, *) {
+                request.allowsExpensiveNetworkAccess = processedRequest.allowsExpensiveNetworkAccess
+                request.allowsConstrainedNetworkAccess = processedRequest.allowsConstrainedNetworkAccess
             }
             if let method = processedRequest.httpMethod {
                 request.httpMethod = method
             }
             request.httpBody = processedRequest.httpBody
+            request.httpBodyStream = processedRequest.httpBodyStream
             request.timeoutInterval = processedRequest.timeoutInterval
-            if let allHeaders = processedRequest.allHTTPHeaderFields {
-                for (header, value) in allHeaders {
-                    request.setValue(value, forHTTPHeaderField: header)
-                }
-            }
+            request.allHTTPHeaderFields = processedRequest.allHTTPHeaderFields
         } catch {
             NSLog("[ApproovServiceMutatorBridge] Error processing request: %@", error.localizedDescription)
         }

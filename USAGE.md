@@ -4,9 +4,9 @@ This document describes the features and functionality of the Approov Service fo
 
 ## ⚠️ Critical: Initialization Timing & Network Requests
 
-The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic. 
+The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic.
 
-If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, the native interceptor will bypass that specific request without adding an Approov token or enforcing TLS pinning.
+If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the early `+load` swizzles may still observe session creation, but the request itself is not recoverable after it has left the device.
 
 To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
 
@@ -43,6 +43,7 @@ const MainScreen = () => {
 If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
 
 ```javascript
+import { Platform } from 'react-native';
 import { ApproovService } from '@approov/approov-service-react-native';
 
 async function bootstrapAppAndFetch() {
@@ -50,23 +51,73 @@ async function bootstrapAppAndFetch() {
     // 1. Wait for Approov to finish initializing its Native modules
     await ApproovService.initialize("<your-config-string>");
     
-    // 2. CRITICAL ON ANDROID: Verify the OkHttpClient hasn't been overwritten 
-    // by another third-party SDK before making your very first fetch request.
-    const status = await ApproovService.getPinningDiagnostics();
-    if (status && status.isInterceptorPresent === false) {
-      console.warn("Approov Interceptor is missing! Healing Android OkHttpClient...");
-      // Re-inject the protection onto the tampered client
+    // 2. Capture startup diagnostics metadata.
+    // On Android this is the pre-flight health check. On iOS this is a baseline.
+    const diagnostics = await ApproovService.getPinningDiagnostics();
+    console.log("Approov startup diagnostics:", diagnostics);
+
+    // 3. CRITICAL ON ANDROID: heal the shared OkHttpClient before the first request.
+    if (Platform.OS === "android" &&
+        diagnostics &&
+        (!diagnostics.isInterceptorPresent || !diagnostics.isPinnerPresent)) {
+      console.warn("Approov hooks are missing from the active OkHttpClient. Healing...");
       await ApproovService.updateClientFactory(true);
     }
     
-    // 3. Now it is 100% safe to fetch; the session is securely protected
+    // 4. Make the first protected request
     const response = await fetch("https://api.example.com/secure-data");
-    // ...
+
+    // 5. On iOS, inspect session metadata immediately after the first protected request.
+    const afterFirstRequest = await ApproovService.getPinningDiagnostics();
+    console.log("Approov post-request diagnostics:", afterFirstRequest);
   } catch (error) {
     console.error("Failed to initialize Approov", error);
   }
 }
 ```
+
+### Recommended Early Diagnostics Metadata Capture
+During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
+
+1. **Immediately after initialization and before the first protected request**
+2. **Immediately after the first protected request**
+
+This gives you visibility into two different failure classes:
+
+1. **Android factory override problems before the first request**
+2. **iOS session registration, delegate, and pinning-verification problems after the first request**
+
+```javascript
+import { Platform } from 'react-native';
+import { ApproovService } from '@approov/approov-service-react-native';
+
+async function captureApproovDiagnostics(stage) {
+  const diagnostics = await ApproovService.getPinningDiagnostics();
+  console.log(`[Approov ${stage}]`, JSON.stringify(diagnostics, null, 2));
+
+  if (Platform.OS === 'android' &&
+      (!diagnostics.isInterceptorPresent || !diagnostics.isPinnerPresent)) {
+    await ApproovService.updateClientFactory(true);
+  }
+
+  return diagnostics;
+}
+
+await ApproovService.initialize("<your-config-string>");
+await captureApproovDiagnostics("pre-first-fetch");
+
+await fetch("https://api.example.com/secure-data");
+
+await captureApproovDiagnostics("post-first-fetch");
+```
+
+Interpret the metadata as follows:
+
+* **Android:** `isInterceptorPresent` and `isPinnerPresent` must both be `true` before the first protected request. If not, another SDK likely replaced the shared `OkHttpClientFactory`.
+* **iOS:** a pre-request baseline with zero sessions is normal. The important signal is the metadata *after* the first protected request. If `sessionsWithoutPinning` is greater than `0`, then Approov observed requests on intercepted sessions but pinning was not verified for those sessions.
+* **iOS limitation:** `getPinningDiagnostics()` only knows about sessions that actually reached the Approov interceptor. A completely bypassed first request may still require inspection of native `ApproovService` logs for `IMP CONFLICT`, `SKIPPING session creation`, or `skipping ... unregistered session`.
+
+You should send this metadata to your observability platform during early adoption. It is one of the fastest ways to spot request mutation or pinning regressions introduced by new monitoring SDKs, networking wrappers, or startup ordering changes.
 
 ### Pre-Flight Native Network Health Check (Android)
 React Native heavily optimizes Android networking by using a single, globally shared `OkHttpClient`. If another observability or analytics SDK (e.g., Datadog, New Relic) initializes *after* Approov does, that SDK might programmatically overwrite the networking factory, completely stripping away the Approov protection without throwing an error.

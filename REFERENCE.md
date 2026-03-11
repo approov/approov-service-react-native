@@ -326,7 +326,7 @@ ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
 - Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts.
 
 ## getPinningDiagnostics
-Returns an object containing detailed diagnostics about the current state of certificate pinning and SDK interception. On Android, this specifically checks the `OkHttpClient` to ensure the `ApproovInterceptor` and `ApproovCertificatePinner` are active. On iOS, it provides statistics about the currently pinned and unpinned `NSURLSession` instances.
+Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
 
 ```Javascript
 ApproovService.getPinningDiagnostics();
@@ -342,6 +342,16 @@ This function returns a `Promise` resolving to an object with the following stru
 * `sessionsWithPinning` (number): (iOS only) The number of `NSURLSession` instances currently protected by Approov pinning.
 * `sessionsWithoutPinning` (number): (iOS only) The number of `NSURLSession` instances currently active without Approov pinning.
 * `unpinnedSessions` (Array<{ sessionPointer: string; delegateClassName: string; requestCount: number }>): (iOS only) Details of sessions where requests were observed but pinning was not verified.
+
+Recommended usage:
+
+* **Android:** call this immediately before the first protected request. If `isInterceptorPresent` or `isPinnerPresent` is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.
+* **iOS:** call this immediately after the first protected request and inspect `sessionsWithoutPinning` and `unpinnedSessions`.
+
+Important limitations:
+
+* On iOS, a pre-request baseline with zero sessions is normal.
+* On iOS, this method only reports on sessions that Approov successfully intercepted and registered. A completely bypassed request may not appear in this metadata and must be diagnosed from native logs.
 
 ## updateClientFactory
 Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.

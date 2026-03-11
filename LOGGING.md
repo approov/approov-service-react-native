@@ -82,6 +82,27 @@ Because the Approov SDK operates at the native network interception layer (often
 
 We **strongly recommend** ensuring that your native observability SDK is configured to capture and forward these system logs remotely. This provides critical visibility into the initialization and pinning process, allowing for faster diagnosis of issues that may occur in different production environments.
 
+We also recommend capturing the structured metadata returned by `ApproovService.getPinningDiagnostics()` during early rollout:
+1. immediately after initialization and before the first protected request
+2. immediately after the first protected request
+
+This metadata complements the native logs:
+* **Android:** confirms whether the active shared `OkHttpClient` still contains the Approov interceptor and certificate pinner.
+* **iOS:** confirms whether registered sessions have verified pinning, and highlights `sessionsWithoutPinning` / `unpinnedSessions` when requests were observed without successful pinning verification.
+
+On iOS, remember that a completely bypassed session may not appear in the metadata at all. In that case, the native logs remain the primary signal.
+
+## High-Value iOS Log Lines
+
+When debugging iOS networking conflicts, these log messages are especially important:
+
+* `Registered session ...`: Approov saw session creation and stored session metadata.
+* `task mutation [...]`: request interception and mutation executed for that task.
+* `SKIPPING session creation ... (not in interception policy)`: the delegate class was not allowlisted.
+* `skipping dataTaskWithRequest for unregistered session`: task creation was visible, but session registration was missed.
+* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an Approov hook and the interceptor detected or attempted recovery.
+* `PINNING BLOCKED connection ...`: pinning actively rejected the server trust.
+* `forwarding without pin verification`: the pinning delegate was reached, but a usable service was not available for verification.
 
 ## Troubleshooting
 

@@ -62,8 +62,37 @@ We highly recommend building a temporary "Networking Health Check" into your app
 
 Here is the step-by-step workflow to verify your integration and fix any conflicts you find:
 
-### Step 1: Run the Native Diagnostics
-Immediately after calling `ApproovService.initialize()`, execute the diagnostics check and log the output:
+### Step 1: Capture Early Diagnostics Metadata
+Capture diagnostics twice and keep the output in your logs or observability breadcrumbs:
+1. immediately after `ApproovService.initialize()`
+2. immediately after the first protected request
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+import { Platform } from 'react-native';
+
+const startup = await ApproovService.getPinningDiagnostics();
+console.log("Approov startup diagnostics:", JSON.stringify(startup, null, 2));
+
+if (Platform.OS === 'android' &&
+    (!startup.isInterceptorPresent || !startup.isPinnerPresent)) {
+  await ApproovService.updateClientFactory(true);
+}
+
+await fetch("https://api.example.com/secure-data");
+
+const postRequest = await ApproovService.getPinningDiagnostics();
+console.log("Approov post-request diagnostics:", JSON.stringify(postRequest, null, 2));
+```
+
+How to read it:
+* **Android:** `isInterceptorPresent` and `isPinnerPresent` must both be `true` before the first protected request.
+* **iOS:** a startup baseline with zero sessions is normal. The important signal is the post-request metadata. If `sessionsWithoutPinning` is greater than `0`, Approov saw requests on registered sessions without verified pinning.
+* **iOS limitation:** a completely bypassed session may not appear in this metadata at all. In that case, native logs are essential.
+
+### Step 2: Diagnose & Fix Android Overrides
+Look at the Android output from the diagnostics check:
+
 ```javascript
 import { ApproovService } from '@approov/approov-service-react-native';
 
@@ -71,8 +100,6 @@ const status = await ApproovService.getPinningDiagnostics();
 console.log("Approov Native Networking Status:", JSON.stringify(status, null, 2));
 ```
 
-### Step 2: Diagnose & Fix Android Overrides
-Look at the Android output from the diagnostics check:
 * **SUCCESS:** If `isInterceptorPresent: true` and `isPinnerPresent: true`, your Android integration is perfect. Approov tokens and certificate pins are actively protecting the global `fetch()` client.
 * **FAILURE:** If `isInterceptorPresent: false`, another Android SDK (e.g., Firebase, Datadog) has overwritten the React Native networking factory and severed Approov's hooks.
 * **THE FIX:** You must tell Approov to "heal" the factory. Wait for the conflicting SDK to finish initializing, and then execute:
@@ -81,9 +108,10 @@ Look at the Android output from the diagnostics check:
   await ApproovService.updateClientFactory(true); 
   ```
 
-### Step 3: Diagnose & Fix iOS Custom Delegates
+### Step 3: Diagnose & Fix iOS Custom Delegates and Missing Pinning
 Look at the iOS console logs (via Xcode or the Mac Console App) while your app makes network requests.
 * **SUCCESS:** You see logs from `ApproovPinningDelegate` confirming that the connection to your API domain is being secured and tokenized. If `status.sessionsWithPinning` is greater than `0`, the React Native hooks are active.
+* **WARNING:** If `status.sessionsWithoutPinning` is greater than `0`, Approov saw requests on registered sessions but pinning was not verified for those sessions. Inspect `unpinnedSessions` and correlate with native logs.
 * **FAILURE:** You see an explicit console warning: `SKIPPING session creation with <SomeThirdPartyDelegate> (not in interception policy)`. This means a native module inside your app is bypassing the standard React Native networking stack and using its own custom session.
 * **THE FIX:** If you *want* that specific traffic protected by Approov, you must explicitly whitelist that custom delegate class name *before* calling initialize:
   ```javascript
@@ -92,7 +120,15 @@ Look at the iOS console logs (via Xcode or the Mac Console App) while your app m
   await ApproovService.initialize("<config>");
   ```
 
-### Step 4: The Fallback (`fetchWithApproov`)
+### Step 4: Watch for iOS Swizzle and Task-Path Conflicts
+Some failures do not show up as simple custom delegate issues:
+* `IMP CONFLICT` or `IMP RECOVERY` logs mean another SDK has overwritten one of the iOS hooks.
+* `skipping dataTaskWithRequest for unregistered session` means the task path is still visible but the session was never registered.
+* `forwarding without pin verification` means a challenge reached the pinning delegate before a usable service was available.
+
+If you see these logs during rollout, treat them as an integration warning even if requests still appear to succeed.
+
+### Step 5: The Fallback (`fetchWithApproov`)
 If you have applied the fixes above, but highly aggressive 3rd party SDKs are still somehow mutating global traffic or actively stripping the `Approov-Token` header downstream, you can abandon global interception for specific, high-security endpoints. 
 
 Simply replace `fetch('https://api.mybank.com/transfer')` with `ApproovService.fetchWithApproov('https://api.mybank.com/transfer')`. This routes the payload through completely isolated, natively built OkHttp/NSURLSession instances that are entirely immune to global swizzling or factory overrides.

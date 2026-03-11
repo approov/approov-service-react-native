@@ -1771,13 +1771,68 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
           reject(@"bad_url", details, error);
           return;
         }
+        void (^rejectBadRequest)(NSString *) = ^(NSString *details) {
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:NO]];
+          reject(@"bad_request", details, error);
+        };
         NSMutableURLRequest *request =
             [NSMutableURLRequest requestWithURL:parsedURL];
-        request.HTTPMethod = options[@"method"] ?: @"GET";
-        request.allHTTPHeaderFields = options[@"headers"];
-        if (options[@"body"]) {
+        request.HTTPMethod = @"GET";
+
+        id methodValue = options[@"method"];
+        if (methodValue != nil && methodValue != [NSNull null]) {
+          if (![methodValue isKindOfClass:[NSString class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov method must be a string when provided");
+            return;
+          }
+          NSString *method = [(NSString *)methodValue
+              stringByTrimmingCharactersInSet:
+                  [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+          if (method.length != 0)
+            request.HTTPMethod = method;
+        }
+
+        id headersValue = options[@"headers"];
+        if (headersValue != nil && headersValue != [NSNull null]) {
+          if (![headersValue isKindOfClass:[NSDictionary class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov headers must be an object when provided");
+            return;
+          }
+          NSMutableDictionary<NSString *, NSString *> *headers =
+              [[NSMutableDictionary alloc] init];
+          for (id key in [(NSDictionary *)headersValue allKeys]) {
+            id value = [(NSDictionary *)headersValue objectForKey:key];
+            if (![key isKindOfClass:[NSString class]]) {
+              rejectBadRequest(
+                  @"fetchWithApproov header names must be strings");
+              return;
+            }
+            if (value == nil || value == [NSNull null])
+              continue;
+            if (![value isKindOfClass:[NSString class]]) {
+              rejectBadRequest(
+                  @"fetchWithApproov header values must be strings");
+              return;
+            }
+            headers[(NSString *)key] = (NSString *)value;
+          }
+          request.allHTTPHeaderFields = headers;
+        }
+
+        id bodyValue = options[@"body"];
+        if (bodyValue != nil && bodyValue != [NSNull null]) {
+          if (![bodyValue isKindOfClass:[NSString class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov body must be a string when provided");
+            return;
+          }
           request.HTTPBody =
-              [options[@"body"] dataUsingEncoding:NSUTF8StringEncoding];
+              [(NSString *)bodyValue dataUsingEncoding:NSUTF8StringEncoding];
         }
 
         // 3. Add ALL Approov protections (Token, Signature, TraceIDs, Headers)

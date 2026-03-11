@@ -40,7 +40,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
 + (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
-                    approovService:(ApproovService *)approovService;
+                    approovService:(ApproovService *_Nullable)approovService;
 
 /// Initializes a pinning URL session delegate.
 ///
@@ -48,7 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
 - (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
-                  approovService:(ApproovService *)approovService;
+                  approovService:(ApproovService *_Nullable)approovService;
 
 @end
 

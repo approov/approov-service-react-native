@@ -109,6 +109,9 @@ static id earliestNetworkRequestTimeLock = nil;
 // Approov itself can be initialized - or 0.0 they may proceed immediately
 NSTimeInterval earliestNetworkRequestTime = 0.0;
 
+// the current shared ApproovService instance
+static ApproovService *sharedApproovService = nil;
+
 // original config string used during initialization
 NSString *initialConfigString = nil;
 
@@ -207,6 +210,10 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
     ApproovLogE(@"native module failed to initialize");
     [NSException raise:@"ApproovServiceInitFailure"
                 format:@"Approov native module failed to initialize"];
+  }
+
+  @synchronized([ApproovService class]) {
+    sharedApproovService = self;
   }
 
   // setup the state for the ApproovService
@@ -1699,6 +1706,12 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 + (BOOL)sharedUseApproovStatusIfNoToken {
   return useApproovStatusIfNoToken;
+}
+
++ (ApproovService *)sharedService {
+  @synchronized([ApproovService class]) {
+    return sharedApproovService;
+  }
 }
 
 + (NSString *)sharedTokenHeader {

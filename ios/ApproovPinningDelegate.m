@@ -38,7 +38,7 @@
 
 // the ApproovService that is able to interpret the trust decisions against the
 // dynamic pins
-@property ApproovService *approovService;
+@property(nonatomic, strong, nullable) ApproovService *approovService;
 
 // the original delegate to which non-authentication calls are passed
 @property(nullable) id<NSURLSessionDataDelegate> originalDelegate;
@@ -54,7 +54,7 @@
  * information
  */
 + (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
-                    approovService:(ApproovService *)approovService {
+                    approovService:(ApproovService *_Nullable)approovService {
   return [[self alloc] initWithDelegate:delegate approovService:approovService];
 }
 
@@ -66,7 +66,7 @@
  * information
  */
 - (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
-                  approovService:(ApproovService *)approovService {
+                  approovService:(ApproovService *_Nullable)approovService {
   self = [super init];
   if (self) {
     _approovService = approovService;
@@ -75,6 +75,19 @@
   ApproovLogI(@"ApproovService pinning NSURLSessionDelegate: %@",
               delegate ? NSStringFromClass([delegate class]) : @"<nil>");
   return self;
+}
+
+/**
+ * Resolves the current ApproovService. Delegates created during early
+ * swizzling may be initialized before the native module exists, so pinning
+ * must recover the live service at challenge time.
+ */
+- (ApproovService *_Nullable)currentApproovService {
+  ApproovService *service = _approovService ?: [ApproovService sharedService];
+  if (_approovService == nil && service != nil) {
+    _approovService = service;
+  }
+  return service;
 }
 
 /**
@@ -156,9 +169,23 @@
               host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+    ApproovService *service = [self currentApproovService];
+    if (service == nil) {
+      ApproovLogW(@"ApproovService unavailable for task server-trust "
+                  @"challenge on %@, forwarding without pin verification",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:dataTask
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(service "
+                                                         @"unavailable)"];
+      return;
+    }
+
     ApproovTrustDecision trustDecision =
-        [_approovService verifyPins:challenge.protectionSpace.serverTrust
-                            forHost:host];
+        [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
 
     // Notify interceptor that pinning was invoked
     if (self.authChallengeCallback) {
@@ -212,9 +239,23 @@
               authMethod, host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+    ApproovService *service = [self currentApproovService];
+    if (service == nil) {
+      ApproovLogW(@"ApproovService unavailable for session server-trust "
+                  @"challenge on %@, forwarding without pin verification",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:nil
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(service "
+                                                         @"unavailable)"];
+      return;
+    }
+
     ApproovTrustDecision trustDecision =
-        [_approovService verifyPins:challenge.protectionSpace.serverTrust
-                            forHost:host];
+        [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
 
     // Notify interceptor that pinning was invoked
     if (self.authChallengeCallback) {

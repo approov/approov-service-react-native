@@ -345,9 +345,25 @@ static dispatch_once_t _onceToken = 0;
   NSString *tokenHeader = [ApproovService sharedTokenHeader];
   NSString *traceIDHeader = [ApproovService sharedTraceIDHeader];
   NSString *tokenBefore = [request valueForHTTPHeaderField:tokenHeader];
+  ApproovService *service = self.approovService ?: [ApproovService sharedService];
+
+  if (service == nil) {
+    ApproovLogW(@"skipping %@ interception for %@ on session %p because "
+                @"ApproovService is not yet available",
+                taskType, request.URL, session);
+    return [ApproovInterceptorResult createWithRequest:request
+                                            withAction:
+                                                ApproovInterceptorActionProceed
+                                           withMessage:@"ApproovService not "
+                                                       @"ready"];
+  }
+
+  if (self.approovService == nil) {
+    self.approovService = service;
+  }
 
   ApproovInterceptorResult *result =
-      [self.approovService interceptRequest:request];
+      [service interceptRequest:request];
   NSString *tokenAfterIntercept =
       [result.request valueForHTTPHeaderField:tokenHeader];
   NSString *traceAfterIntercept =

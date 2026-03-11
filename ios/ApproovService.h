@@ -74,6 +74,9 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// interceptors and bridges calls from Javascript
 @interface ApproovService : NSObject <RCTBridgeModule>
 
+/// Returns the current shared service instance when available.
++ (nullable ApproovService *)sharedService;
+
 /// Intercepts a request and updates it to potentially add an Approov token
 /// and/or perform substitutions on headers and query parameters.
 ///

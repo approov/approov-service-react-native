@@ -101,7 +101,7 @@ When debugging iOS networking conflicts, these log messages are especially impor
 * `task mutation [...]`: request interception and mutation executed for that task.
 * `SKIPPING session creation ... (not in interception policy)`: the delegate class was not allowlisted.
 * `skipping dataTaskWithRequest for unregistered session`: task creation was visible, but session registration was missed.
-* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an active Approov hook after interceptor startup and the runtime integrity checker detected or attempted recovery.
+* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an active Approov hook after interceptor startup and the optional runtime integrity checker detected or attempted recovery. These logs only appear when runtime recovery is enabled with `setMaxReswizzleAttempts(...) > 0`.
 * `PINNING BLOCKED connection ...`: pinning actively rejected the server trust.
 * `forwarding without pin verification`: the pinning delegate was reached, but a usable service was not available for verification.
 

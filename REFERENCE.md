@@ -314,7 +314,7 @@ Sets the maximum number of times Approov should attempt to automatically re-swiz
 ApproovService.setMaxReswizzleAttempts(attempts)
 ```
 
-- `attempts` (number): The maximum number of recovery attempts. Must be a positive integer or zero. The default value is 3.
+- `attempts` (number): The maximum number of recovery attempts. Must be a positive integer or zero. The default value is `0`, which disables runtime IMP recovery unless you explicitly opt in.
 
 ## getMaxReswizzleAttempts
 Gets the current maximum number of times Approov should attempt to automatically re-swizzle its network interception hooks on iOS.
@@ -323,7 +323,7 @@ Gets the current maximum number of times Approov should attempt to automatically
 ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
 ```
 
-- Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts.
+- Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts. The default is `0` (disabled).
 
 ## getPinningDiagnostics
 Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.

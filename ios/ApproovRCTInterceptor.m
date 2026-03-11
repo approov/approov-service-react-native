@@ -147,8 +147,9 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 
 @end
 
-// Global configuration variable for max reswizzle attempts (default is 3)
-static NSUInteger gMaxReswizzleAttempts = 3;
+// Global configuration variable for max reswizzle attempts (default is 0,
+// meaning runtime IMP recovery is disabled unless explicitly enabled).
+static NSUInteger gMaxReswizzleAttempts = 0;
 
 // MARK: - Configuration Implementation
 
@@ -1230,6 +1231,10 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
  */
 - (NSUInteger)verifyIMPIntegrity {
   NSUInteger maxAttempts = [[self class] maxReswizzleAttempts];
+  if (maxAttempts == 0) {
+    return 0;
+  }
+
   NSUInteger conflicts = 0;
   [_impTrackingLock lock];
   NSDictionary<NSString *, NSValue *> *snapshot = [_installedIMPs copy];

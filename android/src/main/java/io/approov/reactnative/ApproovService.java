@@ -1624,13 +1624,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 
                 String method = "GET";
                 if (options != null && options.hasKey("method")) {
-                    method = options.getString("method");
+                    ReadableType methodType = options.getType("method");
+                    if (methodType != ReadableType.Null && methodType != ReadableType.String) {
+                        promise.reject("bad_request", "fetchWithApproov method must be a string when provided");
+                        return;
+                    }
+                    if (methodType == ReadableType.String) {
+                        String candidateMethod = options.getString("method");
+                        if (candidateMethod != null && !candidateMethod.trim().isEmpty()) {
+                            method = candidateMethod.trim();
+                        }
+                    }
                 }
                 
                 okhttp3.RequestBody requestBody = null;
                 if (options != null && options.hasKey("body")) {
-                    String bodyString = options.getString("body");
-                    requestBody = okhttp3.RequestBody.create(null, bodyString);
+                    ReadableType bodyType = options.getType("body");
+                    if (bodyType != ReadableType.Null && bodyType != ReadableType.String) {
+                        promise.reject("bad_request", "fetchWithApproov body must be a string when provided");
+                        return;
+                    }
+                    if (bodyType == ReadableType.String) {
+                        String bodyString = options.getString("body");
+                        requestBody = okhttp3.RequestBody.create(null, bodyString);
+                    }
                 }
                 
                 // If the user has omitted a body, but the method is one that OkHttp requires 

@@ -1798,6 +1798,7 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
             dataTaskWithRequest:finalRequest
               completionHandler:^(NSData *data, NSURLResponse *response,
                                   NSError *error) {
+                [session finishTasksAndInvalidate];
                 if (error) {
                   reject(@"network_error", error.localizedDescription, error);
                   return;

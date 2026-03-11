@@ -1744,8 +1744,22 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // 2. Build the basic request from JS inputs
+        NSURL *parsedURL = [NSURL URLWithString:url];
+        if (parsedURL == nil || parsedURL.scheme == nil ||
+            parsedURL.host == nil) {
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:NO]];
+          NSString *details =
+              [NSString stringWithFormat:@"invalid URL supplied to "
+                                         @"fetchWithApproov: %@",
+                                         url ?: @"(null)"];
+          reject(@"bad_url", details, error);
+          return;
+        }
         NSMutableURLRequest *request =
-            [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+            [NSMutableURLRequest requestWithURL:parsedURL];
         request.HTTPMethod = options[@"method"] ?: @"GET";
         request.allHTTPHeaderFields = options[@"headers"];
         if (options[@"body"]) {

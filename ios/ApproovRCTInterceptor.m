@@ -61,8 +61,16 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 /// Metadata tracked for each intercepted session
 @interface SessionMetadata : NSObject
 @property(nonatomic, strong) NSString *delegateClassName;
+@property(nonatomic, strong) NSString *delegateImagePath;
+@property(nonatomic, strong) NSString *delegateBundleIdentifier;
 @property(nonatomic, strong) NSDate *createdAt;
 @property(nonatomic, assign) NSUInteger requestCount;
+@property(nonatomic, assign) BOOL registeredForPinning;
+@property(nonatomic, strong) NSString *creationDisposition;
+@property(nonatomic, strong) NSDate *lastObservedAt;
+@property(nonatomic, strong) NSString *lastObservedTaskType;
+@property(nonatomic, strong) NSString *lastObservedRequestURL;
+@property(nonatomic, strong) NSString *lastObservedRequestMethod;
 
 // Pinning validation tracking
 @property(nonatomic, assign) NSUInteger authChallengeCount;
@@ -151,27 +159,19 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
 // meaning runtime IMP recovery is disabled unless explicitly enabled).
 static NSUInteger gMaxReswizzleAttempts = 0;
 
-// MARK: - Configuration Implementation
-
-@implementation ApproovRCTInterceptor (Configuration)
-
-+ (void)setMaxReswizzleAttempts:(NSInteger)attempts {
-  if (attempts >= 0) {
-    gMaxReswizzleAttempts = (NSUInteger)attempts;
-  }
-}
-
-+ (NSInteger)maxReswizzleAttempts {
-  return (NSInteger)gMaxReswizzleAttempts;
-}
-
-@end
+// Extended session metadata powers verbose diagnostics for skipped/unregistered
+// sessions. It is enabled by default for development, but can be disabled from
+// React when apps ship to production and no longer need the extra bookkeeping.
+static BOOL gSessionMetadataCollectionEnabled = YES;
 
 // MARK: - ApproovRCTInterceptor Implementation
 
 @implementation ApproovRCTInterceptor {
   // Track all pinned sessions with metadata
   NSMapTable<NSURLSession *, SessionMetadata *> *_pinnedSessions;
+
+  // Track all observed sessions, including those not registered for pinning.
+  NSMapTable<NSURLSession *, SessionMetadata *> *_observedSessions;
 
   // Configuration for which sessions to intercept
   SessionInterceptionPolicy *_policy;
@@ -228,6 +228,28 @@ static NSString *ApproovPassiveProbeSymbolForIMP(IMP imp) {
   return @"<unknown>";
 }
 
+static NSString *ApproovImagePathForClass(Class targetClass) {
+  if (targetClass == Nil) {
+    return nil;
+  }
+
+  const char *imageName = class_getImageName(targetClass);
+  if (imageName == NULL) {
+    return nil;
+  }
+
+  return [NSString stringWithUTF8String:imageName];
+}
+
+static NSString *ApproovBundleIdentifierForClass(Class targetClass) {
+  if (targetClass == Nil) {
+    return nil;
+  }
+
+  NSBundle *bundle = [NSBundle bundleForClass:targetClass];
+  return bundle.bundleIdentifier;
+}
+
 static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                          BOOL classMethod,
                                          NSString *label) {
@@ -246,6 +268,49 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
               classMethod ? @"class" : @"instance", imp,
               ApproovPassiveProbeImageForIMP(imp),
               ApproovPassiveProbeSymbolForIMP(imp));
+}
+
++ (void)setMaxReswizzleAttempts:(NSInteger)attempts {
+  if (attempts >= 0) {
+    gMaxReswizzleAttempts = (NSUInteger)attempts;
+  }
+}
+
++ (NSInteger)maxReswizzleAttempts {
+  return (NSInteger)gMaxReswizzleAttempts;
+}
+
++ (void)setSessionMetadataCollectionEnabled:(BOOL)enabled {
+  gSessionMetadataCollectionEnabled = enabled;
+
+  ApproovRCTInterceptor *interceptor = _sharedInterceptor;
+  if (interceptor == nil) {
+    return;
+  }
+
+  dispatch_sync(interceptor->_sessionRegistryQueue, ^{
+    NSEnumerator *sessionEnum = [interceptor->_pinnedSessions keyEnumerator];
+    NSURLSession *session = nil;
+    while ((session = [sessionEnum nextObject])) {
+      SessionMetadata *metadata =
+          [interceptor->_pinnedSessions objectForKey:session];
+      if (metadata != nil && !enabled) {
+        metadata.delegateImagePath = nil;
+        metadata.delegateBundleIdentifier = nil;
+        metadata.creationDisposition = nil;
+        metadata.lastObservedAt = nil;
+        metadata.lastObservedTaskType = nil;
+        metadata.lastObservedRequestURL = nil;
+        metadata.lastObservedRequestMethod = nil;
+      }
+    }
+
+    [interceptor->_observedSessions removeAllObjects];
+  });
+}
+
++ (BOOL)sessionMetadataCollectionEnabled {
+  return gSessionMetadataCollectionEnabled;
 }
 
 /**
@@ -330,6 +395,7 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
   // Thread-safe session registry using weak-to-strong map table
   // #5)
   _pinnedSessions = [NSMapTable weakToStrongObjectsMapTable];
+  _observedSessions = [NSMapTable weakToStrongObjectsMapTable];
 
   // Serial queue for session registry operations
   _sessionRegistryQueue = dispatch_queue_create("io.approov.sessionRegistry",
@@ -397,6 +463,80 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
               label, NSStringFromClass(sessionClass),
               NSStringFromSelector(selector), overridesBase ? @"yes" : @"no",
               sessionImp, baseImp);
+}
+
+- (void)trackObservedSession:(NSURLSession *)session
+           delegateClassName:(NSString *)delegateClassName
+           delegateImagePath:(NSString *)delegateImagePath
+    delegateBundleIdentifier:(NSString *)delegateBundleIdentifier
+                  registered:(BOOL)registered
+                 disposition:(NSString *)disposition {
+  if (!gSessionMetadataCollectionEnabled) {
+    return;
+  }
+
+  if (session == nil) {
+    return;
+  }
+
+  dispatch_sync(_sessionRegistryQueue, ^{
+    SessionMetadata *metadata = [_observedSessions objectForKey:session];
+    if (metadata == nil) {
+      metadata = [[SessionMetadata alloc] init];
+      metadata.createdAt = [NSDate date];
+      metadata.requestCount = 0;
+      metadata.authChallengeCount = 0;
+      metadata.pinnedChallengeCount = 0;
+      metadata.blockedChallengeCount = 0;
+      metadata.pinningDelegateVerified = NO;
+      [_observedSessions setObject:metadata forKey:session];
+    }
+
+    metadata.delegateClassName = delegateClassName ?: @"<unknown>";
+    metadata.delegateImagePath = delegateImagePath;
+    metadata.delegateBundleIdentifier = delegateBundleIdentifier;
+    metadata.registeredForPinning = registered;
+    metadata.creationDisposition = disposition ?: @"unknown";
+  });
+}
+
+- (void)trackUnregisteredRequestForSession:(NSURLSession *)session
+                                   request:(NSURLRequest *)request
+                                  taskType:(NSString *)taskType {
+  if (!gSessionMetadataCollectionEnabled) {
+    return;
+  }
+
+  if (session == nil) {
+    return;
+  }
+
+  dispatch_sync(_sessionRegistryQueue, ^{
+    SessionMetadata *metadata = [_observedSessions objectForKey:session];
+    if (metadata == nil) {
+      metadata = [[SessionMetadata alloc] init];
+      metadata.delegateClassName = @"<unknown>";
+      metadata.createdAt = [NSDate date];
+      metadata.creationDisposition = @"task-observed-without-session-creation";
+      metadata.registeredForPinning = NO;
+      metadata.authChallengeCount = 0;
+      metadata.pinnedChallengeCount = 0;
+      metadata.blockedChallengeCount = 0;
+      metadata.pinningDelegateVerified = NO;
+      [_observedSessions setObject:metadata forKey:session];
+    }
+
+    metadata.requestCount++;
+    metadata.lastObservedAt = [NSDate date];
+    metadata.lastObservedTaskType = taskType ?: @"<unknown>";
+    metadata.lastObservedRequestURL = request.URL.absoluteString ?: @"";
+
+    NSString *method = request.HTTPMethod;
+    if (method == nil || method.length == 0) {
+      method = request.URL != nil ? @"GET" : @"<unknown>";
+    }
+    metadata.lastObservedRequestMethod = method;
+  });
 }
 
 /**
@@ -519,8 +659,17 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
         NSURLSession *session;
         if (delegate != nil) {
           NSString *delegateClassName = NSStringFromClass([delegate class]);
+          NSString *delegateImagePath = ApproovImagePathForClass([delegate class]);
+          NSString *delegateBundleIdentifier =
+              ApproovBundleIdentifierForClass([delegate class]);
           ApproovLogI(@"checking session creation with %@ delegate",
                       delegateClassName);
+          if (delegateImagePath != nil || delegateBundleIdentifier != nil) {
+            ApproovLogI(@"delegate %@ loaded from image=%@ bundle=%@",
+                        delegateClassName,
+                        delegateImagePath ?: @"<unknown>",
+                        delegateBundleIdentifier ?: @"<unknown>");
+          }
           // Thread-safe policy check
           BOOL shouldIntercept;
           [interceptor->_policyLock lock];
@@ -624,8 +773,14 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
             // Store in registry with metadata
             SessionMetadata *metadata = [[SessionMetadata alloc] init];
             metadata.delegateClassName = delegateClassName;
+            if (gSessionMetadataCollectionEnabled) {
+              metadata.delegateImagePath = delegateImagePath;
+              metadata.delegateBundleIdentifier = delegateBundleIdentifier;
+              metadata.creationDisposition = @"registered";
+            }
             metadata.createdAt = [NSDate date];
             metadata.requestCount = 0;
+            metadata.registeredForPinning = YES;
             metadata.authChallengeCount = 0;
             metadata.pinnedChallengeCount = 0;
             metadata.blockedChallengeCount = 0;
@@ -633,6 +788,10 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
 
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
               [interceptor->_pinnedSessions setObject:metadata forKey:session];
+              if (gSessionMetadataCollectionEnabled) {
+                [interceptor->_observedSessions setObject:metadata
+                                                   forKey:session];
+              }
               ApproovLogI(@"Registered session %p (total: %lu)", session,
                           (unsigned long)interceptor->_pinnedSessions.count);
             });
@@ -646,15 +805,29 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
           } else {
             // Delegate was rejected by policy - log this for diagnostics
             session = RSSWCallOriginal(configuration, delegate, queue);
+            [interceptor trackObservedSession:session
+                            delegateClassName:delegateClassName
+                            delegateImagePath:delegateImagePath
+                     delegateBundleIdentifier:delegateBundleIdentifier
+                                   registered:NO
+                                  disposition:@"policy-skipped"];
             ApproovLogW(
                 @"SKIPPING session creation %p with %@ delegate (not in "
-                @"interception policy)",
-                session, delegateClassName);
+                @"interception policy, image=%@, bundle=%@)",
+                session, delegateClassName,
+                delegateImagePath ?: @"<unknown>",
+                delegateBundleIdentifier ?: @"<unknown>");
             return session;
           }
         } else {
           // No delegate provided
           session = RSSWCallOriginal(configuration, delegate, queue);
+          [interceptor trackObservedSession:session
+                          delegateClassName:@"<nil delegate>"
+                          delegateImagePath:nil
+                   delegateBundleIdentifier:nil
+                                 registered:NO
+                                disposition:@"nil-delegate"];
           ApproovLogD(@"session creation %p with nil delegate", session);
           return session;
         }
@@ -728,6 +901,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
           } else {
             // if the data task creation is for a different (unpinned) session
             // then we don't add Approov
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"dataTaskWithRequest:"];
             ApproovLogI(
                 @"skipping dataTaskWithRequest for unregistered session "
                 @"%p %@ %@",
@@ -780,6 +956,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"dataTaskWithRequest:completionHandler:"];
             ApproovLogI(@"skipping dataTaskWithRequest:completionHandler: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
@@ -828,6 +1007,10 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            NSURLRequest *request = [NSURLRequest requestWithURL:url];
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"dataTaskWithURL:"];
             ApproovLogI(@"skipping dataTaskWithURL: for unregistered session "
                         @"%p %@",
                         self, url);
@@ -880,6 +1063,10 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            NSURLRequest *request = [NSURLRequest requestWithURL:url];
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"dataTaskWithURL:completionHandler:"];
             ApproovLogI(@"skipping dataTaskWithURL:completionHandler: for "
                         @"unregistered session %p %@",
                         self, url);
@@ -954,6 +1141,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"uploadTaskWithRequest:fromData:"];
             ApproovLogI(@"skipping uploadTaskWithRequest:fromData: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
@@ -1009,6 +1199,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"uploadTaskWithRequest:fromData:completionHandler:"];
             ApproovLogI(
                 @"skipping uploadTaskWithRequest:fromData:completionHandler: "
                 @"for unregistered session %p %@ %@",
@@ -1059,6 +1252,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"uploadTaskWithRequest:fromFile:"];
             ApproovLogI(@"skipping uploadTaskWithRequest:fromFile: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
@@ -1113,6 +1309,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"uploadTaskWithRequest:fromFile:completionHandler:"];
             ApproovLogI(
                 @"skipping uploadTaskWithRequest:fromFile:completionHandler: "
                 @"for unregistered session %p %@ %@",
@@ -1161,6 +1360,9 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
                                withMessage:[result message]];
             }
           } else {
+            [interceptor trackUnregisteredRequestForSession:self
+                                                    request:request
+                                                   taskType:@"uploadTaskWithStreamedRequest:"];
             ApproovLogI(@"skipping uploadTaskWithStreamedRequest: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
@@ -1921,36 +2123,83 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
     return @{@"error" : @"Interceptor not initialized"};
   }
 
-  __block NSMutableArray *sessions = [NSMutableArray array];
+  if (!gSessionMetadataCollectionEnabled) {
+    return @{
+      @"enabled" : @NO,
+      @"message" : @"Session metadata collection disabled"
+    };
+  }
+
+  __block NSMutableArray *registeredSessions = [NSMutableArray array];
+  __block NSMutableArray *unregisteredSessions = [NSMutableArray array];
   __block NSUInteger totalRequests = 0;
+  __block NSUInteger nilDelegateSessionCount = 0;
+  __block NSUInteger policySkippedSessionCount = 0;
+  __block NSUInteger taskObservedWithoutSessionCreationCount = 0;
 
   dispatch_sync(_sharedInterceptor->_sessionRegistryQueue, ^{
     NSEnumerator *sessionEnum =
-        [_sharedInterceptor->_pinnedSessions keyEnumerator];
+        [_sharedInterceptor->_observedSessions keyEnumerator];
     NSURLSession *session;
     while ((session = [sessionEnum nextObject])) {
       SessionMetadata *metadata =
-          [_sharedInterceptor->_pinnedSessions objectForKey:session];
+          [_sharedInterceptor->_observedSessions objectForKey:session];
       if (metadata) {
         totalRequests += metadata.requestCount;
-        [sessions addObject:@{
+        NSDictionary *sessionEntry = @{
           @"sessionPointer" : [NSString stringWithFormat:@"%p", session],
           @"delegateClassName" : metadata.delegateClassName,
+          @"delegateImagePath" : metadata.delegateImagePath ?: [NSNull null],
+          @"delegateBundleIdentifier" :
+              metadata.delegateBundleIdentifier ?: [NSNull null],
           @"createdAt" : [NSString stringWithFormat:@"%@", metadata.createdAt],
           @"requestCount" : @(metadata.requestCount),
+          @"registeredForPinning" : @(metadata.registeredForPinning),
+          @"creationDisposition" : metadata.creationDisposition ?: @"unknown",
+          @"lastObservedAt" : metadata.lastObservedAt != nil ? [NSString stringWithFormat:@"%@", metadata.lastObservedAt] : [NSNull null],
+          @"lastObservedTaskType" : metadata.lastObservedTaskType ?: [NSNull null],
+          @"lastObservedRequestURL" : metadata.lastObservedRequestURL ?: [NSNull null],
+          @"lastObservedRequestMethod" : metadata.lastObservedRequestMethod ?: [NSNull null],
           @"authChallengeCount" : @(metadata.authChallengeCount),
           @"pinnedChallengeCount" : @(metadata.pinnedChallengeCount),
           @"blockedChallengeCount" : @(metadata.blockedChallengeCount),
           @"pinningDelegateVerified" : @(metadata.pinningDelegateVerified)
-        }];
+        };
+
+        if ([metadata.creationDisposition isEqualToString:@"nil-delegate"]) {
+          nilDelegateSessionCount++;
+        } else if ([metadata.creationDisposition
+                        isEqualToString:@"policy-skipped"]) {
+          policySkippedSessionCount++;
+        } else if ([metadata.creationDisposition
+                        isEqualToString:
+                            @"task-observed-without-session-creation"]) {
+          taskObservedWithoutSessionCreationCount++;
+        }
+
+        if (metadata.registeredForPinning) {
+          [registeredSessions addObject:sessionEntry];
+        } else {
+          [unregisteredSessions addObject:sessionEntry];
+        }
       }
     }
   });
 
   return @{
-    @"totalSessions" : @(sessions.count),
+    @"enabled" : @YES,
+    @"totalSessions" :
+        @(registeredSessions.count + unregisteredSessions.count),
     @"totalRequests" : @(totalRequests),
-    @"sessions" : sessions
+    @"sessions" : registeredSessions,
+    @"registeredSessions" : registeredSessions,
+    @"unregisteredSessions" : unregisteredSessions,
+    @"registeredSessionCount" : @(registeredSessions.count),
+    @"unregisteredSessionCount" : @(unregisteredSessions.count),
+    @"nilDelegateSessionCount" : @(nilDelegateSessionCount),
+    @"policySkippedSessionCount" : @(policySkippedSessionCount),
+    @"taskObservedWithoutSessionCreationCount" :
+        @(taskObservedWithoutSessionCreationCount)
   };
 }
 

@@ -57,6 +57,22 @@ ApproovService.setUseApproovStatusIfNoToken(shouldUse: boolean);
 
 When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
 
+## setSessionMetadataCollectionEnabled
+Enables or disables the extended session metadata ledger used by `getSessionDiagnostics()` on iOS. This ledger records extra development-time information about registered and unregistered sessions, including skipped delegates, request counts, last observed URLs, and the owning image/bundle for delegate classes.
+
+```Javascript
+ApproovService.setSessionMetadataCollectionEnabled(enabled: boolean);
+```
+
+The default is `true`. This ledger is intended for development, staging, and troubleshooting startup/interception issues. In normal production operation, you should call this early in startup with `false` to stop collecting the extra session-observation metadata. This does not disable the core pinning/session registry used by Approov itself.
+
+## getSessionMetadataCollectionEnabled
+Returns whether extended session metadata collection is currently enabled.
+
+```Javascript
+ApproovService.getSessionMetadataCollectionEnabled();
+```
+
 ## setLogLevel
 Sets the logging level for the native Approov SDK integration. This governs how much information is printed to the native console (Android Logcat or iOS OSLog/console).
 

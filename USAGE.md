@@ -8,6 +8,11 @@ The Approov SDK must fully complete its native initialization sequence and recei
 
 If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
 
+> [!WARNING]
+> You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
+> A request that leaves the device before initialization completes may be forwarded without an Approov token.
+> The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues. Once your integration is stable, disable it in production with `ApproovService.setSessionMetadataCollectionEnabled(false)` to avoid collecting unnecessary diagnostic state.
+
 To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
 
 ### Option 1: Using the `useApproov()` Hook (Recommended)
@@ -86,6 +91,12 @@ This gives you visibility into two different failure classes:
 
 1. **Android factory override problems before the first request**
 2. **iOS session registration, delegate, and pinning-verification problems after the first request**
+
+If you are also using `ApproovService.getSessionDiagnostics()`, treat it as a temporary troubleshooting aid. It is most useful while validating a new integration, tracking down third-party `NSURLSessionDelegate` conflicts, or confirming that a startup request escaped before initialization completed. After that work is done, disable the extended ledger in production:
+
+```javascript
+ApproovService.setSessionMetadataCollectionEnabled(false);
+```
 
 ```javascript
 import { Platform } from 'react-native';

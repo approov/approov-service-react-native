@@ -154,6 +154,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // true if the logging should be suppressed for unknown (and excluded) URLs
     private boolean suppressLoggingUnknownURL;
 
+    // true if verbose session metadata collection should be enabled. Android
+    // does not currently emit the iOS-style session ledger, but this flag keeps
+    // the JS API cross-platform safe.
+    private boolean sessionMetadataCollectionEnabled;
+
     // header to be used to send Approov tokens
     private String approovTokenHeader;
 
@@ -381,6 +386,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         earliestNetworkRequestTime = 0;
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
+        sessionMetadataCollectionEnabled = true;
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
@@ -789,6 +795,28 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void addAllowedDelegate(String delegatePattern) {
         log(LOG_DEBUG, TAG, "addAllowedDelegate: no-op on Android (" + delegatePattern + ")");
+    }
+
+    /**
+     * Enables or disables extended session metadata collection.
+     * No-op on Android today, but retained for JS API parity.
+     *
+     * @param enabled true to enable metadata collection, false to disable it
+     */
+    @ReactMethod
+    public synchronized void setSessionMetadataCollectionEnabled(boolean enabled) {
+        log(LOG_DEBUG, TAG, "setSessionMetadataCollectionEnabled: no-op on Android (" + enabled + ")");
+        sessionMetadataCollectionEnabled = enabled;
+    }
+
+    /**
+     * Returns whether extended session metadata collection is enabled.
+     *
+     * @param promise resolves to the current flag value
+     */
+    @ReactMethod
+    public synchronized void getSessionMetadataCollectionEnabled(Promise promise) {
+        promise.resolve(sessionMetadataCollectionEnabled);
     }
 
     /**

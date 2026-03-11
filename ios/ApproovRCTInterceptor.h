@@ -52,6 +52,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Gets the configured maximum swizzle recovery attempts.
 + (NSInteger)maxReswizzleAttempts;
 
+/// Enables or disables extended session metadata collection used by diagnostics.
++ (void)setSessionMetadataCollectionEnabled:(BOOL)enabled;
+
+/// Indicates whether extended session metadata collection is enabled.
++ (BOOL)sessionMetadataCollectionEnabled;
+
 /// Adds a delegate pattern to the allow list
 /// @param delegatePattern delegate class name or pattern (use * for wildcard)
 + (void)addAllowedDelegate:(NSString *)delegatePattern;

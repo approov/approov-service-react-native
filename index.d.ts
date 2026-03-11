@@ -14,6 +14,8 @@ export declare class ApproovService {
    */
   static setProceedOnNetworkFail(): void;
   static setUseApproovStatusIfNoToken(shouldUse: boolean): void;
+  static setSessionMetadataCollectionEnabled(enabled: boolean): void;
+  static getSessionMetadataCollectionEnabled(): Promise<boolean>;
   /**
    * Sets the maximum number of times Approov should attempt to automatically
    * re-swizzle its network interception hooks on iOS if it detects they have been
@@ -83,6 +85,53 @@ export declare class ApproovService {
       sessionPointer?: string;
       delegateClassName?: string;
       requestCount: number;
+    }>;
+  }>;
+  static getSessionDiagnostics(): Promise<{
+    enabled?: boolean;
+    message?: string;
+    totalSessions?: number;
+    totalRequests?: number;
+    registeredSessionCount?: number;
+    unregisteredSessionCount?: number;
+    nilDelegateSessionCount?: number;
+    policySkippedSessionCount?: number;
+    taskObservedWithoutSessionCreationCount?: number;
+    registeredSessions?: Array<{
+      sessionPointer?: string;
+      delegateClassName?: string;
+      delegateImagePath?: string | null;
+      delegateBundleIdentifier?: string | null;
+      createdAt?: string;
+      requestCount?: number;
+      registeredForPinning?: boolean;
+      creationDisposition?: string;
+      lastObservedAt?: string | null;
+      lastObservedTaskType?: string | null;
+      lastObservedRequestURL?: string | null;
+      lastObservedRequestMethod?: string | null;
+      authChallengeCount?: number;
+      pinnedChallengeCount?: number;
+      blockedChallengeCount?: number;
+      pinningDelegateVerified?: boolean;
+    }>;
+    unregisteredSessions?: Array<{
+      sessionPointer?: string;
+      delegateClassName?: string;
+      delegateImagePath?: string | null;
+      delegateBundleIdentifier?: string | null;
+      createdAt?: string;
+      requestCount?: number;
+      registeredForPinning?: boolean;
+      creationDisposition?: string;
+      lastObservedAt?: string | null;
+      lastObservedTaskType?: string | null;
+      lastObservedRequestURL?: string | null;
+      lastObservedRequestMethod?: string | null;
+      authChallengeCount?: number;
+      pinnedChallengeCount?: number;
+      blockedChallengeCount?: number;
+      pinningDelegateVerified?: boolean;
     }>;
   }>;
   static updateClientFactory(wrapExisting: boolean): Promise<boolean>;

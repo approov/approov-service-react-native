@@ -483,6 +483,18 @@ RCT_EXPORT_METHOD(getMaxReswizzleAttempts : (RCTPromiseResolveBlock)
   resolve(@([ApproovRCTInterceptor maxReswizzleAttempts]));
 }
 
+RCT_EXPORT_METHOD(setSessionMetadataCollectionEnabled : (BOOL)enabled) {
+  ApproovLogD(@"setSessionMetadataCollectionEnabled %@",
+              enabled ? @"YES" : @"NO");
+  [ApproovRCTInterceptor setSessionMetadataCollectionEnabled:enabled];
+}
+
+RCT_EXPORT_METHOD(getSessionMetadataCollectionEnabled
+                  : (RCTPromiseResolveBlock)resolve rejecter
+                  : (RCTPromiseRejectBlock)reject) {
+  resolve(@([ApproovRCTInterceptor sessionMetadataCollectionEnabled]));
+}
+
 /**
  * Sets a development key indicating that the app is a development version and
  * it should pass attestation even if the app is not registered or it is running
@@ -1035,6 +1047,13 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
   NSDictionary *diagnostics = [ApproovRCTInterceptor getPinningDiagnostics];
   ApproovLogI(@"getPinningDiagnostics: %@", diagnostics);
+  resolve(diagnostics);
+}
+
+RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSDictionary *diagnostics = [ApproovRCTInterceptor getSessionDiagnostics];
+  ApproovLogI(@"getSessionDiagnostics: %@", diagnostics);
   resolve(diagnostics);
 }
 

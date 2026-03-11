@@ -6,7 +6,7 @@ This document describes the features and functionality of the Approov Service fo
 
 The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic.
 
-If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the early `+load` swizzles may still observe session creation, but the request itself is not recoverable after it has left the device.
+If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
 
 To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
 

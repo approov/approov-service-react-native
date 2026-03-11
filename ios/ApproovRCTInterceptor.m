@@ -193,6 +193,60 @@ static ApproovRCTInterceptor *_sharedInterceptor = nil;
 // ensure the singleton is only created once
 static dispatch_once_t _onceToken = 0;
 
+static NSString *ApproovPassiveProbeImageForIMP(IMP imp) {
+  if (imp == NULL) {
+    return @"<nil>";
+  }
+
+  Dl_info info;
+  if (dladdr((const void *)imp, &info) == 0) {
+    return @"<unknown>";
+  }
+
+  if (info.dli_fname != NULL) {
+    return [NSString stringWithUTF8String:info.dli_fname];
+  }
+
+  return @"<unknown>";
+}
+
+static NSString *ApproovPassiveProbeSymbolForIMP(IMP imp) {
+  if (imp == NULL) {
+    return @"<nil>";
+  }
+
+  Dl_info info;
+  if (dladdr((const void *)imp, &info) == 0) {
+    return @"<unknown>";
+  }
+
+  if (info.dli_sname != NULL) {
+    return [NSString stringWithUTF8String:info.dli_sname];
+  }
+
+  return @"<unknown>";
+}
+
+static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
+                                         BOOL classMethod,
+                                         NSString *label) {
+  if (targetClass == Nil) {
+    ApproovLogI(@"+load passive probe [%@] class missing", label);
+    return;
+  }
+
+  Method method = classMethod ? class_getClassMethod(targetClass, selector)
+                              : class_getInstanceMethod(targetClass, selector);
+  IMP imp = method != NULL ? method_getImplementation(method) : NULL;
+  ApproovLogI(@"+load passive probe [%@] class=%@ selector=%@ "
+              @"kind=%@ imp=%p image=%@ symbol=%@",
+              label, NSStringFromClass(targetClass),
+              NSStringFromSelector(selector),
+              classMethod ? @"class" : @"instance", imp,
+              ApproovPassiveProbeImageForIMP(imp),
+              ApproovPassiveProbeSymbolForIMP(imp));
+}
+
 /**
  * Creates a ReactNative interceptor.
  *
@@ -209,14 +263,54 @@ static dispatch_once_t _onceToken = 0;
 }
 
 /**
- * Early initialization for swizzling interception.
- * This ensures Approov is installed into the objective-c runtime
- * before other observability SDKs can hook the networking stack.
+ * Passive startup probe only.
+ * This intentionally does not create the interceptor or install swizzles.
+ * It provides early diagnostics without changing runtime behavior.
  */
 + (void)load {
-  dispatch_once(&_onceToken, ^{
-    _sharedInterceptor = [[self alloc] initWithApproovService:nil];
-  });
+  Class nsurlSessionClass = NSClassFromString(@"NSURLSession");
+  Class localSessionClass = NSClassFromString(@"__NSURLSessionLocal");
+  Class cfsessionClass = NSClassFromString(@"__NSCFURLSession");
+
+  ApproovLogI(@"+load passive probe start");
+  ApproovLogI(@"+load passive probe class NSURLSession=%@",
+              nsurlSessionClass != Nil ? @"present" : @"missing");
+  ApproovLogI(@"+load passive probe class __NSURLSessionLocal=%@",
+              localSessionClass != Nil ? @"present" : @"missing");
+  ApproovLogI(@"+load passive probe class __NSCFURLSession=%@",
+              cfsessionClass != Nil ? @"present" : @"missing");
+
+  ApproovLogPassiveMethodProbe(
+      nsurlSessionClass,
+      @selector(sessionWithConfiguration:delegate:delegateQueue:), YES,
+      @"NSURLSession.sessionWithConfiguration:delegate:delegateQueue:");
+  ApproovLogPassiveMethodProbe(nsurlSessionClass,
+                               @selector(dataTaskWithRequest:), NO,
+                               @"NSURLSession.dataTaskWithRequest:");
+  ApproovLogPassiveMethodProbe(
+      nsurlSessionClass, @selector(dataTaskWithRequest:completionHandler:), NO,
+      @"NSURLSession.dataTaskWithRequest:completionHandler:");
+  ApproovLogPassiveMethodProbe(nsurlSessionClass,
+                               @selector(uploadTaskWithRequest:fromData:), NO,
+                               @"NSURLSession.uploadTaskWithRequest:fromData:");
+  ApproovLogPassiveMethodProbe(
+      nsurlSessionClass,
+      @selector(uploadTaskWithRequest:fromData:completionHandler:), NO,
+      @"NSURLSession.uploadTaskWithRequest:fromData:completionHandler:");
+  ApproovLogPassiveMethodProbe(
+      localSessionClass, @selector(dataTaskWithRequest:), NO,
+      @"__NSURLSessionLocal.dataTaskWithRequest:");
+  ApproovLogPassiveMethodProbe(
+      localSessionClass, @selector(dataTaskWithRequest:completionHandler:), NO,
+      @"__NSURLSessionLocal.dataTaskWithRequest:completionHandler:");
+  ApproovLogPassiveMethodProbe(
+      localSessionClass, @selector(uploadTaskWithRequest:fromData:), NO,
+      @"__NSURLSessionLocal.uploadTaskWithRequest:fromData:");
+  ApproovLogPassiveMethodProbe(
+      localSessionClass,
+      @selector(uploadTaskWithRequest:fromData:completionHandler:), NO,
+      @"__NSURLSessionLocal.uploadTaskWithRequest:fromData:completionHandler:");
+  ApproovLogI(@"+load passive probe end");
 }
 
 /**
@@ -359,7 +453,7 @@ static dispatch_once_t _onceToken = 0;
   }
 
   if (self.approovService == nil) {
-    self.approovService = service;
+    _approovService = service;
   }
 
   ApproovInterceptorResult *result =

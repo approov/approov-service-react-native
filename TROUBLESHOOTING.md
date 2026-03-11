@@ -33,12 +33,14 @@ async function verifyNetworkingHealth() {
 ```
 
 ### iOS: Swizzling and Delegate Hijacking
-On iOS, React Native uses `NSURLSession` for networking. To intercept these requests, Approov uses "Method Swizzling" on the `RCTHTTPRequestHandler` to wrap the session delegate with an `ApproovPinningDelegate`. We perform this swizzling extremely early in the application lifecycle during `+load`.
+On iOS, React Native uses `NSURLSession` for networking. To intercept these requests, Approov uses "Method Swizzling" on the `RCTHTTPRequestHandler` to wrap the session delegate with an `ApproovPinningDelegate`. The current design uses a passive `+load` probe for startup diagnostics only; the actual swizzles are installed later when the native `ApproovService` starts.
 
-**The Problem**: Other native iOS SDKs often use swizzling to intercept network traffic as well. If another SDK swizzles the same methods after our `+load` execution, or dynamically changes the `NSURLSessionDelegate` after the session is created, the Approov delegate might be entirely bypassed. Furthermore, if a third-party React Native library implements its own custom `NSURLSessionDelegate` class (instead of using the standard React Native ones), Approov will ignore it by default to prevent crashes.
+**The Problem**: Other native iOS SDKs often use swizzling to intercept network traffic as well. If another SDK swizzles the same methods after our interceptor starts, or dynamically changes the `NSURLSessionDelegate` after the session is created, the Approov delegate might be entirely bypassed. Furthermore, if a third-party React Native library implements its own custom `NSURLSessionDelegate` class (instead of using the standard React Native ones), Approov will ignore it by default to prevent crashes.
 
-**The Solution (`getPinningDiagnostics`, Auto-Recovery, & Whitelisting)**:
-To combat this, the iOS interceptor actively monitors its execution chain. If it detects another SDK has swizzled over the top of the Approov hooks, it will attempt an **Auto-Recovery** by re-swizzling itself back to the top of the chain (up to 3 times by default, configurable via `ApproovService.setMaxReswizzleAttempts(attempts)`).
+**The Solution (`getPinningDiagnostics`, Passive Probe, Auto-Recovery, & Whitelisting)**:
+To combat this, the iOS implementation does two separate things:
+1. `+load` emits passive startup probe logs so you can see early runtime state without changing behavior.
+2. Once the interceptor is active, it monitors its execution chain. If it detects another SDK has swizzled over the top of the Approov hooks, it will attempt an **Auto-Recovery** by re-swizzling itself back to the top of the chain (up to 3 times by default, configurable via `ApproovService.setMaxReswizzleAttempts(attempts)`).
 
 If your sessions are continuously bypassed despite the auto-recovery, you can analyze the tracked sessions or completely bypass the React Native `NetworkingModule` by switching specific API calls to use `ApproovService.fetchWithApproov` instead. Furthermore, the Xcode console logs are your best tool during development.
 
@@ -122,7 +124,8 @@ Look at the iOS console logs (via Xcode or the Mac Console App) while your app m
 
 ### Step 4: Watch for iOS Swizzle and Task-Path Conflicts
 Some failures do not show up as simple custom delegate issues:
-* `IMP CONFLICT` or `IMP RECOVERY` logs mean another SDK has overwritten one of the iOS hooks.
+* `+load passive probe ...` logs mean the startup probe ran and captured runtime selector state before the interceptor started.
+* `IMP CONFLICT` or `IMP RECOVERY` logs mean another SDK has overwritten one of the active iOS hooks after interceptor startup.
 * `skipping dataTaskWithRequest for unregistered session` means the task path is still visible but the session was never registered.
 * `forwarding without pin verification` means a challenge reached the pinning delegate before a usable service was available.
 

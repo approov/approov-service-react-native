@@ -96,11 +96,12 @@ On iOS, remember that a completely bypassed session may not appear in the metada
 
 When debugging iOS networking conflicts, these log messages are especially important:
 
+* `+load passive probe ...`: startup-only diagnostics about `NSURLSession` classes and selector implementations before the interceptor starts.
 * `Registered session ...`: Approov saw session creation and stored session metadata.
 * `task mutation [...]`: request interception and mutation executed for that task.
 * `SKIPPING session creation ... (not in interception policy)`: the delegate class was not allowlisted.
 * `skipping dataTaskWithRequest for unregistered session`: task creation was visible, but session registration was missed.
-* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an Approov hook and the interceptor detected or attempted recovery.
+* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an active Approov hook after interceptor startup and the runtime integrity checker detected or attempted recovery.
 * `PINNING BLOCKED connection ...`: pinning actively rejected the server trust.
 * `forwarding without pin verification`: the pinning delegate was reached, but a usable service was not available for verification.
 

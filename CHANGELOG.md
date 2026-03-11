@@ -27,6 +27,8 @@ All notable changes to this project will be documented in this file.
 - **iOS fetchWithApproov Session Leak**: The ephemeral `NSURLSession` created by `fetchWithApproov` now calls `finishTasksAndInvalidate` in its completion handler, preventing leaked sessions and delegate references.
 - **iOS fetchWithApproov URL Validation**: Added early validation of the URL passed to iOS `fetchWithApproov` (nil, missing scheme, missing host), rejecting with a descriptive error instead of crashing on `nil`.
 - **Android fetchWithApproov Input Validation**: Added type-level validation for `method` and `body` options on Android `fetchWithApproov`, rejecting non-string values early with descriptive errors. Response handling now uses `try-with-resources` to always release the OkHttp connection.
+- **iOS Passive `+load` Probe**: Replaced early `+load` interceptor installation with a passive startup probe that logs `NSURLSession` runtime state without creating the interceptor or installing swizzles. This preserves early diagnostics while avoiding the compatibility regressions caused by early swizzling in apps that also use observability SDKs.
+- **iOS Runtime Interception Lifecycle**: The actual iOS swizzles now begin when the interceptor starts with the native `ApproovService`, while IMP integrity checking and runtime auto-recovery remain active after startup.
 
 ## [3.5.9]
 - **iOS Bridging Header Fix**: Resolved an issue where React Native apps failed to compile with the error `'approov_service_react_native-Swift.h' file not found`. The import now correctly prefers modular framework headers (`<approov_service_react_native/approov_service_react_native-Swift.h>`) and falls back to the quoted header when needed during CocoaPods compilation.
@@ -53,4 +55,3 @@ All notable changes to this project will be documented in this file.
 - Add support for New Relic NRMA session interception.
 - Fixed missing promise return on success in `ApproovService.initialize` for both Android (Java) and iOS implementations.
 - Add `REFERENCE.md` file documenting the public interface.
-

@@ -27,18 +27,18 @@ While React Native itself exclusively builds `NSURLRequest` objects and calls `d
 5. The React Native JavaScript bundle executes
 6. `ApproovService.initialize(configString)` is eventually called from JavaScript
 
-Because the core React Native networking session may be created *before* Javascript initialization completes, the iOS interceptor must install its hooks before the RN bridge and before the `ApproovService` instance is fully configured. The current design does this in `+load`, allowing Approov to observe and register early sessions even before the native module has finished initialization.
+Because the core React Native networking session may be created *before* Javascript initialization completes, the iOS design now uses a passive `+load` probe to capture startup diagnostics without changing runtime behavior. The actual interceptor and swizzles are installed later, when the native `ApproovService` instance starts. This avoids the compatibility issues we observed when early `+load` performed real swizzling in apps that also use observability SDKs.
 
 What `+load` solves:
 
-* Early session creation can still be observed.
-* Early-created sessions can be registered and later matched when tasks are created.
-* The pinning delegate can now recover the live `ApproovService` later at challenge time.
+* Early class/runtime state can be logged before the React Native bridge exists.
+* It can prove that key `NSURLSession` classes and selectors already existed at startup.
+* It can help diagnose whether an SDK had already modified runtime method implementations before Approov starts.
 
 What `+load` does **not** solve:
 
 * A request that leaves the device before Approov is initialized is not recoverable.
-* A session whose creation never reaches the Approov swizzle cannot be registered.
+* An already-created early session cannot be retroactively registered, pinned, or mutated later.
 * A later SDK can still overwrite or proxy over task creation or auth-challenge delivery.
 
 ### Protection Scenarios and Edge Cases
@@ -47,7 +47,7 @@ To handle this timeline and the presence of third-party SDKs, our swizzling stra
 | Scenario | Network Call Source | Swizzle Result | Is Protected? | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Standard Fetch (Post-Init)** | Standard JS `fetch()` called after `ApproovService.initialize()` | `dataTaskWithRequest:` is intercepted. Interceptor recognizes the React Native `RCTHTTPRequestHandler` session. | ✅ **Yes** | The happy path. Token is added, and pinning delegate processes the TLS handshake. |
-| **Early Fetch (Pre-Init)** | JS `fetch()` called *before* `ApproovService.initialize()` finishes. | Swizzles may already be active due to `+load`, but the request itself can still proceed before the native service is ready to mutate it or guarantee pinning. | ❌ **No** | Developers must ensure `fetch` calls await the `ApproovProvider` initialization completion. The request itself is not recoverable after it leaves the device. |
+| **Early Fetch (Pre-Init)** | JS `fetch()` called *before* `ApproovService.initialize()` finishes. | A passive `+load` probe may prove that startup networking primitives already existed, but the request itself can still leave the device before the interceptor is active. | ❌ **No** | Developers must ensure `fetch` calls await the `ApproovProvider` initialization completion. The request itself is not recoverable after it leaves the device. |
 | **Late URL Convenience Methods** | A specialized 3rd party React Native native module (e.g., a fast image downloader) makes calls reusing the React Native `RCTHTTPRequestHandler` session, but chooses to call `dataTaskWithURL:` internally instead of `dataTaskWithRequest:`. | `dataTaskWithURL:` is intercepted, converted to an `NSURLRequest`, and funneled into standard processing. | ✅ **Yes** | Previously an edge case bypass. Because our old hook only watched the `*WithRequest:` door, traffic entering the same protected session through the `*WithURL:` door snuck out without an Approov token. |
 | **Custom 3rd Party Session (Unrecognized Delegate)** | A 3rd party native module creates its completely own `NSURLSession` instance with a custom delegate. | Task is intercepted at the global class level, but Approov recognizes the delegate does not match React Native's `RCTHTTPRequestHandler`. | ❌ **No** | Approov explicitly skips interception to prevent crashing third-party logic. Developers must add the custom delegate class via `ApproovService.addAllowedDelegate()` to protect it. |
 | **Aggressive Swizzling Conflicts** | An observability SDK (like Datadog) globally swizzles all `NSURLSession` methods to track metrics. If they swizzle *after* Approov, proxy the delegate, or swallow auth challenges, they may sever part or all of our hook chain. | Our hook may be bypassed, our task mutation may be skipped, or our Delegate may never receive the TLS challenge. | ❌ **No** | We attempt auto-recovery and log `IMP CONFLICT` warnings, but a fully bypassed first request is not recoverable. Use startup diagnostics metadata and `fetchWithApproov` for critical calls if the race cannot be controlled. |
@@ -61,10 +61,11 @@ Previously, the Approov React Native interceptor had several vulnerabilities to 
 
 ### Current State and Fixes
 To fortify the iOS interceptor against these race conditions, several critical improvements were implemented:
-1. **`+load` Time Swizzling:** We migrated the swizzle installation to the Objective-C class `+load` method. This installs hooks before the RN bridge is created and allows early sessions to be observed and registered. It materially improves our position in the swizzle stack, but it does not guarantee we will always remain first if another SDK swizzles later.
-2. **Comprehensive Hooking:** We expanded the swizzles to cover `dataTaskWithURL:` and its completion handler variants, ensuring all entry points to session tasks are intercepted and routed through our protection logic.
-3. **Dynamic Service Recovery:** Early-created pinning delegates and task interception now resolve the live `ApproovService` when it becomes available, instead of permanently capturing a stale `nil` service reference.
-4. **IMP Integrity Checking and Auto-Recovery:** We implemented a system that records the implementation pointers (IMPs) of the original methods during `+load`. When intercepted sessions are registered later, the interceptor verifies that the IMPs have not been overwritten, logs a conspicuous warning (`IMP CONFLICT`) if another SDK has compromised our hooks, and attempts to re-swizzle on top again.
+1. **Passive `+load` Startup Probe:** We now use `+load` only for diagnostic probing. It logs startup class and selector state without creating the interceptor or installing any swizzles. This preserves compatibility with aggressive observability SDKs while still giving us early evidence during debugging.
+2. **Runtime Swizzle Installation:** The actual interceptor and swizzles are installed when the native `ApproovService` starts. This keeps the protection behavior aligned with the stable `3.5.9` lifecycle while preserving the broader interception fixes introduced on this branch.
+3. **Comprehensive Hooking:** We expanded the swizzles to cover `dataTaskWithURL:` and its completion handler variants, ensuring all entry points to session tasks are intercepted and routed through our protection logic once the interceptor is active.
+4. **Dynamic Service Recovery:** Pinning delegates and task interception resolve the live `ApproovService` when it becomes available, instead of permanently capturing a stale `nil` service reference.
+5. **IMP Integrity Checking and Auto-Recovery:** We implemented a system that records the implementation pointers (IMPs) of the swizzled methods after runtime interception is active. When intercepted sessions are registered later, the interceptor verifies that the IMPs have not been overwritten, logs a conspicuous warning (`IMP CONFLICT`) if another SDK has compromised our hooks, and attempts to re-swizzle on top again.
 
 ### What the Public Diagnostics Can and Cannot Prove
 The public `ApproovService.getPinningDiagnostics()` metadata is designed to complement native logging during rollout:

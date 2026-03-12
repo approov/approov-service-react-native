@@ -164,6 +164,11 @@ static NSUInteger gMaxReswizzleAttempts = 0;
 // React when apps ship to production and no longer need the extra bookkeeping.
 static BOOL gSessionMetadataCollectionEnabled = YES;
 
+// The extended diagnostics ledger is for development only. Cap its retained
+// metadata to approximately 1 MB so a forgotten production toggle cannot grow
+// without bound.
+static const NSUInteger kApproovSessionMetadataBudgetBytes = 1024 * 1024;
+
 // MARK: - ApproovRCTInterceptor Implementation
 
 @implementation ApproovRCTInterceptor {
@@ -311,6 +316,115 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
 
 + (BOOL)sessionMetadataCollectionEnabled {
   return gSessionMetadataCollectionEnabled;
+}
+
+static NSUInteger ApproovApproximateStringBytes(NSString *value) {
+  if (value == nil) {
+    return 0;
+  }
+
+  return 32 + [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+}
+
+- (NSUInteger)approximateObservedSessionMetadataBytes:
+    (SessionMetadata *)metadata {
+  if (metadata == nil) {
+    return 0;
+  }
+
+  NSUInteger totalBytes = 256;
+  totalBytes += ApproovApproximateStringBytes(metadata.delegateClassName);
+  totalBytes += ApproovApproximateStringBytes(metadata.delegateImagePath);
+  totalBytes +=
+      ApproovApproximateStringBytes(metadata.delegateBundleIdentifier);
+  totalBytes += ApproovApproximateStringBytes(metadata.creationDisposition);
+  totalBytes += ApproovApproximateStringBytes(metadata.lastObservedTaskType);
+  totalBytes += ApproovApproximateStringBytes(metadata.lastObservedRequestURL);
+  totalBytes +=
+      ApproovApproximateStringBytes(metadata.lastObservedRequestMethod);
+
+  if (metadata.createdAt != nil) {
+    totalBytes += 32;
+  }
+  if (metadata.lastObservedAt != nil) {
+    totalBytes += 32;
+  }
+  if (metadata.lastAuthChallengeAt != nil) {
+    totalBytes += 32;
+  }
+
+  totalBytes += sizeof(NSUInteger) * 4;
+  totalBytes += sizeof(BOOL) * 2;
+  return totalBytes;
+}
+
+- (void)trimObservedSessionMetadataToBudgetLocked {
+  NSUInteger totalBytes = 0;
+  NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+
+  NSEnumerator *sessionEnum = [_observedSessions keyEnumerator];
+  NSURLSession *session = nil;
+  while ((session = [sessionEnum nextObject])) {
+    SessionMetadata *metadata = [_observedSessions objectForKey:session];
+    if (metadata == nil) {
+      continue;
+    }
+
+    NSUInteger entryBytes =
+        [self approximateObservedSessionMetadataBytes:metadata];
+    totalBytes += entryBytes;
+
+    NSDate *sortDate = metadata.lastObservedAt ?: metadata.createdAt;
+    if (sortDate == nil) {
+      sortDate = [NSDate distantPast];
+    }
+
+    [entries addObject:@{
+      @"session" : session,
+      @"bytes" : @(entryBytes),
+      @"registered" : @(metadata.registeredForPinning),
+      @"sortDate" : sortDate
+    }];
+  }
+
+  if (totalBytes <= kApproovSessionMetadataBudgetBytes) {
+    return;
+  }
+
+  [entries sortUsingComparator:^NSComparisonResult(NSDictionary *left,
+                                                   NSDictionary *right) {
+    BOOL leftRegistered = [left[@"registered"] boolValue];
+    BOOL rightRegistered = [right[@"registered"] boolValue];
+    if (leftRegistered != rightRegistered) {
+      return leftRegistered ? NSOrderedDescending : NSOrderedAscending;
+    }
+
+    return [left[@"sortDate"] compare:right[@"sortDate"]];
+  }];
+
+  NSUInteger evictedCount = 0;
+  NSUInteger evictedBytes = 0;
+  for (NSDictionary *entry in entries) {
+    if (totalBytes <= kApproovSessionMetadataBudgetBytes) {
+      break;
+    }
+
+    NSURLSession *entrySession = entry[@"session"];
+    NSUInteger entryBytes = [entry[@"bytes"] unsignedIntegerValue];
+    [_observedSessions removeObjectForKey:entrySession];
+
+    totalBytes = (entryBytes >= totalBytes) ? 0 : (totalBytes - entryBytes);
+    evictedCount++;
+    evictedBytes += entryBytes;
+  }
+
+  ApproovLogW(@"Session metadata budget exceeded (%lu > %lu bytes); evicted "
+              @"%lu diagnostic session entr%@ to stay within the ~1 MB cap. "
+              @"Disable session metadata collection in production with "
+              @"setSessionMetadataCollectionEnabled(false).",
+              (unsigned long)(totalBytes + evictedBytes),
+              (unsigned long)kApproovSessionMetadataBudgetBytes,
+              (unsigned long)evictedCount, evictedCount == 1 ? @"y" : @"ies");
 }
 
 /**
@@ -497,6 +611,7 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
     metadata.delegateBundleIdentifier = delegateBundleIdentifier;
     metadata.registeredForPinning = registered;
     metadata.creationDisposition = disposition ?: @"unknown";
+    [self trimObservedSessionMetadataToBudgetLocked];
   });
 }
 
@@ -536,6 +651,7 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
       method = request.URL != nil ? @"GET" : @"<unknown>";
     }
     metadata.lastObservedRequestMethod = method;
+    [self trimObservedSessionMetadataToBudgetLocked];
   });
 }
 
@@ -654,8 +770,6 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
       RSSWArguments(NSURLSessionConfiguration *_Nonnull configuration,
                     id _Nullable delegate, NSOperationQueue *_Nullable queue),
       RSSWReplacement({
-        // check if the delegate is part of the React Native or rn-fetch-blob
-        // stack
         NSURLSession *session;
         if (delegate != nil) {
           NSString *delegateClassName = NSStringFromClass([delegate class]);
@@ -791,6 +905,7 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
               if (gSessionMetadataCollectionEnabled) {
                 [interceptor->_observedSessions setObject:metadata
                                                    forKey:session];
+                [interceptor trimObservedSessionMetadataToBudgetLocked];
               }
               ApproovLogI(@"Registered session %p (total: %lu)", session,
                           (unsigned long)interceptor->_pinnedSessions.count);
@@ -821,6 +936,7 @@ static void ApproovLogPassiveMethodProbe(Class targetClass, SEL selector,
           }
         } else {
           // No delegate provided
+          NSLog(@"[Approov] WARNING: NSURLSession created with a nil delegate! Call stack: %@", [NSThread callStackSymbols]);
           session = RSSWCallOriginal(configuration, delegate, queue);
           [interceptor trackObservedSession:session
                           delegateClassName:@"<nil delegate>"

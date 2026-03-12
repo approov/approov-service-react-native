@@ -11,7 +11,10 @@ If your application executes a `fetch()` or `axios` request *before* `ApproovSer
 > [!WARNING]
 > You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
 > A request that leaves the device before initialization completes may be forwarded without an Approov token.
-> The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues. Once your integration is stable, disable it in production with `ApproovService.setSessionMetadataCollectionEnabled(false)` to avoid collecting unnecessary diagnostic state.
+> The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues.
+> On iOS, **turn it off for production** with `ApproovService.setSessionMetadataCollectionEnabled(false)` as part of startup.
+> Android currently does not persist an equivalent session ledger; this toggle is retained there only for API parity.
+> The iOS ledger now has an internal safety cap of about 1 MB, but that cap is only a backstop. It is **not** a reason to leave session metadata collection enabled in release builds.
 
 To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
 
@@ -97,6 +100,11 @@ If you are also using `ApproovService.getSessionDiagnostics()`, treat it as a te
 ```javascript
 ApproovService.setSessionMetadataCollectionEnabled(false);
 ```
+
+> [!WARNING]
+> Do not leave `getSessionDiagnostics()` metadata collection enabled in production on iOS.
+> The ledger is capped internally to about 1 MB to prevent unbounded growth, but it still stores extra diagnostic state that should only exist during development, staging, or short-lived rollout debugging.
+> On Android this toggle is currently a no-op for ledger storage.
 
 ```javascript
 import { Platform } from 'react-native';

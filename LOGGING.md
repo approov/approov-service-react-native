@@ -92,6 +92,12 @@ This metadata complements the native logs:
 
 On iOS, remember that a completely bypassed session may not appear in the metadata at all. In that case, the native logs remain the primary signal.
 
+> [!WARNING]
+> The session metadata ledger behind `getSessionDiagnostics()` is intended only for development and short-lived troubleshooting.
+> In production, turn it off on iOS with `ApproovService.setSessionMetadataCollectionEnabled(false)`.
+> The iOS implementation now enforces an internal safety cap of about 1 MB, but that cap is only a guardrail and should not be treated as a production setting.
+> Android does not currently retain an equivalent session ledger.
+
 ## High-Value iOS Log Lines
 
 When debugging iOS networking conflicts, these log messages are especially important:

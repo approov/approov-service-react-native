@@ -64,7 +64,13 @@ Enables or disables the extended session metadata ledger used by `getSessionDiag
 ApproovService.setSessionMetadataCollectionEnabled(enabled: boolean);
 ```
 
-The default is `true`. This ledger is intended for development, staging, and troubleshooting startup/interception issues. In normal production operation, you should call this early in startup with `false` to stop collecting the extra session-observation metadata. This does not disable the core pinning/session registry used by Approov itself.
+> [!WARNING]
+> This ledger is for development and troubleshooting only.
+> On iOS, call `ApproovService.setSessionMetadataCollectionEnabled(false)` early in startup for production builds.
+> Android does not currently store an equivalent session ledger; there this API is a parity no-op.
+> The iOS diagnostics ledger is internally capped to about 1 MB as a safety backstop, but you should still disable it in release builds.
+
+The default is `true`. This does not disable the core pinning/session registry used by Approov itself.
 
 ## getSessionMetadataCollectionEnabled
 Returns whether extended session metadata collection is currently enabled.
@@ -72,6 +78,8 @@ Returns whether extended session metadata collection is currently enabled.
 ```Javascript
 ApproovService.getSessionMetadataCollectionEnabled();
 ```
+
+On Android, this reflects the parity flag only; it does not imply an iOS-style diagnostic ledger is being retained.
 
 ## setLogLevel
 Sets the logging level for the native Approov SDK integration. This governs how much information is printed to the native console (Android Logcat or iOS OSLog/console).

@@ -42,6 +42,8 @@ import com.facebook.react.modules.network.OkHttpClientFactory;
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
 import okhttp3.CertificatePinner;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import com.criticalblue.approovsdk.Approov;
 
@@ -151,6 +153,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // true if the logging should be suppressed for unknown (and excluded) URLs
     private boolean suppressLoggingUnknownURL;
+
+    // true if verbose session metadata collection should be enabled. Android
+    // does not currently emit the iOS-style session ledger, but this flag keeps
+    // the JS API cross-platform safe.
+    private boolean sessionMetadataCollectionEnabled;
 
     // header to be used to send Approov tokens
     private String approovTokenHeader;
@@ -379,6 +386,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         earliestNetworkRequestTime = 0;
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
+        sessionMetadataCollectionEnabled = true;
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
@@ -776,6 +784,39 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public synchronized void setSuppressLoggingUnknownURL() {
         log(LOG_DEBUG, TAG, "setSuppressLoggingUnknownURL");
         suppressLoggingUnknownURL = true;
+    }
+
+    /**
+     * iOS-specific delegate allow-list API.
+     * No-op on Android to keep the JS API surface cross-platform safe.
+     *
+     * @param delegatePattern the delegate class name pattern
+     */
+    @ReactMethod
+    public void addAllowedDelegate(String delegatePattern) {
+        log(LOG_DEBUG, TAG, "addAllowedDelegate: no-op on Android (" + delegatePattern + ")");
+    }
+
+    /**
+     * Enables or disables extended session metadata collection.
+     * No-op on Android today, but retained for JS API parity.
+     *
+     * @param enabled true to enable metadata collection, false to disable it
+     */
+    @ReactMethod
+    public synchronized void setSessionMetadataCollectionEnabled(boolean enabled) {
+        log(LOG_DEBUG, TAG, "setSessionMetadataCollectionEnabled: no-op on Android (" + enabled + ")");
+        sessionMetadataCollectionEnabled = enabled;
+    }
+
+    /**
+     * Returns whether extended session metadata collection is enabled.
+     *
+     * @param promise resolves to the current flag value
+     */
+    @ReactMethod
+    public synchronized void getSessionMetadataCollectionEnabled(Promise promise) {
+        promise.resolve(sessionMetadataCollectionEnabled);
     }
 
     /**
@@ -1545,17 +1586,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // if we are wrapping the existing client then we use it as the basis for the
             // new one
             OkHttpClient.Builder builder;
-            if (wrapExisting)
+            if (wrapExisting) {
                 builder = currentClient.newBuilder();
-            else
+                // OkHttp's newBuilder() clones the interceptor list, so remove any
+                // previously-added ApproovInterceptors to avoid stacking duplicate
+                // token-fetching and signature-generation on repeated recovery calls.
+                builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
+            } else {
                 builder = new OkHttpClient.Builder();
+            }
 
             // add the Approov protection to the builder
-            ApproovClientBuilder approovBuilder;
-            if (wrapExisting)
-                approovBuilder = new ApproovClientBuilder(this, null); // interceptors are already in the builder
-            else
-                approovBuilder = new ApproovClientBuilder(this, null);
+            // updateClientFactory builds a one-shot recovered client snapshot, so the
+            // builder should not register as a PinChangeListener.
+            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
             approovBuilder.apply(builder);
 
             // build the new client
@@ -1587,5 +1631,147 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } catch (Exception e) {
             promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
         }
+    }
+
+    /**
+     * Performs a secure fetch bypassing any global OkHttpClient interceptors.
+     * It creates an isolated OkHttpClient explicitly populated with the Approov
+     * interceptor and certificate pinner, ensuring other SDKs cannot interfere.
+     *
+     * @param url     the requested URL
+     * @param options dictionary containing headers, body, method, etc.
+     * @param promise promise to be fulfilled with the response
+     */
+    @ReactMethod
+    public void fetchWithApproov(String url, ReadableMap options, Promise promise) {
+        // Run network operation in a background thread to avoid blocking JS
+        new Thread(() -> {
+            try {
+                // 1. Build the explicit OkHttp request
+                Request.Builder requestBuilder = new Request.Builder().url(url);
+                
+                String method = "GET";
+                if (options != null && options.hasKey("method")) {
+                    ReadableType methodType = options.getType("method");
+                    if (methodType != ReadableType.Null && methodType != ReadableType.String) {
+                        promise.reject("bad_request", "fetchWithApproov method must be a string when provided");
+                        return;
+                    }
+                    if (methodType == ReadableType.String) {
+                        String candidateMethod = options.getString("method");
+                        if (candidateMethod != null && !candidateMethod.trim().isEmpty()) {
+                            method = candidateMethod.trim();
+                        }
+                    }
+                }
+                
+                okhttp3.RequestBody requestBody = null;
+                if (options != null && options.hasKey("body")) {
+                    ReadableType bodyType = options.getType("body");
+                    if (bodyType != ReadableType.Null && bodyType != ReadableType.String) {
+                        promise.reject("bad_request", "fetchWithApproov body must be a string when provided");
+                        return;
+                    }
+                    if (bodyType == ReadableType.String) {
+                        String bodyString = options.getString("body");
+                        requestBody = okhttp3.RequestBody.create(null, bodyString);
+                    }
+                }
+                
+                // If the user has omitted a body, but the method is one that OkHttp requires 
+                // a body for (like POST/PUT/etc), we must provide an empty body instead of null
+                // to avoid an IllegalArgumentException. This does NOT clear existing content
+                // because it only runs if requestBody is still null.
+                if (requestBody == null && (method.equalsIgnoreCase("POST") || 
+                                           method.equalsIgnoreCase("PUT") || 
+                                           method.equalsIgnoreCase("PATCH") || 
+                                           method.equalsIgnoreCase("PROPPATCH"))) {
+                    requestBody = okhttp3.RequestBody.create(null, new byte[0]);
+                }
+                
+                // Add headers if provided
+                if (options != null && options.hasKey("headers")) {
+                    ReadableMap headersMap = options.getMap("headers");
+                    if (headersMap != null) {
+                        for (Map.Entry<String, Object> entry : headersMap.toHashMap().entrySet()) {
+                            if (entry.getValue() instanceof String) {
+                                requestBuilder.addHeader(entry.getKey(), (String) entry.getValue());
+                            }
+                        }
+                    }
+                }
+                
+                requestBuilder.method(method, requestBody);
+                Request request = requestBuilder.build();
+
+                // 2. Build the cleanly isolated Approov OkHttpClient
+                OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
+                // ephemeral builder: skip PinChangeListener to avoid leaking references on every fetch
+                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
+                approovBuilder.apply(clientBuilder);
+                OkHttpClient secureClient = clientBuilder.build();
+
+                // 3. Execute request safely and always close the response to release
+                // the underlying connection.
+                try (Response response = secureClient.newCall(request).execute()) {
+                    // 4. Format the response for React Native
+                    WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
+                    responseMap.putInt("status", response.code());
+                    
+                    WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
+                    for (String headerName : response.headers().names()) {
+                        responseHeaders.putString(headerName, response.header(headerName));
+                    }
+                    responseMap.putMap("headers", responseHeaders);
+                    
+                    if (response.body() != null) {
+                        responseMap.putString("body", response.body().string());
+                    } else {
+                        responseMap.putString("body", "");
+                    }
+                    
+                    promise.resolve(responseMap);
+                }
+                
+            } catch (Exception e) {
+                log(LOG_ERROR, TAG, "fetchWithApproov failed: " + e.getMessage());
+                promise.reject("network_error", e.getMessage(), e);
+            }
+        }).start();
+    }
+
+    /**
+     * iOS-specific method to set the max reswizzle attempts.
+     * This is a no-op on Android since the OkHttp integration
+     * does not rely on method swizzling or +load races.
+     *
+     * @param attempts the maximum number of recovery attempts.
+     */
+    @ReactMethod
+    public void setMaxReswizzleAttempts(Integer attempts) {
+        log(LOG_DEBUG, TAG, "setMaxReswizzleAttempts: no-op on Android");
+    }
+
+    /**
+     * iOS-specific method to get the max reswizzle attempts.
+     * Always returns 0 on Android since swizzling is not used.
+     *
+     * @param promise promise to be fulfilled with 0
+     */
+    @ReactMethod
+    public void getMaxReswizzleAttempts(Promise promise) {
+        promise.resolve(0);
+    }
+
+    /**
+     * Exposes the native Approov logging facility to Javascript.
+     * 
+     * @param message the string message to log natively
+     * @param level   the integer log level (e.g., ApproovService.Log.INFO)
+     */
+    @ReactMethod
+    public void logMessage(String message, Integer level) {
+        int mappedLevel = (level != null) ? level : LOG_INFO;
+        log(mappedLevel, TAG, "JS: " + (message != null ? message : "null"));
     }
 }

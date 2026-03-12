@@ -24,6 +24,7 @@
 
 #import "ApproovService.h"
 #import "Approov/Approov.h"
+#import "ApproovPinningDelegate.h"
 #import "ApproovProps.h"
 #import "ApproovRCTInterceptor.h"
 #import "ApproovUtils.h"
@@ -95,18 +96,21 @@ static NSString *const ConfigExtension = @"config";
 static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
 
 // lock object used during initialization
-id initializerLock = nil;
+static id initializerLock = nil;
 
 // keeps track of whether Approov is initialized
 BOOL isInitialized = NO;
 
 // lock object used for synchronizing the earliestNetworkRequestTime
-id earliestNetworkRequestTimeLock = nil;
+static id earliestNetworkRequestTimeLock = nil;
 
 // the earliest time that any network request will be allowed to avoid any
 // potential race conditions with Approov protected API calls being made before
 // Approov itself can be initialized - or 0.0 they may proceed immediately
 NSTimeInterval earliestNetworkRequestTime = 0.0;
+
+// the current shared ApproovService instance
+static ApproovService *sharedApproovService = nil;
 
 // original config string used during initialization
 NSString *initialConfigString = nil;
@@ -187,6 +191,16 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 }
 
 /**
+ * Class initialization called once.
+ */
++ (void)initialize {
+  if (self == [ApproovService class]) {
+    initializerLock = [NSObject new];
+    earliestNetworkRequestTimeLock = [NSObject new];
+  }
+}
+
+/**
  * Initializes this native module. This may load the optional configuration
  * files and initializes the SDK.
  */
@@ -196,6 +210,10 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
     ApproovLogE(@"native module failed to initialize");
     [NSException raise:@"ApproovServiceInitFailure"
                 format:@"Approov native module failed to initialize"];
+  }
+
+  @synchronized([ApproovService class]) {
+    sharedApproovService = self;
   }
 
   // setup the state for the ApproovService
@@ -280,12 +298,12 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * @return NSDictionary* to provide in an NSError
  */
 - (NSDictionary<NSErrorUserInfoKey, id> *)
-    rejectionUserInfo:(NSString *)
-         rejectionARC:(NSString *)rejectionReasons {
+    rejectionUserInfo:(NSString *)rejectionARC
+     rejectionReasons:(NSString *)rejectionReasons {
   NSMutableDictionary<NSErrorUserInfoKey, id> *error =
       [[NSMutableDictionary alloc] init];
   error[@"type"] = @"rejection";
-  error[@"rejectonARC"] = rejectionARC;
+  error[@"rejectionARC"] = rejectionARC;
   error[@"rejectionReasons"] = rejectionReasons;
   return error;
 }
@@ -434,6 +452,47 @@ RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
 RCT_EXPORT_METHOD(setUseApproovStatusIfNoToken : (BOOL)shouldUse) {
   ApproovLogD(@"setUseApproovStatusIfNoToken %@", shouldUse ? @"YES" : @"NO");
   useApproovStatusIfNoToken = shouldUse;
+}
+
+/**
+ * Sets the maximum number of times Approov should attempt to automatically
+ * re-swizzle its network interception hooks if it detects they have been
+ * hijacked or overwritten by another SDK (e.g. Datadog, New Relic) at runtime.
+ *
+ * @param attempts the maximum number of recovery attempts (default is 3).
+ */
+RCT_EXPORT_METHOD(setMaxReswizzleAttempts : (NSInteger)attempts) {
+  if (attempts < 0) {
+    ApproovLogE(@"setMaxReswizzleAttempts: ignoring invalid negative value %ld",
+                (long)attempts);
+    return;
+  }
+  ApproovLogD(@"setMaxReswizzleAttempts %ld", (long)attempts);
+  [ApproovRCTInterceptor setMaxReswizzleAttempts:attempts];
+}
+
+/**
+ * Gets the current maximum number of times Approov should attempt to
+ * automatically re-swizzle its network interception hooks.
+ *
+ * @param resolve promise to be fulfilled with the current attempts integer
+ * @param reject promise to be fulfilled if an error occurs
+ */
+RCT_EXPORT_METHOD(getMaxReswizzleAttempts : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@([ApproovRCTInterceptor maxReswizzleAttempts]));
+}
+
+RCT_EXPORT_METHOD(setSessionMetadataCollectionEnabled : (BOOL)enabled) {
+  ApproovLogD(@"setSessionMetadataCollectionEnabled %@",
+              enabled ? @"YES" : @"NO");
+  [ApproovRCTInterceptor setSessionMetadataCollectionEnabled:enabled];
+}
+
+RCT_EXPORT_METHOD(getSessionMetadataCollectionEnabled
+                  : (RCTPromiseResolveBlock)resolve rejecter
+                  : (RCTPromiseRejectBlock)reject) {
+  resolve(@([ApproovRCTInterceptor sessionMetadataCollectionEnabled]));
 }
 
 /**
@@ -689,7 +748,11 @@ RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
               [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];
@@ -872,7 +935,11 @@ RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
                     [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];
@@ -929,7 +996,11 @@ RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
                     [Approov stringFromApproovTokenFetchStatus:result.status]);
         if (result.status == ApproovTokenFetchStatusRejected) {
           // fetch failed because the attestation failed
-          NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative" code:0 userInfo:[self rejectionUserInfo:result.ARC :result.rejectionReasons]];
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
           NSString *details =
               [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
                                          result.rejectionReasons];
@@ -976,6 +1047,13 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
   NSDictionary *diagnostics = [ApproovRCTInterceptor getPinningDiagnostics];
   ApproovLogI(@"getPinningDiagnostics: %@", diagnostics);
+  resolve(diagnostics);
+}
+
+RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSDictionary *diagnostics = [ApproovRCTInterceptor getSessionDiagnostics];
+  ApproovLogI(@"getSessionDiagnostics: %@", diagnostics);
   resolve(diagnostics);
 }
 
@@ -1034,6 +1112,12 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     // wait until any initial fetch time is reached
     BOOL waitForReady = YES;
     while (waitForReady) {
+      // if initialization has completed then we can proceed
+      if (isInitialized) {
+        waitForReady = NO;
+        break;
+      }
+
       NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
       NSTimeInterval earliestTime = 0.0;
       @synchronized(earliestNetworkRequestTimeLock) {
@@ -1043,6 +1127,14 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
         waitForReady = NO;
       else {
         // sleep for a short period to block this request thread
+        static BOOL hasLoggedInitWarning = NO;
+        if (!hasLoggedInitWarning) {
+          ApproovLogE(
+              @"Approov initialization is delaying a network request! A native "
+              @"thread is sleeping. You MUST await ApproovService.initialize() "
+              @"or use the useApproov() hook before calling fetch().");
+          hasLoggedInitWarning = YES;
+        }
         ApproovLogI(@"request paused: %@", url);
         [NSThread sleepForTimeInterval:0.1];
       }
@@ -1129,12 +1221,37 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
 
       // If mutator returned false, block the request as appropriate
       if (!shouldProceed) {
+        // If the mutator provided an explicit error, honor it rather than
+        // falling back to default status handling.
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = ApproovInterceptorActionFail;
+          if ([errorType isEqualToString:@"network"]) {
+            action = ApproovInterceptorActionRetry;
+          }
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+
         if (status == ApproovTokenFetchStatusNoNetwork ||
             status == ApproovTokenFetchStatusPoorNetwork ||
             status == ApproovTokenFetchStatusMITMDetected) {
           return [ApproovInterceptorResult
               createWithRequest:updatedRequest
                      withAction:ApproovInterceptorActionRetry
+                    withMessage:[Approov
+                                    stringFromApproovTokenFetchStatus:status]];
+        } else if (status == ApproovTokenFetchStatusNoApproovService) {
+          // Default behavior for NO_APPROOV_SERVICE is to proceed without an
+          // Approov token unless a custom mutator chooses otherwise.
+          return [ApproovInterceptorResult
+              createWithRequest:updatedRequest
+                     withAction:ApproovInterceptorActionProceed
                     withMessage:[Approov
                                     stringFromApproovTokenFetchStatus:status]];
         } else {
@@ -1185,8 +1302,7 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
     if (traceIDHeader != nil && traceID != nil && traceID.length > 0) {
       [updatedRequest setValue:traceID forHTTPHeaderField:traceIDHeader];
     }
-  } else if ((status != ApproovTokenFetchStatusNoApproovService) &&
-             (status != ApproovTokenFetchStatusUnknownURL) &&
+  } else if ((status != ApproovTokenFetchStatusUnknownURL) &&
              (status != ApproovTokenFetchStatusUnprotectedURL)) {
     // We are proceeding (allowed by mutator) with a failure status.
     // Add the status string to the Approov token header if
@@ -1228,7 +1344,7 @@ RCT_EXPORT_METHOD(getPinningDiagnostics : (RCTPromiseResolveBlock)
   // we now deal with any header substitutions, which may require further
   // fetches but these should be using cached results
   for (NSString *header in subsHeaders) {
-    NSString *prefix = [substitutionHeaders objectForKey:header];
+    NSString *prefix = subsHeaders[header];
     NSString *value = [request valueForHTTPHeaderField:header];
     if ((value != nil) && (prefix != nil) && (value.length > prefix.length) &&
         (([prefix length] == 0) || [value hasPrefix:prefix])) {
@@ -1611,6 +1727,12 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
   return useApproovStatusIfNoToken;
 }
 
++ (ApproovService *)sharedService {
+  @synchronized([ApproovService class]) {
+    return sharedApproovService;
+  }
+}
+
 + (NSString *)sharedTokenHeader {
   @synchronized(approovTokenHeader) {
     return approovTokenHeader;
@@ -1644,6 +1766,190 @@ RCT_EXPORT_METHOD(updateClientFactory : (BOOL)wrapExisting resolve : (
 
 + (NSString *)getAccountMessageSignature:(NSString *)message {
   return [Approov getMessageSignature:message];
+}
+
+RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
+                      options resolver : (RCTPromiseResolveBlock)
+                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  // 1. Run in background to avoid blocking the JS thread (fetchTokenAndWait is
+  // blocking)
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // 2. Build the basic request from JS inputs
+        NSURL *parsedURL = [NSURL URLWithString:url];
+        if (parsedURL == nil || parsedURL.scheme == nil ||
+            parsedURL.host == nil) {
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:NO]];
+          NSString *details =
+              [NSString stringWithFormat:@"invalid URL supplied to "
+                                         @"fetchWithApproov: %@",
+                                         url ?: @"(null)"];
+          reject(@"bad_url", details, error);
+          return;
+        }
+        void (^rejectBadRequest)(NSString *) = ^(NSString *details) {
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:NO]];
+          reject(@"bad_request", details, error);
+        };
+        NSMutableURLRequest *request =
+            [NSMutableURLRequest requestWithURL:parsedURL];
+        request.HTTPMethod = @"GET";
+
+        id methodValue = options[@"method"];
+        if (methodValue != nil && methodValue != [NSNull null]) {
+          if (![methodValue isKindOfClass:[NSString class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov method must be a string when provided");
+            return;
+          }
+          NSString *method = [(NSString *)methodValue
+              stringByTrimmingCharactersInSet:
+                  [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+          if (method.length != 0)
+            request.HTTPMethod = method;
+        }
+
+        id headersValue = options[@"headers"];
+        if (headersValue != nil && headersValue != [NSNull null]) {
+          if (![headersValue isKindOfClass:[NSDictionary class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov headers must be an object when provided");
+            return;
+          }
+          NSMutableDictionary<NSString *, NSString *> *headers =
+              [[NSMutableDictionary alloc] init];
+          for (id key in [(NSDictionary *)headersValue allKeys]) {
+            id value = [(NSDictionary *)headersValue objectForKey:key];
+            if (![key isKindOfClass:[NSString class]]) {
+              rejectBadRequest(
+                  @"fetchWithApproov header names must be strings");
+              return;
+            }
+            if (value == nil || value == [NSNull null])
+              continue;
+            if (![value isKindOfClass:[NSString class]]) {
+              rejectBadRequest(
+                  @"fetchWithApproov header values must be strings");
+              return;
+            }
+            headers[(NSString *)key] = (NSString *)value;
+          }
+          request.allHTTPHeaderFields = headers;
+        }
+
+        id bodyValue = options[@"body"];
+        if (bodyValue != nil && bodyValue != [NSNull null]) {
+          if (![bodyValue isKindOfClass:[NSString class]]) {
+            rejectBadRequest(
+                @"fetchWithApproov body must be a string when provided");
+            return;
+          }
+          request.HTTPBody =
+              [(NSString *)bodyValue dataUsingEncoding:NSUTF8StringEncoding];
+        }
+
+        // 3. Add ALL Approov protections (Token, Signature, TraceIDs, Headers)
+        ApproovInterceptorResult *result = [self interceptRequest:request];
+        switch (result.action) {
+        case ApproovInterceptorActionProceed:
+          break;
+        case ApproovInterceptorActionRetry:
+          // Mirror swizzled behavior and avoid sending any outbound request.
+          resolve(@{
+            @"status" : @503,
+            @"headers" : @{},
+            @"body" : result.message ?: @"Approov retry"
+          });
+          return;
+        case ApproovInterceptorActionFail:
+        default:
+          reject(@"approov_error",
+                 result.message ?: @"Approov request blocked by interceptor",
+                 nil);
+          return;
+        }
+
+        // Apply mutator post-processing (e.g. message signing) to mirror the
+        // swizzled interception pipeline.
+        NSMutableURLRequest *finalRequest = [result.request mutableCopy];
+        [[ApproovServiceMutatorBridge shared]
+            processRequest:finalRequest
+               tokenHeader:[ApproovService sharedTokenHeader]
+             traceIDHeader:[ApproovService sharedTraceIDHeader]];
+
+        // 4. Create an isolated, unswizzled NSURLSession with our Pinning
+        // Delegate
+        PinningURLSessionDelegate *pinningDelegate =
+            [[PinningURLSessionDelegate alloc] initWithDelegate:nil
+                                                 approovService:self];
+        NSURLSession *session = [NSURLSession
+            sessionWithConfiguration:[NSURLSessionConfiguration
+                                         defaultSessionConfiguration]
+                            delegate:pinningDelegate
+                       delegateQueue:nil];
+
+        // 5. Execute the highly protected request natively
+        NSURLSessionDataTask *task = [session
+            dataTaskWithRequest:finalRequest
+              completionHandler:^(NSData *data, NSURLResponse *response,
+                                  NSError *error) {
+                [session finishTasksAndInvalidate];
+                if (error) {
+                  reject(@"network_error", error.localizedDescription, error);
+                  return;
+                }
+
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                NSString *bodyString =
+                    [[NSString alloc] initWithData:data
+                                          encoding:NSUTF8StringEncoding];
+
+                // 6. Return the response back to JavaScript
+                resolve(@{
+                  @"status" : @(httpResponse.statusCode),
+                  @"headers" : httpResponse.allHeaderFields ?: @{},
+                  @"body" : bodyString ?: @""
+                });
+              }];
+
+        [task resume];
+      });
+}
+
+/**
+ * Exposes the native Approov logging facility to Javascript.
+ *
+ * @param message the string message to log natively
+ * @param level   the integer log level (e.g., ApproovLogLevelInfo)
+ */
+RCT_EXPORT_METHOD(logMessage : (NSString *)message level : (NSInteger)level) {
+  NSString *msg = message ? message : @"null";
+  switch (level) {
+  case APPROOV_EXTREME:
+    ApproovLogX(@"JS: %@", msg);
+    break;
+  case APPROOV_DEBUG:
+    ApproovLogD(@"JS: %@", msg);
+    break;
+  case APPROOV_INFO:
+    ApproovLogI(@"JS: %@", msg);
+    break;
+  case APPROOV_WARN:
+    ApproovLogW(@"JS: %@", msg);
+    break;
+  case APPROOV_ERROR:
+    ApproovLogE(@"JS: %@", msg);
+    break;
+  default:
+    ApproovLogI(@"JS: %@", msg);
+    break;
+  }
 }
 
 @end

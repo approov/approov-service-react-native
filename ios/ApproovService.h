@@ -74,6 +74,9 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// interceptors and bridges calls from Javascript
 @interface ApproovService : NSObject <RCTBridgeModule>
 
+/// Returns the current shared service instance when available.
++ (nullable ApproovService *)sharedService;
+
 /// Intercepts a request and updates it to potentially add an Approov token
 /// and/or perform substitutions on headers and query parameters.
 ///
@@ -122,5 +125,17 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// @param message is the message to be signed
 /// @return the base64 encoded signature
 + (NSString *)getAccountMessageSignature:(NSString *)message;
+
+/// Performs a secure fetch bypassing any swizzling, applying Approov
+/// protections and pinning.
+///
+/// @param url the requested URL
+/// @param options dictionary containing headers, body, method, etc.
+/// @param resolve promise resolver
+/// @param reject promise rejecter
+- (void)fetchWithApproov:(NSString *)url
+                 options:(NSDictionary *)options
+                resolver:(RCTPromiseResolveBlock)resolve
+                rejecter:(RCTPromiseRejectBlock)reject;
 
 @end

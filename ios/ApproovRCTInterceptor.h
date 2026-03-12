@@ -45,6 +45,19 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param mode 0=AllowList (default), 1=DenyList, 2=All
 + (void)setInterceptionMode:(NSInteger)mode;
 
+/// Sets the maximum number of times swizzle recovery can be attempted.
+/// @param attempts maximum attempts (must be >= 0)
++ (void)setMaxReswizzleAttempts:(NSInteger)attempts;
+
+/// Gets the configured maximum swizzle recovery attempts.
++ (NSInteger)maxReswizzleAttempts;
+
+/// Enables or disables extended session metadata collection used by diagnostics.
++ (void)setSessionMetadataCollectionEnabled:(BOOL)enabled;
+
+/// Indicates whether extended session metadata collection is enabled.
++ (BOOL)sessionMetadataCollectionEnabled;
+
 /// Adds a delegate pattern to the allow list
 /// @param delegatePattern delegate class name or pattern (use * for wildcard)
 + (void)addAllowedDelegate:(NSString *)delegatePattern;
@@ -71,6 +84,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Validates that pinning is active and logs warnings if not
 + (void)validatePinningIsActive;
+
+/// Returns IMP integrity diagnostics — detects if another SDK has
+/// overwritten our swizzled method implementations
++ (NSDictionary *)getIMPIntegrityDiagnostics;
 
 @end
 

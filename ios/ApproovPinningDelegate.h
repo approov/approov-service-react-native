@@ -39,16 +39,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param delegate is the original delgate
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
-+ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate>)delegate
-                    approovService:(ApproovService *)approovService;
++ (instancetype)createWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
+                    approovService:(ApproovService *_Nullable)approovService;
 
 /// Initializes a pinning URL session delegate.
 ///
 /// @param delegate is the original delgate
 /// @param approovService is the ApproovService that will provide the pinning
 /// information
-- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
-                  approovService:(ApproovService *)approovService;
+- (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
+                  approovService:(ApproovService *_Nullable)approovService;
 
 @end
 

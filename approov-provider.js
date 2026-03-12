@@ -32,19 +32,39 @@ const ApproovProvider = ({ config, onInit, children }) => {
   })
 
   useEffect(() => {
-    // execute onInit function before initialization
-    if (onInit) onInit()
+    let isMounted = true
 
-    // initialize Approov
-    ApproovService.initialize(config)
-      .then(() => {
+    const initializeApproov = async () => {
+      try {
+        // execute onInit function before initialization and support async setup
+        if (onInit) await Promise.resolve(onInit())
+
+        // initialize Approov
+        await ApproovService.initialize(config)
+        if (!isMounted) return
+
         setStatus({ approovReady: true, approovError: null })
-      })
-      .catch((error) => {
+        if (ApproovService.logMessage) {
+          ApproovService.logMessage("React Native: ApproovService.initialize() promise resolved successfully.", 2 /* INFO */);
+        }
+      } catch (error) {
+        if (!isMounted) return
+
         // This is a runtime error so set in context so program can notify user
         // Most common cause is a missing config string.
         setStatus({ approovReady: false, approovError: error })
-      })
+        if (ApproovService.logMessage) {
+          const details = (error && error.message) ? error.message : String(error)
+          ApproovService.logMessage("React Native: ApproovService.initialize() promise rejected: " + details, 4 /* ERROR */);
+        }
+      }
+    }
+
+    initializeApproov()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   return (

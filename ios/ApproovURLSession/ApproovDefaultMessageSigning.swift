@@ -129,7 +129,7 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
     @available(*, deprecated, message: "Use handleInterceptorProcessedRequest instead.")
     public func processedRequest(_ request: URLRequest, changes: ApproovRequestMutations) throws -> URLRequest {
         // If the request doesn't have an Approov token, we don't need to sign it
-        if (request.allHTTPHeaderFields?["Approov-Token"]) != nil {
+        if (request.allHTTPHeaderFields?[ApproovService.sharedTokenHeader()]) != nil {
             // Generate and add a message signature
             let provider = ApproovURLSessionComponentProvider(request: request)
             guard let params = try buildSignatureParameters(provider: provider, changes: changes) else {

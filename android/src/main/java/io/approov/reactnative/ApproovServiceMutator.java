@@ -225,10 +225,12 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
+                throw new ApproovNetworkException(status,
+                        "Approov token fetch for " + url + ": " + status.toString());
+            case NO_APPROOV_SERVICE:
                 if (service.getUseApproovStatusIfNoToken())
                     return true;
                 return false;
-            case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;

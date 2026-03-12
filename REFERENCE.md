@@ -23,6 +23,24 @@ ApproovService.initialize(config: string);
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
+## fetchWithApproov
+Provides a secure `fetch()`-compatible API, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs.
+
+```Javascript
+ApproovService.fetchWithApproov(input: string | Request, init?: RequestInit);
+```
+
+- `input` (string | Request): The URL to fetch, or a WHATWG `Request` object containing the URL and method.
+- `init` (RequestInit, optional): An options object containing standard fetch properties like `method`, `headers`, and `body`.
+
+This function returns a `Promise` that resolves to a standard WHATWG `Response` object. `fetchWithApproov` is intended for JSON/text APIs and does not provide full React Native `NetworkingModule` parity:
+
+* Only string request bodies are supported (`JSON.stringify(...)` or plain text).
+* No multipart form uploads (`FormData`, including file/URI-backed form parts).
+* No binary request bodies (`Blob`, `ArrayBuffer`) or request/response streaming.
+* No `AbortController` cancellation.
+* No React Native networking event model features (for example upload/download progress hooks).
+
 ## setProceedOnNetworkFail
 *OBSOLETE:* Do not use this method. It is deprecated and does nothing.
 
@@ -37,7 +55,31 @@ Sets a flag indicating if the Approov fetch status should be used as the token h
 ApproovService.setUseApproovStatusIfNoToken(shouldUse: boolean);
 ```
 
-When enabled, if the Approov token fetch fails or returns an empty token, the `Approov-Token` header will be populated with the status string (with the configured prefix) instead of being left empty.
+When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
+
+## setSessionMetadataCollectionEnabled
+Enables or disables the extended session metadata ledger used by `getSessionDiagnostics()` on iOS. This ledger records extra development-time information about registered and unregistered sessions, including skipped delegates, request counts, last observed URLs, and the owning image/bundle for delegate classes.
+
+```Javascript
+ApproovService.setSessionMetadataCollectionEnabled(enabled: boolean);
+```
+
+> [!WARNING]
+> This ledger is for development and troubleshooting only.
+> On iOS, call `ApproovService.setSessionMetadataCollectionEnabled(false)` early in startup for production builds.
+> Android does not currently store an equivalent session ledger; there this API is a parity no-op.
+> The iOS diagnostics ledger is internally capped to about 1 MB as a safety backstop, but you should still disable it in release builds.
+
+The default is `true`. This does not disable the core pinning/session registry used by Approov itself.
+
+## getSessionMetadataCollectionEnabled
+Returns whether extended session metadata collection is currently enabled.
+
+```Javascript
+ApproovService.getSessionMetadataCollectionEnabled();
+```
+
+On Android, this reflects the parity flag only; it does not imply an iOS-style diagnostic ledger is being retained.
 
 ## setLogLevel
 Sets the logging level for the native Approov SDK integration. This governs how much information is printed to the native console (Android Logcat or iOS OSLog/console).
@@ -48,14 +90,24 @@ ApproovService.setLogLevel(level: number);
 
 The `level` should be one of the constants provided in `ApproovService.Log` (e.g., `ApproovService.Log.DEBUG`, `ApproovService.Log.INFO`, `ApproovService.Log.WARN`, `ApproovService.Log.ERROR`, `ApproovService.Log.EXTREME`, or `ApproovService.Log.NONE`).
 
+## logMessage
+Emits a message to native Approov logging (Android Logcat / iOS console) from JavaScript. This is useful for correlating JS lifecycle events with native interception logs.
+
+```Javascript
+ApproovService.logMessage(message: string, level?: number);
+```
+
+* `message` (string): The message text to log.
+* `level` (number, optional): One of `ApproovService.Log.*`. Defaults to `INFO` if omitted.
+
 ## addAllowedDelegate
-Registers a custom `NSURLSessionDelegate` class name (or a regex pattern matching class names) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
+Registers a custom `NSURLSessionDelegate` class name (or a prefix pattern matching class names using a trailing `*`) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
 
 ```Javascript
 ApproovService.addAllowedDelegate(delegatePattern: string);
 ```
 
-* `delegatePattern` (string): The exact class name or a regular expression string matching the class name of the delegate you wish to intercept.
+* `delegatePattern` (string): The exact class name or a prefix string ending with `*` (e.g., `MySDK*`) matching the class name of the delegate you wish to intercept.
 
 This method only affects the iOS networking stack; it is a no-op on Android.
 
@@ -78,6 +130,24 @@ ApproovService.setTokenHeader(header: string, prefix: string);
 ```
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
+
+## setTraceIDHeader
+Sets a header to be used to include a trace ID in subsequent network requests. If a header is set, then a random identifier is added to the request headers when an Approov token is fetched natively, to uniquely identify the request for diagnostic purposes.
+
+```Javascript
+ApproovService.setTraceIDHeader(header: string);
+```
+
+You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`.
+
+## getTraceIDHeader
+Gets the trace ID header that was previously set by `setTraceIDHeader` or through the configuration properties.
+
+```Javascript
+ApproovService.getTraceIDHeader();
+```
+
+This function returns a `Promise` providing the result.
 
 ## setBindingHeader
 Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then a hash of the header value is included in the issued Approov tokens to bind them to the value. This may then be verified by the backend API integration.
@@ -261,8 +331,26 @@ token will not use a cached version, so that this information can be transmitted
 ApproovService.setInstallAttrsInToken(attrs: string);
 ```
 
+## setMaxReswizzleAttempts
+Sets the maximum number of times Approov should attempt to automatically re-swizzle its network interception hooks on iOS if it detects they have been hijacked or overwritten by another SDK (like Datadog or New Relic) at runtime.
+
+```javascript
+ApproovService.setMaxReswizzleAttempts(attempts)
+```
+
+- `attempts` (number): The maximum number of recovery attempts. Must be a positive integer or zero. The default value is `0`, which disables runtime IMP recovery unless you explicitly opt in.
+
+## getMaxReswizzleAttempts
+Gets the current maximum number of times Approov should attempt to automatically re-swizzle its network interception hooks on iOS.
+
+```javascript
+ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
+```
+
+- Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts. The default is `0` (disabled).
+
 ## getPinningDiagnostics
-Returns an object containing detailed diagnostics about the current state of certificate pinning and SDK interception. On Android, this specifically checks the `OkHttpClient` to ensure the `ApproovInterceptor` and `ApproovCertificatePinner` are active. On iOS, it provides statistics about the currently pinned and unpinned `NSURLSession` instances.
+Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
 
 ```Javascript
 ApproovService.getPinningDiagnostics();
@@ -272,9 +360,22 @@ This function returns a `Promise` resolving to an object with the following stru
 * `isInterceptorPresent` (boolean): (Android only) True if the Approov HTTP interceptor is configured.
 * `isPinnerPresent` (boolean): (Android only) True if the Approov Certificate Pinner is configured.
 * `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
+* `totalAuthChallenges` (number): (iOS only) Total TLS auth challenges observed across intercepted sessions.
+* `totalPinned` (number): (iOS only) Number of auth challenges where pinning validation succeeded.
+* `totalBlocked` (number): (iOS only) Number of auth challenges blocked by pinning.
 * `sessionsWithPinning` (number): (iOS only) The number of `NSURLSession` instances currently protected by Approov pinning.
 * `sessionsWithoutPinning` (number): (iOS only) The number of `NSURLSession` instances currently active without Approov pinning.
-* `unpinnedSessions` (Array<{ sessionId: string; requestCount: number }>): (iOS only) Details of active sessions not currently intercepted.
+* `unpinnedSessions` (Array<{ sessionPointer: string; delegateClassName: string; requestCount: number }>): (iOS only) Details of sessions where requests were observed but pinning was not verified.
+
+Recommended usage:
+
+* **Android:** call this immediately before the first protected request. If `isInterceptorPresent` or `isPinnerPresent` is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.
+* **iOS:** call this immediately after the first protected request and inspect `sessionsWithoutPinning` and `unpinnedSessions`.
+
+Important limitations:
+
+* On iOS, a pre-request baseline with zero sessions is normal.
+* On iOS, this method only reports on sessions that Approov successfully intercepted and registered. A completely bypassed request may not appear in this metadata and must be diagnosed from native logs.
 
 ## updateClientFactory
 Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.

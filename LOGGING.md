@@ -82,6 +82,34 @@ Because the Approov SDK operates at the native network interception layer (often
 
 We **strongly recommend** ensuring that your native observability SDK is configured to capture and forward these system logs remotely. This provides critical visibility into the initialization and pinning process, allowing for faster diagnosis of issues that may occur in different production environments.
 
+We also recommend capturing the structured metadata returned by `ApproovService.getPinningDiagnostics()` during early rollout:
+1. immediately after initialization and before the first protected request
+2. immediately after the first protected request
+
+This metadata complements the native logs:
+* **Android:** confirms whether the active shared `OkHttpClient` still contains the Approov interceptor and certificate pinner.
+* **iOS:** confirms whether registered sessions have verified pinning, and highlights `sessionsWithoutPinning` / `unpinnedSessions` when requests were observed without successful pinning verification.
+
+On iOS, remember that a completely bypassed session may not appear in the metadata at all. In that case, the native logs remain the primary signal.
+
+> [!WARNING]
+> The session metadata ledger behind `getSessionDiagnostics()` is intended only for development and short-lived troubleshooting.
+> In production, turn it off on iOS with `ApproovService.setSessionMetadataCollectionEnabled(false)`.
+> The iOS implementation now enforces an internal safety cap of about 1 MB, but that cap is only a guardrail and should not be treated as a production setting.
+> Android does not currently retain an equivalent session ledger.
+
+## High-Value iOS Log Lines
+
+When debugging iOS networking conflicts, these log messages are especially important:
+
+* `+load passive probe ...`: startup-only diagnostics about `NSURLSession` classes and selector implementations before the interceptor starts.
+* `Registered session ...`: Approov saw session creation and stored session metadata.
+* `task mutation [...]`: request interception and mutation executed for that task.
+* `SKIPPING session creation ... (not in interception policy)`: the delegate class was not allowlisted.
+* `skipping dataTaskWithRequest for unregistered session`: task creation was visible, but session registration was missed.
+* `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an active Approov hook after interceptor startup and the optional runtime integrity checker detected or attempted recovery. These logs only appear when runtime recovery is enabled with `setMaxReswizzleAttempts(...) > 0`.
+* `PINNING BLOCKED connection ...`: pinning actively rejected the server trust.
+* `forwarding without pin verification`: the pinning delegate was reached, but a usable service was not available for verification.
 
 ## Troubleshooting
 

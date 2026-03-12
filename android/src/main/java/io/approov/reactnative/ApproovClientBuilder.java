@@ -47,16 +47,34 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     private CustomClientBuilder wrappedBuilder;
 
     /**
-     * Creates an ApproovClientBuilder for OkHttp requests. This adds the
-     * interceptor and certificate
-     * pinning, which can be dynamically updated if the pins change during app
-     * usage.
+     * Creates a long-lived ApproovClientBuilder for OkHttp requests. This adds
+     * the interceptor and certificate pinning, which can be dynamically updated
+     * if the pins change during app usage. The builder registers itself as a
+     * PinChangeListener so that it is notified when pins are updated.
      *
      * @param approovService is the ApproovService being used
      * @param wrappedBuilder is the CustomClientBuilder that was already set, or
      *                       null if none
      */
     public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder) {
+        this(approovService, wrappedBuilder, false);
+    }
+
+    /**
+     * Creates an ApproovClientBuilder for OkHttp requests. This adds the
+     * interceptor and certificate pinning. When {@code ephemeral} is false the
+     * builder registers itself as a PinChangeListener so that it can react to
+     * dynamic pin changes over the app's lifetime. When {@code ephemeral} is
+     * true the builder is intended for a single, short-lived request (e.g.
+     * fetchWithApproov) and does NOT register as a listener, avoiding unbounded
+     * listener list growth.
+     *
+     * @param approovService is the ApproovService being used
+     * @param wrappedBuilder is the CustomClientBuilder that was already set, or
+     *                       null if none
+     * @param ephemeral      if true, skip PinChangeListener registration
+     */
+    public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder, boolean ephemeral) {
         this.approovService = approovService;
         this.wrappedBuilder = wrappedBuilder;
 
@@ -66,8 +84,12 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
         // set the interceptor
         interceptor = new ApproovInterceptor(approovService);
 
-        // listen for any future pinning changes
-        approovService.addPinChangeListener(this);
+        // only register for pin change notifications on long-lived builders;
+        // ephemeral builders (used by fetchWithApproov) build a fresh pinner on
+        // every call so listening for updates would just leak references.
+        if (!ephemeral) {
+            approovService.addPinChangeListener(this);
+        }
     }
 
     /**

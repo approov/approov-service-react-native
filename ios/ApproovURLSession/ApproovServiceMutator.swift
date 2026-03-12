@@ -209,12 +209,13 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
+            return false
+        case .noApproovService:
             if ApproovService.sharedUseApproovStatusIfNoToken() {
                 return true
             }
             return false
-        case .noApproovService,
-             .unknownURL,
+        case .unknownURL,
              .unprotectedURL:
             return false
         default:

@@ -1,8 +1,9 @@
 # Approov Service for React Native
 
-A wrapper for the [Approov SDK](https://github.com/approov/approov-ios-sdk) to enable easy integration when using [`React native`](https://reactnative.dev/) for making the API calls that you wish to protect with Approov. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
+A wrapper for the [Approov SDK](https://github.com/approov/approov-ios-sdk) to enable easy integration when using [`React Native`](https://reactnative.dev/) for making the API calls that you wish to protect with Approov using `fetch()` or similar. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
 
 For more detailed information, please refer to the following documentation:
+* **[ARCHITECTURE.md](ARCHITECTURE.md)**: A deep dive into the service layer's network interception design on iOS and Android, race conditions, interference from 3rd party SDKs, and the `fetchWithApproov` alternative.
 * **[USAGE.md](USAGE.md)**: Detailed instructions on using the various features of the Approov Service, including message signing, token binding, and custom networks mutators.
 * **[REFERENCE.md (Interface)](REFERENCE.md)**: The complete API reference for the React Native `ApproovService` interface, describing all available methods and error types.
 * **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: A guide providing solutions to common errors and compilation issues you may encounter during setup and integration.
@@ -15,7 +16,7 @@ Add the Approov service layer to your existing App with the following command:
 npm install @approov/approov-service-react-native
 ```
 
-Note if you experience an error related to peer dependencies, then you can append the `--force` to install with your particular React Native version. The plugin supports version 0.75 or above.
+Note if you experience an error related to peer dependencies, then you can append the `--force` to install with your particular React Native version. The plugin supports version 0.76 or above.
 
 If you are installing into an Expo project then use:
 
@@ -76,6 +77,12 @@ The `<enter-your-config-string-here>` is a custom string that configures your Ap
 Once the initialization is called, it is possible for any network requests to have Approov tokens or secret substitutions made. Initially you won't have set which API domains to protect, so the requests will be unchanged. It will have called Approov though and made contact with the Approov cloud service. You will see `ApproovService` logging indicating `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 
 You may use the `ApproovMonitor` component (also imported from `@approov/approov-service-react-native`) inside the `ApproovProvider`. This will output console logging on the state of the Approov initialization.
+
+During initial rollout and whenever you add observability SDKs, you should also capture `ApproovService.getPinningDiagnostics()` metadata in your app logging:
+* **Android:** fetch the metadata immediately before the first protected request and verify `isInterceptorPresent` and `isPinnerPresent`. If either is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.
+* **iOS:** fetch the metadata immediately after the first protected request and inspect `sessionsWithoutPinning` and `unpinnedSessions`. This helps detect delegate conflicts, skipped sessions, and missing pinning verification early in development and staging.
+
+See [USAGE.md](USAGE.md) for a recommended startup diagnostics workflow and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for platform-specific interpretation.
 
 On Android, you can see logging using [`logcat`](https://developer.android.com/studio/command-line/logcat) output from the device. You can see the specific Approov output using `adb logcat | grep ApproovService`. On iOS, look at the console output from the device using the [Console](https://support.apple.com/en-gb/guide/console/welcome/mac) app from MacOS. This provides console output for a connected simulator or physical device. Select the device and search for `ApproovService` to obtain specific logging related to Approov.
 

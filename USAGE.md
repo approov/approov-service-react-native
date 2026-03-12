@@ -2,6 +2,147 @@
 
 This document describes the features and functionality of the Approov Service for React Native. It provides details on how to interact with the service layer and customize its behavior to suit your application's needs.
 
+## ⚠️ Critical: Initialization Timing & Network Requests
+
+The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic.
+
+If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
+
+> [!WARNING]
+> You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
+> A request that leaves the device before initialization completes may be forwarded without an Approov token.
+> The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues.
+> On iOS, **turn it off for production** with `ApproovService.setSessionMetadataCollectionEnabled(false)` as part of startup.
+> Android currently does not persist an equivalent session ledger; this toggle is retained there only for API parity.
+> The iOS ledger now has an internal safety cap of about 1 MB, but that cap is only a backstop. It is **not** a reason to leave session metadata collection enabled in release builds.
+
+To guarantee all requests are protected, you **must** strictly gate your network activity behind the initialization state. We provide two ways to do this:
+
+### Option 1: Using the `useApproov()` Hook (Recommended)
+If you are using the `<ApproovProvider>` wrapper at the root of your app, the provider automatically handles initialization. You can use the `useApproov()` hook in your child components to wait until Approov is fully ready before fetching data or rendering.
+
+```javascript
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { useApproov } from '@approov/approov-service-react-native';
+
+const MainScreen = () => {
+  // Extract the async initialization state
+  const { approovReady, approovError } = useApproov();
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    // Only fetch your critical API data once Approov is definitively initialized
+    if (approovReady && !approovError) {
+      fetch("https://api.example.com/data")
+        .then(res => res.json())
+        .then(setData);
+    }
+  }, [approovReady, approovError]);
+
+  if (approovError) return <Text>Approov failed to start</Text>;
+  if (!approovReady) return <ActivityIndicator size="large" />; 
+
+  return <View> /* Render your data */ </View>;
+}
+```
+
+### Option 2: Awaiting the Promise (For Headless/Service logic)
+If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
+
+```javascript
+import { Platform } from 'react-native';
+import { ApproovService } from '@approov/approov-service-react-native';
+
+async function bootstrapAppAndFetch() {
+  try {
+    // 1. Wait for Approov to finish initializing its Native modules
+    await ApproovService.initialize("<your-config-string>");
+    
+    // 2. Capture startup diagnostics metadata.
+    // On Android this is the pre-flight health check. On iOS this is a baseline.
+    const diagnostics = await ApproovService.getPinningDiagnostics();
+    console.log("Approov startup diagnostics:", diagnostics);
+
+    // 3. CRITICAL ON ANDROID: heal the shared OkHttpClient before the first request.
+    if (Platform.OS === "android" &&
+        diagnostics &&
+        (!diagnostics.isInterceptorPresent || !diagnostics.isPinnerPresent)) {
+      console.warn("Approov hooks are missing from the active OkHttpClient. Healing...");
+      await ApproovService.updateClientFactory(true);
+    }
+    
+    // 4. Make the first protected request
+    const response = await fetch("https://api.example.com/secure-data");
+
+    // 5. On iOS, inspect session metadata immediately after the first protected request.
+    const afterFirstRequest = await ApproovService.getPinningDiagnostics();
+    console.log("Approov post-request diagnostics:", afterFirstRequest);
+  } catch (error) {
+    console.error("Failed to initialize Approov", error);
+  }
+}
+```
+
+### Recommended Early Diagnostics Metadata Capture
+During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
+
+1. **Immediately after initialization and before the first protected request**
+2. **Immediately after the first protected request**
+
+This gives you visibility into two different failure classes:
+
+1. **Android factory override problems before the first request**
+2. **iOS session registration, delegate, and pinning-verification problems after the first request**
+
+If you are also using `ApproovService.getSessionDiagnostics()`, treat it as a temporary troubleshooting aid. It is most useful while validating a new integration, tracking down third-party `NSURLSessionDelegate` conflicts, or confirming that a startup request escaped before initialization completed. After that work is done, disable the extended ledger in production:
+
+```javascript
+ApproovService.setSessionMetadataCollectionEnabled(false);
+```
+
+> [!WARNING]
+> Do not leave `getSessionDiagnostics()` metadata collection enabled in production on iOS.
+> The ledger is capped internally to about 1 MB to prevent unbounded growth, but it still stores extra diagnostic state that should only exist during development, staging, or short-lived rollout debugging.
+> On Android this toggle is currently a no-op for ledger storage.
+
+```javascript
+import { Platform } from 'react-native';
+import { ApproovService } from '@approov/approov-service-react-native';
+
+async function captureApproovDiagnostics(stage) {
+  const diagnostics = await ApproovService.getPinningDiagnostics();
+  console.log(`[Approov ${stage}]`, JSON.stringify(diagnostics, null, 2));
+
+  if (Platform.OS === 'android' &&
+      (!diagnostics.isInterceptorPresent || !diagnostics.isPinnerPresent)) {
+    await ApproovService.updateClientFactory(true);
+  }
+
+  return diagnostics;
+}
+
+await ApproovService.initialize("<your-config-string>");
+await captureApproovDiagnostics("pre-first-fetch");
+
+await fetch("https://api.example.com/secure-data");
+
+await captureApproovDiagnostics("post-first-fetch");
+```
+
+Interpret the metadata as follows:
+
+* **Android:** `isInterceptorPresent` and `isPinnerPresent` must both be `true` before the first protected request. If not, another SDK likely replaced the shared `OkHttpClientFactory`.
+* **iOS:** a pre-request baseline with zero sessions is normal. The important signal is the metadata *after* the first protected request. If `sessionsWithoutPinning` is greater than `0`, then Approov observed requests on intercepted sessions but pinning was not verified for those sessions.
+* **iOS limitation:** `getPinningDiagnostics()` only knows about sessions that actually reached the Approov interceptor. A completely bypassed first request may still require inspection of native `ApproovService` logs for `IMP CONFLICT`, `SKIPPING session creation`, or `skipping ... unregistered session`.
+
+You should send this metadata to your observability platform during early adoption. It is one of the fastest ways to spot request mutation or pinning regressions introduced by new monitoring SDKs, networking wrappers, or startup ordering changes.
+
+### Pre-Flight Native Network Health Check (Android)
+React Native heavily optimizes Android networking by using a single, globally shared `OkHttpClient`. If another observability or analytics SDK (e.g., Datadog, New Relic) initializes *after* Approov does, that SDK might programmatically overwrite the networking factory, completely stripping away the Approov protection without throwing an error.
+
+For robust Android deployments, it is **highly recommended** to perform the `ApproovService.getPinningDiagnostics()` health-check exactly once, just before you execute the very first API request of the application session, as demonstrated in Option 2 above. If the interceptor is missing, calling `ApproovService.updateClientFactory(true)` will instantly heal the active client, preserving the foreign SDK's hooks while adding the Approov protection back on top.
+
 ## Message Signing
 
 It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:
@@ -43,7 +184,42 @@ To enable this feature:
 ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
-When enabled, if the Approov token fetch fails or returns an empty token, the `Approov-Token` header will be populated with the status string (with the configured prefix) instead of being left empty.
+When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
+
+## Using `fetchWithApproov` (Alternative to Swizzling)
+
+By default, the `@approov/approov-service-react-native` package uses **swizzling (iOS)** and **OkHttpClient factory overrides (Android)** to automatically intercept all React Native `fetch()` calls and inject Approov tokens.
+
+However, in some complex applications, other observability SDKs (like New Relic, Datadog, or Firebase) might aggressively hook into the same networking layer in a way that conflicts with or bypasses Approov's security checks.
+
+If you encounter such conflicts, you can use the `ApproovService.fetchWithApproov` API. It is a secure `fetch`-compatible API for sensitive calls, executed natively on isolated, protected HTTP clients that cannot be interfered with by other React Native modules.
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+// Use it exactly like you would use standard `fetch`
+const response = await ApproovService.fetchWithApproov('https://api.yourdomain.com/data', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ key: 'value' })
+});
+
+const data = await response.json();
+```
+
+### Limitations of `fetchWithApproov`
+The `fetchWithApproov` wrapper is designed for standard JSON and text API payloads. Because it bypasses React Native's full `NetworkingModule` stack, it does not support:
+- Multipart form uploads (`FormData`, including file/URI-backed form parts)
+- Binary request bodies (`Blob` or `ArrayBuffer`)
+- Request cancellation via `AbortController`
+- React Native networking event model features (such as upload/download progress hooks)
+- Streaming enormous files (the entire response is buffered into memory)
+
+In practice, pass string bodies (`JSON.stringify(...)` or plain text) and use this API for security-critical REST calls rather than complex form/file transfer flows.
+
+For critical security and authentication calls, `fetchWithApproov` provides guaranteed protection.
 
 ---
 

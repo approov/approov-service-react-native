@@ -128,8 +128,9 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
      */
     @available(*, deprecated, message: "Use handleInterceptorProcessedRequest instead.")
     public func processedRequest(_ request: URLRequest, changes: ApproovRequestMutations) throws -> URLRequest {
-        // If the request doesn't have an Approov token, we don't need to sign it
-        if (request.allHTTPHeaderFields?[ApproovService.sharedTokenHeader()]) != nil {
+        // If the interceptor did not add an Approov token, there is nothing
+        // for the signer to authenticate.
+        if changes.getTokenHeaderKey() != nil {
             // Generate and add a message signature
             let provider = ApproovURLSessionComponentProvider(request: request)
             guard let params = try buildSignatureParameters(provider: provider, changes: changes) else {
@@ -626,18 +627,22 @@ class ApproovURLSessionComponentProvider: ComponentProvider {
 
     public func getRequestTarget() -> String {
         var target = getPath()
-        if let query = request.url?.query {
+        if let query = percentEncodedQuery() {
             target += "?\(query)"
         }
         return target
     }
 
     public func getPath() -> String {
-        return request.url?.path ?? ""
+        let path = urlComponents()?.percentEncodedPath ?? request.url?.path ?? ""
+        if path.isEmpty, request.url != nil {
+            return "/"
+        }
+        return path
     }
 
     public func getQuery() -> String {
-        return request.url?.query ?? ""
+        return percentEncodedQuery() ?? ""
     }
 
     public func getQueryParam(name: String) -> String? {
@@ -671,6 +676,17 @@ class ApproovURLSessionComponentProvider: ComponentProvider {
 
     public func hasBody() -> Bool {
         return request.httpBody != nil || request.httpBodyStream != nil
+    }
+
+    private func urlComponents() -> URLComponents? {
+        guard let url = request.url else {
+            return nil
+        }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)
+    }
+
+    private func percentEncodedQuery() -> String? {
+        return urlComponents()?.percentEncodedQuery
     }
 }
 

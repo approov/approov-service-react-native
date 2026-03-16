@@ -13,18 +13,32 @@ import Approov
         self.serviceMutator = signer
         super.init()
     }
+
+    private func headerValue(forHTTPHeaderField header: String,
+                             in request: URLRequest) -> String? {
+        if let value = request.value(forHTTPHeaderField: header) {
+            return value
+        }
+        guard let headers = request.allHTTPHeaderFields else {
+            return nil
+        }
+        for (key, value) in headers where key.caseInsensitiveCompare(header) == .orderedSame {
+            return value
+        }
+        return nil
+    }
     
     @objc public func processRequest(_ request: NSMutableURLRequest, tokenHeader: String?, traceIDHeader: String?) {
         let urlRequest = request as URLRequest
         let changes = ApproovRequestMutations()
         if let th = tokenHeader,
-           let tokenValue = request.value(forHTTPHeaderField: th),
+           let tokenValue = headerValue(forHTTPHeaderField: th, in: urlRequest),
            !tokenValue.isEmpty {
             // Only sign token header when the request actually carries one.
             changes.setTokenHeaderKey(th)
         }
         if let traceTh = traceIDHeader,
-           let traceValue = request.value(forHTTPHeaderField: traceTh),
+           let traceValue = headerValue(forHTTPHeaderField: traceTh, in: urlRequest),
            !traceValue.isEmpty {
             // Avoid requiring a trace component when the trace header is absent.
             changes.setTraceIDHeaderKey(traceTh)

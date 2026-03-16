@@ -180,18 +180,21 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
             // os_log("Message Header - Signature: %@", type: .debug, sigHeader)
             // os_log("Message Header Signature-Input: %@", type: .debug, sigInputHeader)
 
-            // Add headers to the request
+            // Replace any previous signing headers so re-processing the same
+            // request stays idempotent.
             var signedRequest = provider.getRequest()
-            signedRequest.addValue(sigHeader, forHTTPHeaderField: "Signature")
-            signedRequest.addValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
+            signedRequest.setValue(sigHeader, forHTTPHeaderField: "Signature")
+            signedRequest.setValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
 
             if params.isDebugMode() {
                 let digest = ApproovDefaultMessageSigning.sha256(data: Data(message.utf8))
                 if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
-                    signedRequest.addValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
+                    signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
                 } else {
                     os_log("ApproovService: Failed to get digest algorithm - no debug entry", type: .debug)
                 }
+            } else {
+                signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")
             }
 
             // WARNING never log the full request as it contains an Approov token which provides access to your API

@@ -154,7 +154,7 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                     os_log("ApproovService: install message signature unavailable, skipping signing", type: .error)
                     return request
                 }
-                // decode the signature from ASN.1 DER format
+                // The backend verifier expects the raw IEEE-P1363 r||s form.
                 signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
             case ApproovDefaultMessageSigning.ALG_HS256:
                 sigId = "account"
@@ -168,8 +168,7 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
             }
 
             // Create signature headers
-            let signatureBase64 = signature.base64EncodedString()
-            guard let sigHeader = try SFV.serializeDictionary(key: sigId, string: signatureBase64) else {
+            guard let sigHeader = try SFV.serializeDictionary(key: sigId, data: signature) else {
                 throw ApproovServiceError.permanentError(message: "Failed to serialize signature header")
             }
             guard let sigInputHeader = try SFV.serializeDictionary(key: sigId, innerList: params.toComponentValue()) else {

@@ -27,6 +27,7 @@ import org.bouncycastle.asn1.ASN1Sequence;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
-import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -270,14 +270,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers. Note that the
-        // signatures are
-        // added as strings (as required by the spec) instead of byte sequences which
-        // would better
-        // fit the data.
-        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
         String sigHeader = Dictionary.valueOf(Map.of(
-                sigId, StringItem.valueOf(signatureBase64))).serialize();
+                sigId, ByteSequenceItem.valueOf(signature))).serialize();
         String sigInputHeader = Dictionary.valueOf(Map.of(
                 sigId, params.toComponentValue())).serialize();
 
@@ -292,8 +286,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // signature builder
         // may have modified it.
         Request.Builder signedBuilder = provider.getRequest().newBuilder()
-                .addHeader("Signature", sigHeader)
-                .addHeader("Signature-Input", sigInputHeader);
+                .header("Signature", sigHeader)
+                .header("Signature-Input", sigInputHeader);
         if (params.isDebugMode()) {
             try {
                 MessageDigest digestBuilder = MessageDigest.getInstance("SHA-256");
@@ -301,10 +295,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 byte[] digest = digestBuilder.digest(message.getBytes(StandardCharsets.UTF_8));
                 String digestHeader = Dictionary.valueOf(Map.of(
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
-                signedBuilder.addHeader("Signature-Base-Digest", digestHeader);
+                signedBuilder.header("Signature-Base-Digest", digestHeader);
             } catch (NoSuchAlgorithmException e) {
                 Log.d(TAG, "Failed to get digest algorithm - no debug entry " + e);
             }
+        } else {
+            signedBuilder.removeHeader("Signature-Base-Digest");
         }
         Request signed = signedBuilder.build();
 
@@ -571,7 +567,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             // add the digest to the request
             Request request = provider.getRequest();
             request = request.newBuilder()
-                    .addHeader("Content-Digest", digestHeader.serialize())
+                    .header("Content-Digest", digestHeader.serialize())
                     .build();
             provider.setRequest(request);
             // add the header to the SignatureParameters
@@ -673,15 +669,26 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
 
         @Override
         public String getTargetUri() {
-            return jURI.toString();
+            String rawPath = jURI.getRawPath();
+            if (rawPath != null && !rawPath.isEmpty()) {
+                return jURI.toString();
+            }
+            try {
+                return new URI(
+                        jURI.getScheme(),
+                        jURI.getRawAuthority(),
+                        "/",
+                        jURI.getRawQuery(),
+                        jURI.getRawFragment()).toString();
+            } catch (URISyntaxException e) {
+                return jURI.toString();
+            }
         }
 
         @Override
         public String getRequestTarget() {
-            String reqt = "";
-            if (jURI.getRawPath() != null) {
-                reqt += okURL.encodedPath();
-            }
+            String path = getPath();
+            String reqt = path;
             if (jURI.getRawQuery() != null) {
                 reqt += "?" + okURL.encodedQuery();
             }
@@ -690,7 +697,11 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
 
         @Override
         public String getPath() {
-            return okURL.encodedPath();
+            String encodedPath = okURL.encodedPath();
+            if (encodedPath == null || encodedPath.isEmpty()) {
+                return "/";
+            }
+            return encodedPath;
         }
 
         @Override

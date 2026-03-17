@@ -621,7 +621,14 @@ class ApproovURLSessionComponentProvider: ComponentProvider {
     }
 
     public func getTargetUri() -> String {
-        return request.url?.absoluteString ?? ""
+        guard let url = request.url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return request.url?.absoluteString ?? ""
+        }
+        if components.host != nil && components.percentEncodedPath.isEmpty {
+            components.percentEncodedPath = "/"
+        }
+        return components.string ?? url.absoluteString
     }
 
     public func getRequestTarget() -> String {

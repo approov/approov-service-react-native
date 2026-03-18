@@ -65,8 +65,16 @@ import Approov
             if let method = processedRequest.httpMethod {
                 request.httpMethod = method
             }
-            request.httpBody = processedRequest.httpBody
-            request.httpBodyStream = processedRequest.httpBodyStream
+            // Setting httpBodyStream, even to nil, can clear an existing httpBody
+            // on NSMutableURLRequest. Only set the active body representation.
+            if let bodyData = processedRequest.httpBody {
+                request.httpBody = bodyData
+            } else if let stream = processedRequest.httpBodyStream {
+                request.httpBodyStream = stream
+            } else {
+                request.httpBody = nil
+                request.httpBodyStream = nil
+            }
             request.timeoutInterval = processedRequest.timeoutInterval
             request.allHTTPHeaderFields = processedRequest.allHTTPHeaderFields
         } catch {

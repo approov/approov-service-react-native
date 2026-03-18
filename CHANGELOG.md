@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [3.5.11]
+- **HTTP Message Signing Interoperability**: Corrected iOS and Android message-signing output to match backend verifiers that expect structured-field byte sequence `Signature` entries and raw IEEE-P1363 install signatures.
+- **Canonical `@target-uri` Handling**: Normalized root-path target URI signing so requests such as `https://host/?query=...` are signed consistently across iOS and Android, fixing verification failures caused by empty-path URI variants.
+- **Idempotent Signing Headers**: Updated both native signers to replace existing `Signature`, `Signature-Input`, `Signature-Base-Digest`, and `Content-Digest` headers instead of appending duplicates when a request is processed more than once.
+- **iOS Message Signing Robustness**: Fixed iOS signing edge cases around empty-body digest generation, stream-backed request bodies, and dynamic token/trace header detection in the mutator bridge.
+- **iOS Request Body Bridge Refinement**: Refined native request copy-back so `httpBody` and `httpBodyStream` are preserved correctly when processed requests are written back through the iOS mutator bridge.
+
 ## [3.5.10]
 - **iOS Mutator Bridge Refinement**: Fixed a condition in the iOS mutator bridge where trace ID components were incorrectly required for signing even when the trace header was absent. Header mutation keys are now only set if the corresponding header is present and non-empty.
 - **Custom iOS Mutator Reliability**: Fixed an issue where custom iOS mutators could not reliably block requests during `NO_APPROOV_SERVICE` events. The native interceptor now correctly honors and propagates errors from the mutator bridge.

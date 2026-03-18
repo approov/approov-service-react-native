@@ -547,7 +547,9 @@ public class SignatureParametersFactory {
             guard let digestHeader = try SFV.serializeDictionary(key: bodyDigestAlg, data: digest) else {
                 throw ApproovServiceError.permanentError(message: "Failed to serialize Content-Digest header")
             }
-            request.addValue(digestHeader, forHTTPHeaderField: "Content-Digest")
+            // Replace any existing digest so re-processing the same request
+            // does not accumulate duplicate Content-Digest headers.
+            request.setValue(digestHeader, forHTTPHeaderField: "Content-Digest")
             provider.setRequest(request)
         } catch let error {
             throw ApproovServiceError.permanentError(message: "Failed to serialize Content-Digest header: \(error)")

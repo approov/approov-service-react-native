@@ -128,8 +128,9 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
      */
     @available(*, deprecated, message: "Use handleInterceptorProcessedRequest instead.")
     public func processedRequest(_ request: URLRequest, changes: ApproovRequestMutations) throws -> URLRequest {
-        // If the request doesn't have an Approov token, we don't need to sign it
-        if (request.allHTTPHeaderFields?[ApproovService.sharedTokenHeader()]) != nil {
+        // If the interceptor did not add an Approov token, there is nothing
+        // for the signer to authenticate.
+        if changes.getTokenHeaderKey() != nil {
             // Generate and add a message signature
             let provider = ApproovURLSessionComponentProvider(request: request)
             guard let params = try buildSignatureParameters(provider: provider, changes: changes) else {
@@ -153,7 +154,7 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                     os_log("ApproovService: install message signature unavailable, skipping signing", type: .error)
                     return request
                 }
-                // decode the signature from ASN.1 DER format
+                // The backend verifier expects the raw IEEE-P1363 r||s form.
                 signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
             case ApproovDefaultMessageSigning.ALG_HS256:
                 sigId = "account"
@@ -180,18 +181,21 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
             // os_log("Message Header - Signature: %@", type: .debug, sigHeader)
             // os_log("Message Header Signature-Input: %@", type: .debug, sigInputHeader)
 
-            // Add headers to the request
+            // Replace any previous signing headers so re-processing the same
+            // request stays idempotent.
             var signedRequest = provider.getRequest()
-            signedRequest.addValue(sigHeader, forHTTPHeaderField: "Signature")
-            signedRequest.addValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
+            signedRequest.setValue(sigHeader, forHTTPHeaderField: "Signature")
+            signedRequest.setValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
 
             if params.isDebugMode() {
                 let digest = ApproovDefaultMessageSigning.sha256(data: Data(message.utf8))
                 if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
-                    signedRequest.addValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
+                    signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
                 } else {
                     os_log("ApproovService: Failed to get digest algorithm - no debug entry", type: .debug)
                 }
+            } else {
+                signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")
             }
 
             // WARNING never log the full request as it contains an Approov token which provides access to your API
@@ -518,7 +522,7 @@ public class SignatureParametersFactory {
         var request = provider.getRequest()
 
         guard let body = SignatureParametersFactory.getHTTPBody(request) else {
-            // If there is no body, we can't generate a digest
+            // If there is no replayable body, we can't generate a digest.
             return false
         }
 
@@ -543,7 +547,9 @@ public class SignatureParametersFactory {
             guard let digestHeader = try SFV.serializeDictionary(key: bodyDigestAlg, data: digest) else {
                 throw ApproovServiceError.permanentError(message: "Failed to serialize Content-Digest header")
             }
-            request.addValue(digestHeader, forHTTPHeaderField: "Content-Digest")
+            // Replace any existing digest so re-processing the same request
+            // does not accumulate duplicate Content-Digest headers.
+            request.setValue(digestHeader, forHTTPHeaderField: "Content-Digest")
             provider.setRequest(request)
         } catch let error {
             throw ApproovServiceError.permanentError(message: "Failed to serialize Content-Digest header: \(error)")
@@ -553,30 +559,21 @@ public class SignatureParametersFactory {
     }
 
     /**
-     * Gets the HTTP body from the request, either from httpBody or httpBodyStream.
+     * Gets the HTTP body from the request when it can be replayed safely.
+     *
+     * Requests backed by a stream are skipped here because reading the stream
+     * for signing can consume bytes before URLSession sends the request.
      * 
      * @param request is the URLRequest to extract the body from.
-     * @return the HTTP body as Data, or nil if not available.
+     * @return the HTTP body as Data, or nil if not available or not safely replayable.
      */
     private static func getHTTPBody(_ request: URLRequest) -> Data? {
         if let body = request.httpBody {
-            return body
-        } else if let bodyStream = request.httpBodyStream {
-            var data = Data()
-            bodyStream.open()
-            defer { bodyStream.close() }
-            let bufferSize = 1024
-            var buffer = [UInt8](repeating: 0, count: bufferSize)
-            while bodyStream.hasBytesAvailable {
-                let bytesRead = bodyStream.read(&buffer, maxLength: bufferSize)
-                if bytesRead < 0 {
-                    return nil
-                }
-                data.append(buffer, count: bytesRead)
-            }
-            return data
+            return body.isEmpty ? nil : body
+        } else if request.httpBodyStream != nil {
+            return nil
         }
-        return Data()
+        return nil
     }
 
     /**
@@ -626,23 +623,34 @@ class ApproovURLSessionComponentProvider: ComponentProvider {
     }
 
     public func getTargetUri() -> String {
-        return request.url?.absoluteString ?? ""
+        guard let url = request.url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return request.url?.absoluteString ?? ""
+        }
+        if components.host != nil && components.percentEncodedPath.isEmpty {
+            components.percentEncodedPath = "/"
+        }
+        return components.string ?? url.absoluteString
     }
 
     public func getRequestTarget() -> String {
         var target = getPath()
-        if let query = request.url?.query {
+        if let query = percentEncodedQuery() {
             target += "?\(query)"
         }
         return target
     }
 
     public func getPath() -> String {
-        return request.url?.path ?? ""
+        let path = urlComponents()?.percentEncodedPath ?? request.url?.path ?? ""
+        if path.isEmpty, request.url != nil {
+            return "/"
+        }
+        return path
     }
 
     public func getQuery() -> String {
-        return request.url?.query ?? ""
+        return percentEncodedQuery() ?? ""
     }
 
     public func getQueryParam(name: String) -> String? {
@@ -676,6 +684,17 @@ class ApproovURLSessionComponentProvider: ComponentProvider {
 
     public func hasBody() -> Bool {
         return request.httpBody != nil || request.httpBodyStream != nil
+    }
+
+    private func urlComponents() -> URLComponents? {
+        guard let url = request.url else {
+            return nil
+        }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)
+    }
+
+    private func percentEncodedQuery() -> String? {
+        return urlComponents()?.percentEncodedQuery
     }
 }
 

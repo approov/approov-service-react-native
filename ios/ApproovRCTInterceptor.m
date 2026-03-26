@@ -47,6 +47,15 @@
 // re-swizzle chains through to the original swizzle block.
 static NSString *const kApproovRecoveryActiveKey = @"ApproovRecoveryActive";
 
+static BOOL ApproovIsMockURL(NSURL *url) {
+  NSString *scheme = url.scheme;
+  return scheme != nil && [scheme isEqualToString:@"mockhttps"];
+}
+
+static BOOL ApproovIsMockRequest(NSURLRequest *request) {
+  return ApproovIsMockURL(request.URL);
+}
+
 // MARK: - Session Interception Mode
 
 /// Defines how sessions are intercepted
@@ -981,6 +990,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request);
+          }
           ApproovLogI(@"observed dataTaskWithRequest: for session %p %@", self,
                       request.URL);
           // Thread-safe session lookup
@@ -1042,6 +1054,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, completionHandler);
+          }
           ApproovLogI(@"observed dataTaskWithRequest:completionHandler: for "
                       @"session %p %@",
                       self, request.URL);
@@ -1092,6 +1107,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(url);
+          }
+          if (ApproovIsMockURL(url)) {
             return RSSWCallOriginal(url);
           }
           ApproovLogI(@"observed dataTaskWithURL: for session %p %@", self,
@@ -1146,6 +1164,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(url, completionHandler);
+          }
+          if (ApproovIsMockURL(url)) {
             return RSSWCallOriginal(url, completionHandler);
           }
           ApproovLogI(@"observed dataTaskWithURL:completionHandler: for "
@@ -1226,6 +1247,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, bodyData);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, bodyData);
+          }
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromData: for session %p "
               @"%@",
@@ -1283,6 +1307,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, bodyData, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, bodyData, completionHandler);
+          }
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromData:completionHandler: "
               @"for session %p %@",
@@ -1335,6 +1362,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(request, fileURL);
+          }
+          if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, fileURL);
           }
           ApproovLogI(
@@ -1393,6 +1423,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, fileURL, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, fileURL, completionHandler);
+          }
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromFile:completionHandler: "
               @"for session %p %@",
@@ -1444,6 +1477,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(request);
+          }
+          if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request);
           }
           ApproovLogI(@"observed uploadTaskWithStreamedRequest: for session %p "
@@ -1658,6 +1694,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1699,6 +1738,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1736,6 +1778,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockURL(url)) {
+              return RSSWCallOriginal(url);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
@@ -1778,6 +1823,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockURL(url)) {
+              return RSSWCallOriginal(url, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
@@ -1821,6 +1869,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, bodyData);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1864,6 +1915,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, bodyData, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1903,6 +1957,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, fileURL);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1945,6 +2002,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, fileURL, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1983,6 +2043,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;

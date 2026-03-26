@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [3.5.12]
+- **iOS Mock Response Recursion Fix**: Prevented internal `mockhttps` retry and error responses from being re-intercepted by the swizzled `NSURLSession` task APIs. This fixes an iOS crash regression in offline and other non-proceed paths where synthetic mock tasks could recurse until stack overflow.
+
 ## [3.5.11]
 - **HTTP Message Signing Interoperability**: Corrected iOS and Android message-signing output to match backend verifiers that expect structured-field byte sequence `Signature` entries and raw IEEE-P1363 install signatures.
 - **Canonical `@target-uri` Handling**: Normalized root-path target URI signing so requests such as `https://host/?query=...` are signed consistently across iOS and Android, fixing verification failures caused by empty-path URI variants.

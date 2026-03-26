@@ -24,9 +24,17 @@
 
 #import "ApproovUtils.h"
 #import <Foundation/Foundation.h>
+#import <os/log.h>
 
 // Default log level
 static int sApproovLogLevel = APPROOV_INFO;
+
+static void ApproovLogWithType(os_log_type_t type, NSString *prefix,
+                               NSString *fmt, va_list args) {
+  NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+  NSString *fullMessage = [NSString stringWithFormat:@"%@%@", prefix, msg];
+  os_log_with_type(OS_LOG_DEFAULT, type, "%{public}@", fullMessage);
+}
 
 int getApproovLogLevel(void) { return sApproovLogLevel; }
 
@@ -36,9 +44,8 @@ void ApproovLog(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_INFO) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_INFO, @"ApproovService: ", fmt, vargs);
     va_end(vargs);
-    NSLog(@"ApproovService: %@", msg);
   }
 }
 
@@ -46,9 +53,9 @@ void ApproovLogX(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_EXTREME) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_DEBUG, @"ApproovService EXTREME: ", fmt,
+                       vargs);
     va_end(vargs);
-    NSLog(@"ApproovService EXTREME: %@", msg);
   }
 }
 
@@ -56,9 +63,9 @@ void ApproovLogD(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_DEBUG) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_DEBUG, @"ApproovService DEBUG: ", fmt,
+                       vargs);
     va_end(vargs);
-    NSLog(@"ApproovService DEBUG: %@", msg);
   }
 }
 
@@ -66,9 +73,8 @@ void ApproovLogI(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_INFO) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_INFO, @"ApproovService INFO: ", fmt, vargs);
     va_end(vargs);
-    NSLog(@"ApproovService INFO: %@", msg);
   }
 }
 
@@ -76,9 +82,8 @@ void ApproovLogW(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_WARN) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_ERROR, @"ApproovService WARN: ", fmt, vargs);
     va_end(vargs);
-    NSLog(@"ApproovService WARN: %@", msg);
   }
 }
 
@@ -86,9 +91,9 @@ void ApproovLogE(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_ERROR) {
     va_list vargs;
     va_start(vargs, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:vargs];
+    ApproovLogWithType(OS_LOG_TYPE_ERROR, @"ApproovService ERROR: ", fmt,
+                       vargs);
     va_end(vargs);
-    NSLog(@"ApproovService ERROR: %@", msg);
   }
 }
 

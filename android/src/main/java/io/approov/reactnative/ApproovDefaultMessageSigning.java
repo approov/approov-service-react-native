@@ -176,6 +176,44 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
+     * Obtains the install-scoped message signature for the supplied signature base.
+     * This hook exists so tests can override just the SDK lookup while still
+     * exercising the real signing logic.
+     *
+     * @param message The signature base to sign.
+     * @return The base64-encoded ASN.1 DER install signature.
+     * @throws ApproovException If the SDK cannot provide a signature.
+     */
+    protected String getInstallMessageSignature(String message) throws ApproovException {
+        return ApproovService.getInstallMessageSignature(message);
+    }
+
+    /**
+     * Obtains the account-scoped message signature for the supplied signature base.
+     * This hook exists so tests can override just the SDK lookup while still
+     * exercising the real signing logic.
+     *
+     * @param message The signature base to sign.
+     * @return The base64-encoded account signature.
+     * @throws ApproovException If the SDK cannot provide a signature.
+     */
+    protected String getAccountMessageSignature(String message) throws ApproovException {
+        return ApproovService.getAccountMessageSignature(message);
+    }
+
+    /**
+     * Decodes the supplied base64 signature payload. This hook exists so tests can
+     * supply a JVM-friendly decoder while production continues to use the Android
+     * platform implementation.
+     *
+     * @param base64 The base64-encoded signature payload.
+     * @return The decoded bytes.
+     */
+    protected byte[] decodeBase64(String base64) {
+        return Base64.decode(base64, Base64.NO_WRAP);
+    }
+
+    /**
      * Adds message signature to requests that have passed through the Approov
      * interceptor. The request is only modified to include message signature
      * headers if an ApproovToken has been added to the request and if there is
@@ -232,7 +270,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 sigId = "install";
                 String base64;
                 try {
-                    base64 = ApproovService.getInstallMessageSignature(message);
+                    base64 = getInstallMessageSignature(message);
                 } catch (ApproovException e) {
                     Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
                     return request;
@@ -241,7 +279,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                     Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
                     return request;
                 }
-                signature = Base64.decode(base64, Base64.NO_WRAP);
+                signature = decodeBase64(base64);
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
                     ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
@@ -262,8 +300,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             }
             case ALG_HS256: {
                 sigId = "account";
-                String base64 = ApproovService.getAccountMessageSignature(message);
-                signature = Base64.decode(base64, Base64.NO_WRAP);
+                String base64 = getAccountMessageSignature(message);
+                signature = decodeBase64(base64);
                 break;
             }
             default:

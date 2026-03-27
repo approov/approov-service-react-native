@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## [3.5.12]
 - **iOS Mock Response Recursion Fix**: Prevented internal `mockhttps` retry and error responses from being re-intercepted by the swizzled `NSURLSession` task APIs. This fixes an iOS crash regression in offline and other non-proceed paths where synthetic mock tasks could recurse until stack overflow.
+- **iOS Mock Completion Handlers**: Fixed iOS mock retry and failure paths so `NSURLSession` completion-handler APIs preserve and invoke the original caller blocks instead of dropping them. Upload task mock responses created through completion-handler selectors now also return real upload tasks instead of casting data tasks.
 - **iOS Native Log Visibility**: Switched the shared iOS native logging wrapper to unified logging with explicit public string formatting so dynamic Approov log messages no longer appear as `<private>` in app console output.
 
 ## [3.5.11]

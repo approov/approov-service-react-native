@@ -1079,12 +1079,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1192,12 +1194,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             NSURLRequest *request = [NSURLRequest requestWithURL:url];
@@ -1331,15 +1335,17 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return RSSWCallOriginal([result request], bodyData,
                                       completionHandler);
             case ApproovInterceptorActionRetry:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1447,15 +1453,17 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return RSSWCallOriginal([result request], fileURL,
                                       completionHandler);
             case ApproovInterceptorActionRetry:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1761,7 +1769,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, completionHandler);
           } @finally {
@@ -1847,7 +1856,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(url, completionHandler);
           } @finally {
@@ -1933,13 +1943,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               if ([result action] == ApproovInterceptorActionProceed)
                 return RSSWCallOriginal([result request], bodyData,
                                         completionHandler);
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, bodyData, completionHandler);
           } @finally {
@@ -2020,13 +2031,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               if ([result action] == ApproovInterceptorActionProceed)
                 return RSSWCallOriginal([result request], fileURL,
                                         completionHandler);
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, fileURL, completionHandler);
           } @finally {

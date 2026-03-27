@@ -51,10 +51,11 @@
     "preview-readme": "generate-md --layout github --input README.md --output readme.html",
     "build:android": "cd android && ./gradlew assembleDebug",
     "build:ios": "xcodebuild -project ios/Approov.xcodeproj -scheme Approov -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' clean build CODE_SIGNING_ALLOWED=NO",
-    "test": "npm run test:js && npm run test:android && npm run test:ios",
+    "test": "npm run test:js && npm run test:android && npm run test:ios:if-supported",
     "test:js": "jest --runInBand",
     "test:android": "cd android && ./gradlew test",
     "test:ios": "bash ./tests/ios/run_native_tests.sh",
+    "test:ios:if-supported": "node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run test:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS tests on non-macOS platform ' + process.platform); }\"",
     "prepack": "node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run build:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS build on non-macOS platform ' + process.platform); }\""
   }
 }

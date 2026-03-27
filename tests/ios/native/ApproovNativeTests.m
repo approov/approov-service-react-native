@@ -252,6 +252,37 @@ static void TestInterceptRequestDefaultsNoApproovServiceToProceed(void) {
                      @"Proceed path should surface the service status");
 }
 
+static void TestInterceptRequestHonorsCustomNoApproovServiceBlocks(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusNoApproovService, @"", @"", @"", NO));
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url,
+                                                NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    if (errorPointer != NULL) {
+      *errorPointer = [NSError errorWithDomain:@"io.approov.reactnative.tests"
+                                          code:1
+                                      userInfo:@{
+                                        NSLocalizedDescriptionKey :
+                                            @"custom no service block"
+                                      }];
+    }
+    return NO;
+  });
+
+  ApproovInterceptorResult *result =
+      [service interceptRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:
+                                                                 @"https://example.com/data"]]];
+
+  AssertEqualIntegers(ApproovInterceptorActionFail, result.action,
+                      @"Custom mutators should be able to block NO_APPROOV_SERVICE");
+  AssertEqualObjects(@"custom no service block", result.message,
+                     @"Custom mutator failures should be surfaced");
+}
+
 static void TestHeaderSubstitutionNetworkFailureRetries(void) {
   ApproovService *service = FreshService();
   isInitialized = YES;
@@ -385,6 +416,54 @@ static void TestMockUploadCompletionHandlersFire(void) {
   [session finishTasksAndInvalidate];
 }
 
+static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+
+  __block NSInteger fetchTokenHandlerCalls = 0;
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url,
+                                                NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    (void)errorPointer;
+    fetchTokenHandlerCalls += 1;
+    return NO;
+  });
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusPoorNetwork, @"", @"", @"", NO));
+
+  RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
+  NSURLSessionConfiguration *configuration =
+      [NSURLSessionConfiguration ephemeralSessionConfiguration];
+  NSURLSession *session =
+      [NSURLSession sessionWithConfiguration:configuration
+                                    delegate:delegate
+                               delegateQueue:nil];
+
+  NSURLSessionDataTask *task = [session
+      dataTaskWithURL:[NSURL URLWithString:@"https://example.com/data"]];
+  [task resume];
+
+  long waitResult = dispatch_semaphore_wait(
+      delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult,
+                      @"Synthetic dataTaskWithURL retry should complete in time");
+  AssertTrue(delegate.error == nil,
+             @"Synthetic dataTaskWithURL retry should not fail with NSError");
+  AssertEqualIntegers(503, delegate.response.statusCode,
+                      @"Synthetic dataTaskWithURL retry should surface a 503 status");
+  AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
+                      @"Synthetic dataTaskWithURL retry should not include a body");
+  AssertEqualIntegers(1, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
+                      @"Synthetic dataTaskWithURL retry should only fetch a token once");
+  AssertEqualIntegers(1, fetchTokenHandlerCalls,
+                      @"Synthetic dataTaskWithURL retry should only invoke the mutator once");
+
+  [session finishTasksAndInvalidate];
+  (void)service;
+}
+
 static void
 TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
   ApproovService *service = FreshService();
@@ -435,6 +514,40 @@ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
   (void)service;
 }
 
+static void TestFetchWithApproovRejectsInvalidURLs(void) {
+  ApproovService *service = FreshService();
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block BOOL resolved = NO;
+  __block NSString *rejectCode = nil;
+  __block NSString *rejectMessage = nil;
+
+  [service fetchWithApproov:@"file:///tmp/no-host"
+                    options:@{}
+                   resolver:^(id result) {
+                     (void)result;
+                     resolved = YES;
+                     dispatch_semaphore_signal(semaphore);
+                   }
+                   rejecter:^(NSString *code, NSString *message,
+                              NSError *error) {
+                     (void)error;
+                     rejectCode = code;
+                     rejectMessage = message;
+                     dispatch_semaphore_signal(semaphore);
+                   }];
+
+  long waitResult = dispatch_semaphore_wait(
+      semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult,
+                      @"fetchWithApproov bad URL rejections should complete in time");
+  AssertTrue(!resolved,
+             @"fetchWithApproov bad URL handling should reject instead of resolve");
+  AssertEqualObjects(@"bad_url", rejectCode,
+                     @"fetchWithApproov should reject invalid URLs with bad_url");
+  AssertTrue([rejectMessage containsString:@"invalid URL supplied to fetchWithApproov"],
+             @"fetchWithApproov should provide a descriptive invalid URL error");
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -445,12 +558,15 @@ int main(void) {
       ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
+      ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
       ^{ TestHeaderSubstitutionNetworkFailureRetries(); },
       ^{ TestQueryParameterSubstitutionUpdatesTheURL(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },
+      ^{ TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(); },
       ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
+      ^{ TestFetchWithApproovRejectsInvalidURLs(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

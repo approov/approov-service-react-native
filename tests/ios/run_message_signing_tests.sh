@@ -39,6 +39,7 @@ xcrun swiftc \
   "$REPO_ROOT/ios/ApproovURLSession/ApproovRequestMutations.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/ApproovServiceError.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/ApproovServiceMutator.swift" \
+  "$REPO_ROOT/ios/ApproovServiceMutatorBridge.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/ApproovDefaultMessageSigning.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/util/http-sfv/SFV.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/util/http-sfv/StringItem.swift" \

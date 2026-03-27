@@ -168,6 +168,7 @@ public class ApproovDefaultMessageSigningTest {
         assertNotNull(signed.header("Signature"));
         assertNotNull(signed.header("Signature-Input"));
         assertTrue(signed.header("Signature").contains("install=:"));
+        assertFalse(signed.header("Signature").contains(":" + derEncodedInstallSignature() + ":"));
         assertTrue(signed.header("Signature-Input").contains("install=("));
         assertNotEquals("stale-signature", signed.header("Signature"));
         assertNotEquals("stale-input", signed.header("Signature-Input"));
@@ -196,5 +197,42 @@ public class ApproovDefaultMessageSigningTest {
         assertFalse(signedTwice.header("Signature-Input").contains("stale-input"));
         assertEquals(1, countOccurrences(signedTwice.header("Signature"), "install=:"));
         assertEquals(1, countOccurrences(signedTwice.header("Signature-Input"), "install="));
+    }
+
+    @Test
+    public void signingCanonicalizesRootTargetUris() throws Exception {
+        Request request = new Request.Builder()
+            .url("https://api.example.com?hello=world")
+            .header("Approov-Token", "Bearer jwt-token")
+            .header("Approov-TraceID", "trace-123")
+            .build();
+
+        String actualMessage = captureSignatureBase(request);
+
+        assertTrue(actualMessage.contains("https://api.example.com/?hello=world"));
+    }
+
+    @Test
+    public void signingUsesDynamicTokenHeadersWithoutRequiringTraceHeaders() throws Exception {
+        changes.setTokenHeaderKey("X-Approov-Token");
+        changes.setTraceIDHeaderKey(null);
+
+        Request request = new Request.Builder()
+            .url("https://api.example.com/reply")
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("X-Approov-Token", "Bearer custom-token")
+            .header("Content-Type", "application/json")
+            .build();
+
+        String actualMessage = captureSignatureBase(request);
+
+        signer.clearRecordedMessages();
+        signer.setInstallSignatureBase64(derEncodedInstallSignature());
+        Request signed = signer.processedRequest(request, changes);
+
+        assertTrue(actualMessage.contains("\"x-approov-token\""));
+        assertFalse(actualMessage.contains("\"approov-traceid\""));
+        assertNotNull(signed.header("Signature"));
+        assertNotNull(signed.header("Signature-Input"));
     }
 }

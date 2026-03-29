@@ -47,6 +47,15 @@
 // re-swizzle chains through to the original swizzle block.
 static NSString *const kApproovRecoveryActiveKey = @"ApproovRecoveryActive";
 
+static BOOL ApproovIsMockURL(NSURL *url) {
+  NSString *scheme = url.scheme;
+  return scheme != nil && [scheme isEqualToString:@"mockhttps"];
+}
+
+static BOOL ApproovIsMockRequest(NSURLRequest *request) {
+  return ApproovIsMockURL(request.URL);
+}
+
 // MARK: - Session Interception Mode
 
 /// Defines how sessions are intercepted
@@ -981,6 +990,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request);
+          }
           ApproovLogI(@"observed dataTaskWithRequest: for session %p %@", self,
                       request.URL);
           // Thread-safe session lookup
@@ -1042,6 +1054,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, completionHandler);
+          }
           ApproovLogI(@"observed dataTaskWithRequest:completionHandler: for "
                       @"session %p %@",
                       self, request.URL);
@@ -1064,12 +1079,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1092,6 +1109,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(url);
+          }
+          if (ApproovIsMockURL(url)) {
             return RSSWCallOriginal(url);
           }
           ApproovLogI(@"observed dataTaskWithURL: for session %p %@", self,
@@ -1148,6 +1168,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(url, completionHandler);
           }
+          if (ApproovIsMockURL(url)) {
+            return RSSWCallOriginal(url, completionHandler);
+          }
           ApproovLogI(@"observed dataTaskWithURL:completionHandler: for "
                       @"session %p %@",
                       self, url);
@@ -1171,12 +1194,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             NSURLRequest *request = [NSURLRequest requestWithURL:url];
@@ -1224,6 +1249,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(request, bodyData);
+          }
+          if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, bodyData);
           }
           ApproovLogI(
@@ -1283,6 +1311,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, bodyData, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, bodyData, completionHandler);
+          }
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromData:completionHandler: "
               @"for session %p %@",
@@ -1304,15 +1335,17 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return RSSWCallOriginal([result request], bodyData,
                                       completionHandler);
             case ApproovInterceptorActionRetry:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1335,6 +1368,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(request, fileURL);
+          }
+          if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, fileURL);
           }
           ApproovLogI(
@@ -1393,6 +1429,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
             return RSSWCallOriginal(request, fileURL, completionHandler);
           }
+          if (ApproovIsMockRequest(request)) {
+            return RSSWCallOriginal(request, fileURL, completionHandler);
+          }
           ApproovLogI(
               @"observed uploadTaskWithRequest:fromFile:completionHandler: "
               @"for session %p %@",
@@ -1414,15 +1453,17 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return RSSWCallOriginal([result request], fileURL,
                                       completionHandler);
             case ApproovInterceptorActionRetry:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:503
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             default:
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                              withErrorCode:499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
           } else {
             [interceptor trackUnregisteredRequestForSession:self
@@ -1444,6 +1485,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           // Guard: skip if recovery block already processed this call
           if ([NSThread.currentThread
                       .threadDictionary[kApproovRecoveryActiveKey] boolValue]) {
+            return RSSWCallOriginal(request);
+          }
+          if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request);
           }
           ApproovLogI(@"observed uploadTaskWithStreamedRequest: for session %p "
@@ -1658,6 +1702,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1699,6 +1746,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1719,7 +1769,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, completionHandler);
           } @finally {
@@ -1736,6 +1787,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockURL(url)) {
+              return RSSWCallOriginal(url);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
@@ -1778,6 +1832,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockURL(url)) {
+              return RSSWCallOriginal(url, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
@@ -1799,7 +1856,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(url, completionHandler);
           } @finally {
@@ -1821,6 +1879,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, bodyData);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1864,6 +1925,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, bodyData, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1879,13 +1943,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               if ([result action] == ApproovInterceptorActionProceed)
                 return RSSWCallOriginal([result request], bodyData,
                                         completionHandler);
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, bodyData, completionHandler);
           } @finally {
@@ -1903,6 +1968,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, fileURL);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1945,6 +2013,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request, fileURL, completionHandler);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
@@ -1960,13 +2031,14 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               if ([result action] == ApproovInterceptorActionProceed)
                 return RSSWCallOriginal([result request], fileURL,
                                         completionHandler);
-              return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
-                  createMockTaskForSession:self
+              return [ApproovMockURLProtocol
+                  createMockUploadTaskForSession:self
                             withStatusCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
-                               withMessage:[result message]];
+                               withMessage:[result message]
+                         completionHandler:completionHandler];
             }
             return RSSWCallOriginal(request, fileURL, completionHandler);
           } @finally {
@@ -1983,6 +2055,9 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           NSThread.currentThread.threadDictionary[kApproovRecoveryActiveKey] =
               @YES;
           @try {
+            if (ApproovIsMockRequest(request)) {
+              return RSSWCallOriginal(request);
+            }
             ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;

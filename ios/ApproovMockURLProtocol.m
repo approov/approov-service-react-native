@@ -29,6 +29,21 @@
 /// the Approov fetching fails
 @implementation ApproovMockURLProtocol
 
++ (NSURL *)mockURLForPath:(NSString *)path
+                     code:(NSInteger)code
+                  message:(NSString *)msg {
+  NSString *urlString = [NSString
+      stringWithFormat:@"mockhttps://example.com/%@?code=%ld&msg=%@", path, code,
+                       [msg urlEncode]];
+  NSURL *url = [NSURL URLWithString:urlString];
+  ApproovLogD(@"mocked URL: %@: %@", url, urlString);
+  return url;
+}
+
++ (NSURLRequest *)mockRequestForURL:(NSURL *)url {
+  return [NSURLRequest requestWithURL:url];
+}
+
 /**
  * Starts a data task which returns a custom status code.
  *
@@ -40,12 +55,18 @@
 + (NSURLSessionDataTask *)createMockTaskForSession:(NSURLSession *)session
                                     withStatusCode:(NSInteger)code
                                        withMessage:(NSString *)msg {
-  NSString *urlString = [NSString
-      stringWithFormat:@"mockhttps://example.com/status?code=%ld&msg=%@", code,
-                       [msg urlEncode]];
-  NSURL *url = [NSURL URLWithString:urlString];
-  ApproovLogD(@"mocked URL: %@: %@", url, urlString);
+  NSURL *url = [self mockURLForPath:@"status" code:code message:msg];
   return [session dataTaskWithURL:url];
+}
+
++ (NSURLSessionDataTask *)
+    createMockTaskForSession:(NSURLSession *)session
+              withStatusCode:(NSInteger)code
+                 withMessage:(NSString *)msg
+           completionHandler:
+               (ApproovMockTaskCompletionHandler _Nullable)completionHandler {
+  NSURL *url = [self mockURLForPath:@"status" code:code message:msg];
+  return [session dataTaskWithURL:url completionHandler:completionHandler];
 }
 
 /**
@@ -59,12 +80,46 @@
 + (NSURLSessionDataTask *)createMockTaskForSession:(NSURLSession *)session
                                      withErrorCode:(NSInteger)code
                                        withMessage:(NSString *)msg {
-  NSString *urlString = [NSString
-      stringWithFormat:@"mockhttps://example.com/error?code=%ld&msg=%@", code,
-                       [msg urlEncode]];
-  NSURL *url = [NSURL URLWithString:urlString];
-  ApproovLogD(@"mocked URL: %@: %@", url, urlString);
+  NSURL *url = [self mockURLForPath:@"error" code:code message:msg];
   return [session dataTaskWithURL:url];
+}
+
++ (NSURLSessionDataTask *)
+    createMockTaskForSession:(NSURLSession *)session
+               withErrorCode:(NSInteger)code
+                 withMessage:(NSString *)msg
+           completionHandler:
+               (ApproovMockTaskCompletionHandler _Nullable)completionHandler {
+  NSURL *url = [self mockURLForPath:@"error" code:code message:msg];
+  return [session dataTaskWithURL:url completionHandler:completionHandler];
+}
+
++ (NSURLSessionUploadTask *)
+    createMockUploadTaskForSession:(NSURLSession *)session
+                    withStatusCode:(NSInteger)code
+                       withMessage:(NSString *)msg
+                 completionHandler:
+                     (ApproovMockTaskCompletionHandler _Nullable)
+                         completionHandler {
+  NSURL *url = [self mockURLForPath:@"status" code:code message:msg];
+  NSURLRequest *request = [self mockRequestForURL:url];
+  return [session uploadTaskWithRequest:request
+                               fromData:[NSData data]
+                      completionHandler:completionHandler];
+}
+
++ (NSURLSessionUploadTask *)
+    createMockUploadTaskForSession:(NSURLSession *)session
+                     withErrorCode:(NSInteger)code
+                       withMessage:(NSString *)msg
+                 completionHandler:
+                     (ApproovMockTaskCompletionHandler _Nullable)
+                         completionHandler {
+  NSURL *url = [self mockURLForPath:@"error" code:code message:msg];
+  NSURLRequest *request = [self mockRequestForURL:url];
+  return [session uploadTaskWithRequest:request
+                               fromData:[NSData data]
+                      completionHandler:completionHandler];
 }
 
 /**
@@ -157,9 +212,11 @@
     [client URLProtocolDidFinishLoading:self];
   } else {
     // send an error response
-    NSError *error = ApproovRNError(
-        APPROOV_ERROR,
-        @"Approov: MockURLProtocol doesn't support request body stream");
+    NSString *message = queryStrings[@"msg"];
+    if (message == nil || message.length == 0) {
+      message = @"Approov mock request failed";
+    }
+    NSError *error = ApproovRNError(code, @"%@", message);
     [client URLProtocol:self didFailWithError:error];
   }
 }

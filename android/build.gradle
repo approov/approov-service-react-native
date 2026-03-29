@@ -32,8 +32,9 @@ buildscript {
             mavenCentral()
         }
         dependencies {
-            classpath 'com.android.tools.build:gradle:3.4.1'
-        }    }
+            classpath 'com.android.tools.build:gradle:8.5.2'
+        }
+    }
 }
 
 android {
@@ -46,9 +47,18 @@ android {
         versionCode 1
         versionName "1.0"
     }
-    lintOptions {
-        abortOnError false
+    testOptions {
+        unitTests.returnDefaultValues = true
+        unitTests.all {
+            jvmArgs '-Dnet.bytebuddy.experimental=true', '-XX:+EnableDynamicAgentLoading'
+        }
     }
+}
+
+if (android.hasProperty("lint")) {
+    android.lint.abortOnError = false
+} else if (android.hasProperty("lintOptions")) {
+    android.lintOptions.abortOnError = false
 }
 
 repositories {
@@ -73,7 +83,7 @@ repositories {
 dependencies {
     //noinspection GradleDynamicVersion
     implementation fileTree(dir: "libs", include: ["*.aar"])
-    implementation 'com.facebook.react:react-native:+'
+    implementation 'com.facebook.react:react-android:+'
     implementation 'io.approov:approov-android-sdk:3.5.3'
     if (findProject(':rn-fetch-blob') != null) {
         implementation project(path: ':rn-fetch-blob')  // From node_modules
@@ -81,6 +91,9 @@ dependencies {
         println 'optional rn-fetch-blob dependency not found'
     }
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.77'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:4.11.0'
+    testImplementation 'org.mockito:mockito-inline:4.11.0'
 }
 
 def configureReactNativePom(def pom) {

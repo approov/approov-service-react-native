@@ -23,6 +23,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef void (^ApproovMockTaskCompletionHandler)(
+    NSData *_Nullable data, NSURLResponse *_Nullable response,
+    NSError *_Nullable error);
+
 /// A mock https protocol for returning status codes and errors to the user if the Approov
 /// fetching fails
 @interface ApproovMockURLProtocol: NSURLProtocol <NSURLSessionDataDelegate>
@@ -35,6 +39,20 @@ NS_ASSUME_NONNULL_BEGIN
 /// @return NSURLSessionDataTask that mocks the request
 + (NSURLSessionDataTask *)createMockTaskForSession:(NSURLSession *)session withStatusCode:(NSInteger)code withMessage:(NSString *)msg;
 
+/// Starts a data task with a completion handler which returns a custom status code.
+///
+/// @param session the session starting the task
+/// @param code the status code
+/// @param msg a descriptive message
+/// @param completionHandler the completion handler to invoke when the mock response completes
+/// @return NSURLSessionDataTask that mocks the request
++ (NSURLSessionDataTask *)
+    createMockTaskForSession:(NSURLSession *)session
+              withStatusCode:(NSInteger)code
+                 withMessage:(NSString *)msg
+           completionHandler:
+               (ApproovMockTaskCompletionHandler _Nullable)completionHandler;
+
 
 /// Starts a data task which fails the task with a custom error.
 ///
@@ -43,6 +61,50 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param msg a descriptive message
 /// @return NSURLSessionDataTask that mocks the request
 + (NSURLSessionDataTask *)createMockTaskForSession:(NSURLSession *)session withErrorCode:(NSInteger)code withMessage:(NSString *)msg;
+
+/// Starts a data task with a completion handler which fails the task with a custom error.
+///
+/// @param session the session starting the task
+/// @param code the error code
+/// @param msg a descriptive message
+/// @param completionHandler the completion handler to invoke when the mock response completes
+/// @return NSURLSessionDataTask that mocks the request
++ (NSURLSessionDataTask *)
+    createMockTaskForSession:(NSURLSession *)session
+               withErrorCode:(NSInteger)code
+                 withMessage:(NSString *)msg
+           completionHandler:
+               (ApproovMockTaskCompletionHandler _Nullable)completionHandler;
+
+/// Starts an upload task with a completion handler which returns a custom status code.
+///
+/// @param session the session starting the task
+/// @param code the status code
+/// @param msg a descriptive message
+/// @param completionHandler the completion handler to invoke when the mock response completes
+/// @return NSURLSessionUploadTask that mocks the request
++ (NSURLSessionUploadTask *)
+    createMockUploadTaskForSession:(NSURLSession *)session
+                    withStatusCode:(NSInteger)code
+                       withMessage:(NSString *)msg
+                 completionHandler:
+                     (ApproovMockTaskCompletionHandler _Nullable)
+                         completionHandler;
+
+/// Starts an upload task with a completion handler which fails the task with a custom error.
+///
+/// @param session the session starting the task
+/// @param code the error code
+/// @param msg a descriptive message
+/// @param completionHandler the completion handler to invoke when the mock response completes
+/// @return NSURLSessionUploadTask that mocks the request
++ (NSURLSessionUploadTask *)
+    createMockUploadTaskForSession:(NSURLSession *)session
+                     withErrorCode:(NSInteger)code
+                       withMessage:(NSString *)msg
+                 completionHandler:
+                     (ApproovMockTaskCompletionHandler _Nullable)
+                         completionHandler;
 
 @end
 

@@ -9,6 +9,7 @@ import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mockStatic;
 
 import android.content.res.AssetManager;
 import android.content.Context;
@@ -16,14 +17,20 @@ import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.criticalblue.minisdk.testing.AttesterProxyController;
+import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReadableArray;
+import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.modules.network.NetworkingModule;
+import com.facebook.react.modules.network.OkHttpClientProvider;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.CertificatePinner;
+import okhttp3.Interceptor;
 
 import org.json.JSONObject;
 import org.junit.After;
@@ -121,6 +128,42 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void getPinningDiagnosticsReportsInterceptorAndPinner() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-diag");
+        Interceptor extraInterceptor = chain -> chain.proceed(chain.request());
+        OkHttpClient client = new OkHttpClient.Builder()
+            .addInterceptor(new ApproovInterceptor(service))
+            .addInterceptor(extraInterceptor)
+            .certificatePinner(ApproovCertificatePinner.build(service))
+            .build();
+
+        try (org.mockito.MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
+            okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
+
+            PromiseResult resolved = awaitResolvedPromise(service::getPinningDiagnostics);
+            assertTrue(resolved.value instanceof ReadableMap);
+
+            ReadableMap diagnostics = (ReadableMap) resolved.value;
+            assertTrue(diagnostics.hasKey("isInterceptorPresent"));
+            assertTrue(diagnostics.getBoolean("isInterceptorPresent"));
+            assertTrue(diagnostics.hasKey("isPinnerPresent"));
+            assertTrue(diagnostics.getBoolean("isPinnerPresent"));
+            assertTrue(diagnostics.hasKey("interceptors"));
+
+            ReadableArray interceptors = diagnostics.getArray("interceptors");
+            assertNotNull(interceptors);
+            boolean foundApproovInterceptor = false;
+            for (int i = 0; i < interceptors.size(); i++) {
+                if ("io.approov.reactnative.ApproovInterceptor".equals(interceptors.getString(i))) {
+                    foundApproovInterceptor = true;
+                    break;
+                }
+            }
+            assertTrue(foundApproovInterceptor);
+        }
+    }
+
+    @Test
     public void fetchWithApproovAddsTokenTraceBindingHashAndSubstitutions() throws Exception {
         reinitializeServiceWithScenario(
             "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
@@ -151,6 +194,141 @@ public class ApproovServiceMiniSdkTest {
         JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
         assertEquals(sha256Base64("Bearer oauth-token"), payload.getString("pay"));
     }
+    
+    @Test
+    public void setDataHashInTokenDirect() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-data-hash");
+        
+        // Set data hash manually
+        awaitResolvedPromise(promise -> service.setDataHashInToken("manual-data-hash", promise));
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+
+        JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
+        assertEquals(sha256Base64("manual-data-hash"), payload.getString("pay"));
+    }
+
+    @Test
+    public void setDataHashInTokenEmptyClearsPayClaim() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-data-hash-empty");
+
+        awaitResolvedPromise(promise -> service.setDataHashInToken("", promise));
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+
+        JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
+        assertFalse(payload.has("pay"));
+    }
+
+    @Test
+    public void setDataHashInTokenNullRejectsAndDoesNotAffectWorkerRequest() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-data-hash-null");
+
+        PromiseResult rejected = awaitPromise(promise -> service.setDataHashInToken(null, promise));
+        assertEquals("setDataHashInToken", rejected.code);
+        assertTrue(rejected.message.contains("IllegalArgument"));
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+
+        JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
+        assertFalse(payload.has("pay"));
+    }
+
+    @Test
+    public void setBindingHeaderMissing() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-binding-missing");
+        service.setBindingHeader("X-Custom-Binding");
+
+        // Request WITHOUT X-Custom-Binding
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+
+        JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
+        assertFalse(payload.has("pay"));
+    }
+
+    @Test
+    public void setBindingHeaderEmptyDoesNotAddPayClaim() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-binding-empty");
+        service.setBindingHeader("X-Custom-Binding");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL())
+            .header("X-Custom-Binding", "")
+            .build());
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+
+        JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
+        assertFalse(payload.has("pay"));
+    }
+
+
+    @Test
+    public void fetchWithApproovUsesCustomHeaders() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        service.setTokenHeader("Custom-Token", "Prefix ");
+        service.setTraceIDHeader("Custom-TraceID");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        String token = getHeader(reply, "Custom-Token");
+        String traceId = getHeader(reply, "Custom-TraceID");
+
+        assertNotNull(token);
+        assertTrue(token.startsWith("Prefix "));
+        assertNotNull(traceId);
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+    }
+
+    @Test
+    public void fetchWithApproovCanDisableTraceID() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        service.setTraceIDHeader(null);
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+    }
+
+    @Test
+    public void fetchWithApproovInjectsStatusWhenNoToken() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        service.setUseApproovStatusIfNoToken(true);
+        AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertEquals("NO_APPROOV_SERVICE", getHeader(reply, "Approov-Token"));
+    }
+
+    @Test
+    public void fetchWithApproovInjectsStatusWithCustomMutator() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        service.setUseApproovStatusIfNoToken(true);
+
+        // Use a custom mutator that allows POOR_NETWORK to proceed
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorFetchTokenResult(ApproovService service, Approov.TokenFetchResult result, String url) {
+                if (result.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) {
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"POOR_NETWORK\"}}");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertEquals("POOR_NETWORK", getHeader(reply, "Approov-Token"));
+    }
 
     @Test
     public void fetchWithApproovProceedsWithoutTokenForNoApproovService() throws Exception {
@@ -180,6 +358,70 @@ public class ApproovServiceMiniSdkTest {
         assertNull(getHeader(reply, "Approov-Token"));
         assertNull(getHeader(reply, "Approov-TraceID"));
         assertTrue(reply.getString("url").contains("/excluded"));
+    }
+
+    @Test
+    public void removeSubstitutionHeaderRevertsBehavior() throws Exception {
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"initialSecureStrings\": {\"header-key\": \"header-secret\"}",
+            "reinit-header-sub"
+        );
+        service.addSubstitutionHeader("Api-Key", "");
+
+        // 1. Verify substitution happens
+        JSONObject reply1 = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL())
+            .header("Api-Key", "header-key")
+            .build());
+        assertEquals("header-secret", getHeader(reply1, "Api-Key"));
+
+        // 2. Remove substitution and verify it reverts
+        service.removeSubstitutionHeader("Api-Key");
+        JSONObject reply2 = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL())
+            .header("Api-Key", "header-key")
+            .build());
+        assertEquals("header-key", getHeader(reply2, "Api-Key"));
+    }
+
+    @Test
+    public void removeSubstitutionQueryParamRevertsBehavior() throws Exception {
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}",
+            "reinit-query-sub"
+        );
+        service.addSubstitutionQueryParam("api_key");
+
+        // 1. Verify substitution happens
+        JSONObject reply1 = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL() + "?api_key=query-key")
+            .build());
+        assertTrue(reply1.getString("url").contains("api_key=query-secret"));
+
+        // 2. Remove substitution and verify it reverts
+        service.removeSubstitutionQueryParam("api_key");
+        JSONObject reply2 = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL() + "?api_key=query-key")
+            .build());
+        assertTrue(reply2.getString("url").contains("api_key=query-key"));
+    }
+
+    @Test
+    public void removeExclusionURLRegexRevertsBehavior() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        String regex = "^.*excluded.*$";
+        service.addExclusionURLRegex(regex);
+
+        // 1. Verify exclusion happens (no token)
+        JSONObject reply1 = fetchNetworkReply(new Request.Builder().url(getTargetURL() + "/excluded").build());
+        assertNull(getHeader(reply1, "Approov-Token"));
+
+        // 2. Remove exclusion and verify it is protected again
+        service.removeExclusionURLRegex(regex);
+        JSONObject reply2 = fetchNetworkReply(new Request.Builder().url(getTargetURL() + "/excluded").build());
+        assertNotNull(getHeader(reply2, "Approov-Token"));
     }
 
     @Test

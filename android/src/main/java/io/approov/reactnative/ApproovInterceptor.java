@@ -133,9 +133,11 @@ public class ApproovInterceptor implements Interceptor {
 
         // update the data hash based on any token binding header (presence is optional)
         String bindingHeader = approovService.getBindingHeader();
-        if ((bindingHeader != null) && request.headers().names().contains(bindingHeader)) {
-            Approov.setDataHashInToken(request.header(bindingHeader));
-            Log.d(TAG, "setting data hash for binding header " + bindingHeader);
+        if ((bindingHeader != null) && !bindingHeader.equals("")) {
+            String bindingValue = request.header(bindingHeader);
+            Approov.setDataHashInToken((bindingValue != null) ? bindingValue : "");
+            if (bindingValue != null)
+                Log.d(TAG, "setting data hash for binding header " + bindingHeader);
         }
 
         // request an Approov token for the domain and log unless suppressed

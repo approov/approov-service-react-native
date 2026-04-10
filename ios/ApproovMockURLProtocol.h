@@ -29,7 +29,10 @@ typedef void (^ApproovMockTaskCompletionHandler)(
 
 /// A mock https protocol for returning status codes and errors to the user if the Approov
 /// fetching fails
-@interface ApproovMockURLProtocol: NSURLProtocol <NSURLSessionDataDelegate>
+@interface ApproovMockURLProtocol : NSURLProtocol <NSURLSessionDataDelegate>
+
+/// Holds the last request processed by the protocol for testing purposes
+@property(class, nonatomic, strong, nullable) NSURLRequest *lastRequest;
 
 /// Starts a data task which returns a custom status code.
 ///

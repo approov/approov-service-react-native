@@ -4,15 +4,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, ApproovTokenFetchStatus) {
   ApproovTokenFetchStatusSuccess = 0,
-  ApproovTokenFetchStatusUnknownURL,
-  ApproovTokenFetchStatusUnprotectedURL,
   ApproovTokenFetchStatusNoNetwork,
-  ApproovTokenFetchStatusPoorNetwork,
   ApproovTokenFetchStatusMITMDetected,
+  ApproovTokenFetchStatusPoorNetwork,
   ApproovTokenFetchStatusNoApproovService,
   ApproovTokenFetchStatusBadURL,
+  ApproovTokenFetchStatusUnknownURL,
+  ApproovTokenFetchStatusUnprotectedURL,
+  ApproovTokenFetchStatusNotInitialized,
   ApproovTokenFetchStatusRejected,
+  ApproovTokenFetchStatusDisabled,
   ApproovTokenFetchStatusUnknownKey,
+  ApproovTokenFetchStatusBadKey,
+  ApproovTokenFetchStatusBadPayload,
+  ApproovTokenFetchStatusInternalError
 };
 
 @interface ApproovTokenFetchResult : NSObject

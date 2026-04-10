@@ -5,6 +5,7 @@
 #import "MiniSDKTestSupport.h"
 #import "approov_service_react_native-Swift.h"
 #import "ios/ApproovPinningDelegate.h"
+#import "ios/ApproovRCTInterceptor.h"
 #import "ios/ApproovService.h"
 
 extern BOOL isInitialized;
@@ -28,6 +29,8 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
         rejecter:(RCTPromiseRejectBlock)reject;
 - (void)getDeviceID:(RCTPromiseResolveBlock)resolve
            rejecter:(RCTPromiseRejectBlock)reject;
+- (void)getLastARC:(RCTPromiseResolveBlock)resolve
+          rejecter:(RCTPromiseRejectBlock)reject;
 - (void)fetchToken:(NSString *)url
           resolver:(RCTPromiseResolveBlock)resolve
           rejecter:(RCTPromiseRejectBlock)reject;
@@ -42,11 +45,22 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
                   options:(NSDictionary *)options
                  resolver:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject;
+- (void)setDataHashInToken:(NSString *)data
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject;
+- (void)getPinningDiagnostics:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject;
 - (ApproovTrustDecision)verifyPins:(SecTrustRef)serverTrust
                            forHost:(NSString *)host;
+- (void)setTokenHeader:(NSString *)header prefix:(NSString *)prefix;
+- (void)setTraceIDHeader:(NSString *)header;
 - (void)setBindingHeader:(NSString *)header;
+- (void)removeSubstitutionHeader:(NSString *)header;
+- (void)removeSubstitutionQueryParam:(NSString *)key;
+- (void)removeExclusionURLRegex:(NSString *)urlRegex;
 - (void)addSubstitutionHeader:(NSString *)header requiredPrefix:(NSString *)requiredPrefix;
 - (void)addSubstitutionQueryParam:(NSString *)key;
+- (void)addExclusionURLRegex:(NSString *)urlRegex;
 @end
 
 static NSUInteger gFailureCount = 0;
@@ -104,7 +118,7 @@ static void ResetSharedState(void) {
   initialConfigString = @"test-config";
   approovTokenHeader = @"Approov-Token";
   approovTraceIDHeader = @"Approov-TraceID";
-  approovTokenPrefix = @"Bearer ";
+  approovTokenPrefix = @"";
   bindingHeader = @"";
   substitutionHeaders = [[NSMutableDictionary alloc] init];
   substitutionQueryParams = [[NSMutableSet alloc] init];
@@ -215,13 +229,23 @@ static NSDictionary *FetchNetworkReply(ApproovService *service, NSString *url, N
     [service fetchWithApproov:url options:options ?: @{} resolver:resolve rejecter:reject];
   });
   NSDictionary *response = result[@"value"];
+  if (response == nil || (id)response == [NSNull null]) {
+    Fail([NSString stringWithFormat:@"Expected resolve with value, got code=%@ msg=%@", result[@"code"], result[@"message"]]);
+    return nil;
+  }
   NSString *body = response[@"body"];
   if (body == nil || (id)body == [NSNull null] || body.length == 0) {
-    Fail(@"Expected fetchWithApproov to return a JSON body");
+    Fail(@"Expected fetchWithApproov to return a non-empty body");
     return nil;
   }
   NSData *data = [body dataUsingEncoding:NSUTF8StringEncoding];
-  return [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  NSError *error = nil;
+  NSDictionary *reply = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  if (error) {
+    Fail([NSString stringWithFormat:@"Failed to parse worker JSON: %@. Body was: %@", error.localizedDescription, body]);
+    return nil;
+  }
+  return reply;
 }
 
 static id HeaderValue(NSDictionary *reply, NSString *key) {
@@ -306,6 +330,23 @@ static void TestGetDeviceIDReturnsMiniSDKDeviceID(void) {
     [service getDeviceID:resolve rejecter:reject];
   });
   AssertEqualObjects(@"daIvmEWBA2gvZny7a/RC/w==", result[@"value"], @"Mini SDK device ID should match");
+}
+
+static void TestGetPinningDiagnosticsReturnsExpectedShape(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [ApproovRCTInterceptor startWithApproovService:service];
+  NSDictionary *result = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service getPinningDiagnostics:resolve rejecter:reject];
+  });
+
+  NSDictionary *diagnostics = result[@"value"];
+  AssertTrue([diagnostics isKindOfClass:[NSDictionary class]], @"Pinning diagnostics should resolve to a dictionary");
+  AssertNotNil(diagnostics[@"sessionsWithPinning"], @"Pinning diagnostics should include sessionsWithPinning");
+  AssertNotNil(diagnostics[@"sessionsWithoutPinning"], @"Pinning diagnostics should include sessionsWithoutPinning");
+  AssertNotNil(diagnostics[@"unpinnedSessions"], @"Pinning diagnostics should include unpinnedSessions");
 }
 
 static void TestFetchWithApproovAddsTokenTraceAndSubstitutions(void) {
@@ -479,11 +520,227 @@ static void TestFetchWithApproovAcceptsValidRequests(void) {
   AssertEqualObjects(@"{\"test\":\"payload\"}", reply[@"body"], @"Backend should receive string body");
 }
 
+static void TestFetchWithApproovUsesDefaultHeaders(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"), @"Should use default token header");
+  AssertNotNil(HeaderValue(reply, @"Approov-TraceID"), @"Should use default trace ID header");
+}
+
+static void TestFetchWithApproovUsesCustomHeaders(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setTokenHeader:@"Custom-Token" prefix:@"Prefix "];
+  [service setTraceIDHeader:@"Custom-TraceID"];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Custom-Token");
+  NSString *traceID = HeaderValue(reply, @"Custom-TraceID");
+
+  AssertNotNil(token, @"Should use custom token header");
+  AssertTrue([token hasPrefix:@"Prefix "], @"Should use custom token prefix");
+  AssertNotNil(traceID, @"Should use custom trace ID header");
+  AssertNil(HeaderValue(reply, @"Approov-Token"), @"Should NOT use default token header");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"Should NOT use default trace ID header");
+}
+
+static void TestFetchWithApproovCanDisableTraceID(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setTraceIDHeader:nil];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"), @"Should still have token");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"Should NOT have trace ID header");
+}
+
+static void TestRemoveSubstitutionHeaderRevertsBehavior(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@"\"initialSecureStrings\":{\"header-key\":\"header-secret\"}");
+  InitializeService(service, @"reinit");
+
+  [service addSubstitutionHeader:@"Api-Key" requiredPrefix:@""];
+
+  // 1. Verify substitution happens
+  NSDictionary *reply1 = FetchNetworkReply(service, TargetURL(), @{@"headers": @{@"Api-Key": @"header-key"}});
+  AssertEqualObjects(@"header-secret", HeaderValue(reply1, @"Api-Key"), @"Should substitute header");
+
+  // 2. Remove substitution and verify it reverts
+  [service removeSubstitutionHeader:@"Api-Key"];
+  NSDictionary *reply2 = FetchNetworkReply(service, TargetURL(), @{@"headers": @{@"Api-Key": @"header-key"}});
+  AssertEqualObjects(@"header-key", HeaderValue(reply2, @"Api-Key"), @"Should revert header substitution");
+}
+
+static void TestRemoveSubstitutionQueryParamRevertsBehavior(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@"\"initialSecureStrings\":{\"query-key\":\"query-secret\"}");
+  InitializeService(service, @"reinit");
+
+  [service addSubstitutionQueryParam:@"api_key"];
+
+  // 1. Verify substitution happens
+  NSDictionary *reply1 = FetchNetworkReply(service, [TargetURL() stringByAppendingString:@"?api_key=query-key"], @{});
+  AssertTrue([reply1[@"url"] containsString:@"api_key=query-secret"], @"Should substitute query param");
+
+  // 2. Remove substitution and verify it reverts
+  [service removeSubstitutionQueryParam:@"api_key"];
+  NSDictionary *reply2 = FetchNetworkReply(service, [TargetURL() stringByAppendingString:@"?api_key=query-key"], @{});
+  AssertTrue([reply2[@"url"] containsString:@"api_key=query-key"], @"Should revert query substitution");
+}
+
+static void TestRemoveExclusionURLRegexRevertsBehavior(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSString *regex = @"^.*excluded.*$";
+  [service addExclusionURLRegex:regex];
+
+  // 1. Verify exclusion happens (no token)
+  NSDictionary *reply1 = FetchNetworkReply(service, [TargetURL() stringByAppendingString:@"/excluded"], @{});
+  AssertNil(HeaderValue(reply1, @"Approov-Token"), @"Should be excluded (no token)");
+
+  // 2. Remove exclusion and verify it is protected again
+  [service removeExclusionURLRegex:regex];
+  NSDictionary *reply2 = FetchNetworkReply(service, [TargetURL() stringByAppendingString:@"/excluded"], @{});
+  AssertNotNil(HeaderValue(reply2, @"Approov-Token"), @"Should be protected again (has token)");
+}
+
+static void TestFetchWithApproovInjectsStatusWhenNoToken(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  useApproovStatusIfNoToken = YES;
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}"];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  
+  AssertEqualObjects(@"no approov service", token, @"Should inject status when token is missing");
+}
+
+static void TestFetchWithApproovInjectsStatusWithCustomMutator(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  useApproovStatusIfNoToken = YES;
+  
+  // Set custom mutator handler to allow POOR_NETWORK
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url, NSError **error) {
+    ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+    if (fetchResult.status == ApproovTokenFetchStatusPoorNetwork) {
+      return YES;
+    }
+    return NO;
+  });
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"POOR_NETWORK\"}}"];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  
+  AssertEqualObjects(@"poor network", token, @"Should inject POOR_NETWORK status when allowed by mutator");
+  
+  ApproovMutatorBridgeReset();
+}
+
+static void TestSetDataHashInTokenDirect(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service setDataHashInToken:@"manual-data-hash" resolver:resolve rejecter:reject];
+  });
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  AssertNotNil(token, @"Token should not be nil");
+
+  NSDictionary *payload = DecodeJWTBody(token);
+  AssertEqualObjects(SHA256Base64(@"manual-data-hash"), payload[@"pay"], @"Data hash should match manual value");
+}
+
+static void TestSetDataHashInTokenEmptyClearsPayClaim(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service setDataHashInToken:@"" resolver:resolve rejecter:reject];
+  });
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  AssertNotNil(token, @"Token should not be nil");
+
+  NSDictionary *payload = DecodeJWTBody(token);
+  AssertNil(payload[@"pay"], @"Pay claim should be missing for an empty manual data hash");
+}
+
+static void TestSetDataHashInTokenNilClearsPayClaim(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service setDataHashInToken:nil resolver:resolve rejecter:reject];
+  });
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  AssertNotNil(token, @"Token should not be nil");
+
+  NSDictionary *payload = DecodeJWTBody(token);
+  AssertNil(payload[@"pay"], @"Pay claim should be missing after clearing the manual data hash");
+}
+
+static void TestSetBindingHeaderMissing(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setBindingHeader:@"X-Custom-Binding"];
+
+  // Request WITHOUT X-Custom-Binding
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  AssertNotNil(token, @"Token should not be nil");
+
+  NSDictionary *payload = DecodeJWTBody(token);
+  AssertNil(payload[@"pay"], @"Pay claim should be missing when binding header is absent");
+}
+
+static void TestSetBindingHeaderEmpty(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setBindingHeader:@"X-Custom-Binding"];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{@"headers": @{@"X-Custom-Binding": @""}});
+  NSString *token = HeaderValue(reply, @"Approov-Token");
+  AssertNotNil(token, @"Token should not be nil");
+
+  NSDictionary *payload = DecodeJWTBody(token);
+  AssertNil(payload[@"pay"], @"Pay claim should be missing when binding header value is empty");
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
       ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
       ^{ TestGetDeviceIDReturnsMiniSDKDeviceID(); },
+      ^{ TestGetPinningDiagnosticsReturnsExpectedShape(); },
       ^{ TestFetchWithApproovAddsTokenTraceAndSubstitutions(); },
       ^{ TestExcludedProtectedURLLeavesRequestUnmodified(); },
       ^{ TestDirectPinningAllowsValidPins(); },
@@ -496,6 +753,19 @@ int main(void) {
       ^{ TestFetchWithApproovRejectsInvalidHeaderValues(); },
       ^{ TestFetchWithApproovRejectsInvalidBodies(); },
       ^{ TestFetchWithApproovAcceptsValidRequests(); },
+      ^{ TestFetchWithApproovUsesDefaultHeaders(); },
+      ^{ TestFetchWithApproovUsesCustomHeaders(); },
+      ^{ TestFetchWithApproovCanDisableTraceID(); },
+      ^{ TestRemoveSubstitutionHeaderRevertsBehavior(); },
+      ^{ TestRemoveSubstitutionQueryParamRevertsBehavior(); },
+      ^{ TestRemoveExclusionURLRegexRevertsBehavior(); },
+      ^{ TestFetchWithApproovInjectsStatusWhenNoToken(); },
+      ^{ TestFetchWithApproovInjectsStatusWithCustomMutator(); },
+      ^{ TestSetDataHashInTokenDirect(); },
+      ^{ TestSetDataHashInTokenEmptyClearsPayClaim(); },
+      ^{ TestSetDataHashInTokenNilClearsPayClaim(); },
+      ^{ TestSetBindingHeaderMissing(); },
+      ^{ TestSetBindingHeaderEmpty(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

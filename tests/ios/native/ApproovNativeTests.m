@@ -588,6 +588,68 @@ static void TestFetchWithApproovRejectsInvalidURLs(void) {
              @"fetchWithApproov should provide a descriptive invalid URL error");
 }
 
+@interface CaptureProtocol : NSURLProtocol
+@end
+
+@implementation CaptureProtocol
++ (BOOL)canInitWithRequest:(NSURLRequest *)request {
+  return [request.URL.host isEqualToString:@"example.com"];
+}
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
+  return request;
+}
+- (void)startLoading {
+  [ApproovMockURLProtocol setLastRequest:self.request];
+  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}];
+  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+  [self.client URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {}
+@end
+
+static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+  approovTokenPrefix = @"Bearer ";
+  useApproovStatusIfNoToken = YES;
+  [ApproovMockURLProtocol setLastRequest:nil];
+  [NSURLProtocol registerClass:[CaptureProtocol class]];
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusMITMDetected, @"", @"", @"", NO));
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url,
+                                                NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    (void)errorPointer;
+    return YES;
+  });
+
+  NSURL *url = [NSURL URLWithString:@"https://example.com/data"];
+  NSURLRequest *request = [NSURLRequest requestWithURL:url];
+  RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
+  NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+  config.protocolClasses = @[[CaptureProtocol class]];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:config
+                                                        delegate:delegate
+                                                   delegateQueue:nil];
+
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:request];
+  [task resume];
+
+  long waitResult = dispatch_semaphore_wait(
+      delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"Request should complete in time");
+
+  NSURLRequest *lastRequest = [ApproovMockURLProtocol lastRequest];
+  AssertTrue(lastRequest != nil, @"Mock protocol should have captured the request");
+  AssertEqualObjects(@"Bearer MITM_DETECTED",
+                     [lastRequest valueForHTTPHeaderField:@"Approov-Token"],
+                     @"Status header should be present in the outgoing request");
+  
+  [NSURLProtocol unregisterClass:[CaptureProtocol class]];
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -608,6 +670,7 @@ int main(void) {
       ^{ TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(); },
       ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
+      ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

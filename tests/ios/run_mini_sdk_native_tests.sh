@@ -42,8 +42,8 @@ xcrun clang \
   -I"$REPO_ROOT" \
   -I"$REPO_ROOT/ios" \
   -I"$TEST_ROOT" \
-  -I"$REPO_ROOT/tests/ios/native/TestSupport" \
   -I"$MINI_SDK_ROOT/Sources/Approov/include" \
+  -I"$REPO_ROOT/tests/ios/native/TestSupport" \
   -I"$MINI_SDK_ROOT/Sources/MiniSDKTestSupport/include" \
   "$TEST_ROOT/ApproovNativeMiniSDKTests.m" \
   "$MINI_SDK_ROOT/Sources/Approov/Approov.m" \

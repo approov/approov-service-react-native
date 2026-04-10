@@ -279,4 +279,112 @@ public class ApproovServiceRegressionTest {
             assertTrue(recoveredClient.interceptors().contains(extraInterceptor));
         }
     }
+
+    @Test
+    public void fetchExposesStatusHeaderWhenTokenMissingAndAllowed() throws Exception {
+        ApproovService service = newService();
+        service.setUseApproovStatusIfNoTokenInternal(true);
+
+        ServerSocket serverSocket = new ServerSocket();
+        serverSocket.bind(new InetSocketAddress("127.0.0.1", 0));
+        AtomicReference<String> tokenHeader = new AtomicReference<>();
+        CountDownLatch serverLatch = new CountDownLatch(1);
+
+        Thread serverThread = new Thread(() -> {
+            try (Socket socket = serverSocket.accept()) {
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8)
+                );
+
+                String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    int colonIndex = line.indexOf(":");
+                    if (colonIndex != -1) {
+                        String headerName = line.substring(0, colonIndex).trim();
+                        if (headerName.equalsIgnoreCase("Approov-Token")) {
+                            tokenHeader.set(line.substring(colonIndex + 1).trim());
+                        }
+                    }
+                }
+
+                byte[] response = "ok".getBytes(StandardCharsets.UTF_8);
+                String headers = "HTTP/1.1 200 OK\r\n"
+                    + "Content-Type: text/plain\r\n"
+                    + "Content-Length: " + response.length + "\r\n"
+                    + "Connection: close\r\n\r\n";
+                socket.getOutputStream().write(headers.getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().write(response);
+                socket.getOutputStream().flush();
+                serverLatch.countDown();
+            } catch (IOException ignored) {
+            }
+        });
+        serverThread.start();
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
+             MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
+            
+            // Synchronously initialize the static state for the service
+            java.lang.reflect.Field initField = ApproovService.class.getDeclaredField("isInitialized");
+            initField.setAccessible(true);
+            initField.set(null, true);
+
+            java.lang.reflect.Field configField = ApproovService.class.getDeclaredField("initialConfig");
+            configField.setAccessible(true);
+            configField.set(null, "dummy-config");
+
+            Approov.TokenFetchResult mitmResult = mock(Approov.TokenFetchResult.class);
+            when(mitmResult.getStatus()).thenReturn(Approov.TokenFetchStatus.MITM_DETECTED);
+            when(mitmResult.getToken()).thenReturn("");
+            when(mitmResult.getLoggableToken()).thenReturn("MITM_DETECTED");
+            when(mitmResult.isConfigChanged()).thenReturn(false);
+            when(mitmResult.isForceApplyPins()).thenReturn(false);
+
+            final String url1 = "http://127.0.0.1:" + serverSocket.getLocalPort() + "/data";
+            approov.when(() -> Approov.fetchApproovTokenAndWait(url1)).thenReturn(mitmResult);
+
+            // Configure OkHttpClient to resolve example.com to 127.0.0.1 for the test
+            OkHttpClient testClient = new OkHttpClient.Builder()
+                .dns(hostname -> {
+                    if (hostname.equals("api.example.com")) {
+                        return java.util.Collections.singletonList(java.net.InetAddress.getByName("127.0.0.1"));
+                    }
+                    return okhttp3.Dns.SYSTEM.lookup(hostname);
+                })
+                .addInterceptor(new ApproovInterceptor(service))
+                .build();
+            okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(testClient);
+            
+            final String url2 = "http://api.example.com:" + serverSocket.getLocalPort() + "/data";
+            approov.when(() -> Approov.fetchApproovTokenAndWait(url2)).thenReturn(mitmResult);
+
+            // Configure a custom mutator that allows proceeding on MITM
+            ApproovService.setServiceMutator(new ApproovServiceMutator() {
+                @Override
+                public boolean handleInterceptorFetchTokenResult(ApproovService service,
+                        Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+                    if (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED) {
+                        return true;
+                    }
+                    return ApproovServiceMutator.super.handleInterceptorFetchTokenResult(service, approovResults, url);
+                }
+            });
+
+            ReadableMap options = mock(ReadableMap.class);
+            when(options.hasKey("method")).thenReturn(false);
+            when(options.hasKey("headers")).thenReturn(false);
+            when(options.hasKey("body")).thenReturn(false);
+
+            Promise promise = mock(Promise.class);
+            service.fetchWithApproov(url2, options, promise);
+
+            assertTrue("Request should reach the local test server",
+                serverLatch.await(5, TimeUnit.SECONDS));
+            assertEquals("Bearer MITM_DETECTED", tokenHeader.get());
+        } finally {
+            serverSocket.close();
+            serverThread.join(5000);
+            ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        }
+    }
 }

@@ -414,8 +414,11 @@ RCT_EXPORT_METHOD(getLastARC : (RCTPromiseResolveBlock)
     }
   }
   if (hostname != nil) {
+    NSString *fetchURL =
+        [hostname containsString:@"://"] ? hostname
+                                          : [@"https://" stringByAppendingString:hostname];
     ApproovTokenFetchResult *result =
-        [Approov fetchApproovTokenAndWait:hostname];
+        [Approov fetchApproovTokenAndWait:fetchURL];
     // Check if a token was fetched successfully and return its arc code
     if (result.token != nil && result.token.length > 0) {
       if (result.ARC != nil) {
@@ -1205,8 +1208,8 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   @synchronized(bindingHeader) {
     if (![bindingHeader isEqualToString:@""]) {
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
+      [Approov setDataHashInToken:headerValue];
       if (headerValue != nil) {
-        [Approov setDataHashInToken:headerValue];
         ApproovLogI(@"setting data hash for binding header %@", bindingHeader);
       }
     }
@@ -1270,11 +1273,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
         } else if (status == ApproovTokenFetchStatusNoApproovService) {
           // Default behavior for NO_APPROOV_SERVICE is to proceed without an
           // Approov token unless a custom mutator chooses otherwise.
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionProceed
-                    withMessage:[Approov
-                                    stringFromApproovTokenFetchStatus:status]];
+          // We fall through to allow status injection if enabled.
         } else {
           return [ApproovInterceptorResult
               createWithRequest:updatedRequest
@@ -1328,6 +1327,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     // We are proceeding (allowed by mutator) with a failure status.
     // Add the status string to the Approov token header if
     // useApproovStatusIfNoToken is set, so callers can observe it.
+    NSLog(@"Approov: Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
     if (useApproovStatusIfNoToken) {
       NSString *tokenHeader;
       @synchronized(approovTokenHeader) {
@@ -1348,12 +1348,16 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   // - this is to ensure we don't make further Approov fetches if there has been
   // a problem and also that we don't do header or query parameter substitutions
   // in domains not known to Approov (which therefore might not be pinned)
-  if ((status != ApproovTokenFetchStatusSuccess) &&
-      (status != ApproovTokenFetchStatusUnprotectedURL))
+  // we just return early with anything other than a success
+  // - this is to ensure we don't make further Approov fetches if there has been
+  // a problem and also that we don't do header or query parameter substitutions
+  // in domains not known to Approov (which therefore might not be pinned)
+  if (status != ApproovTokenFetchStatusSuccess) {
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
               withMessage:[Approov stringFromApproovTokenFetchStatus:status]];
+  }
 
   // obtain a copy of the substitution headers in a thread safe way
   NSDictionary<NSString *, NSString *> *subsHeaders;

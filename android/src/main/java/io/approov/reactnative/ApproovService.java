@@ -28,8 +28,9 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.JavaOnlyArray;
+import com.facebook.react.bridge.JavaOnlyMap;
 import com.facebook.react.bridge.WritableMap;
-import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableType;
@@ -523,7 +524,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *                       type
      */
     private WritableMap getErrorUserInfo(boolean isNetworkError) {
-        WritableMap userInfo = new WritableNativeMap();
+        WritableMap userInfo = new JavaOnlyMap();
         if (isNetworkError)
             userInfo.putString("type", "network");
         else
@@ -538,7 +539,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param rejectionReasons the rejection reasons or empty string if not enabled
      */
     private WritableMap getRejectionUserInfo(String rejectionARC, String rejectionReasons) {
-        WritableMap userInfo = new WritableNativeMap();
+        WritableMap userInfo = new JavaOnlyMap();
         userInfo.putString("type", "rejection");
         userInfo.putString("rejectionARC", rejectionARC);
         userInfo.putString("rejectionReasons", rejectionReasons);
@@ -678,6 +679,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         if (hostname != null) {
             try {
+                final String fetchURL = hostname.contains("://") ? hostname : "https://" + hostname;
                 Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
                     @Override
                     public void approovCallback(Approov.TokenFetchResult result) {
@@ -691,7 +693,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         log(LOG_INFO, TAG, "ApproovService: ARC code unavailable");
                         promise.resolve("");
                     }
-                }, hostname);
+                }, fetchURL);
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "ApproovService: error fetching ARC", e);
                 promise.resolve("");
@@ -1554,9 +1556,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void getPinningDiagnostics(Promise promise) {
         try {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            WritableMap diagnostics = Arguments.createMap();
+            WritableMap diagnostics = new JavaOnlyMap();
             boolean isInterceptorPresent = false;
-            WritableArray interceptors = Arguments.createArray();
+            WritableArray interceptors = new JavaOnlyArray();
 
             for (Interceptor interceptor : client.interceptors()) {
                 String name = interceptor.getClass().getName();

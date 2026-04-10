@@ -120,6 +120,7 @@ dependencies {
 def prepareMiniSdkTestJars = tasks.register('prepareMiniSdkTestJars', Exec) {
     workingDir projectDir
     commandLine './gradlew',
+        '-I', new File(projectDir, 'mini-sdk-init.gradle').absolutePath,
         '-p', miniSdkAndroidRoot.absolutePath,
         ':approov-sdk:bundleLibRuntimeToJarDebug'
 }

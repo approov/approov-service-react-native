@@ -1,0 +1,13 @@
+settingsEvaluated { settings ->
+    settings.pluginManagement.repositories.clear()
+    settings.pluginManagement.repositories.gradlePluginPortal()
+    settings.pluginManagement.repositories.google()
+    settings.pluginManagement.repositories.mavenCentral()
+
+    def drm = settings.dependencyResolutionManagement
+    if (drm != null) {
+        drm.repositories.clear()
+        drm.repositories.google()
+        drm.repositories.mavenCentral()
+    }
+}

@@ -3,12 +3,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-TEST_ROOT="$REPO_ROOT/tests/ios/native"
-BUILD_DIR="${TMPDIR:-/tmp}/approov-native-tests"
-APP_DIR="$BUILD_DIR/ApproovNativeTests.app"
+TEST_ROOT="$REPO_ROOT/tests/ios/native-mini-sdk"
+MINI_SDK_ROOT="$REPO_ROOT/../core-service-layers-testing/mini-sdk/ios"
+BUILD_DIR="${TMPDIR:-/tmp}/approov-native-mini-sdk-tests"
+APP_DIR="$BUILD_DIR/ApproovNativeMiniSDKTests.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
-BINARY="$MACOS_DIR/ApproovNativeTests"
+BINARY="$MACOS_DIR/ApproovNativeMiniSDKTests"
 
 mkdir -p "$MACOS_DIR"
 
@@ -18,11 +19,11 @@ cat > "$CONTENTS_DIR/Info.plist" <<'EOF'
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>ApproovNativeTests</string>
+  <string>ApproovNativeMiniSDKTests</string>
   <key>CFBundleIdentifier</key>
-  <string>io.approov.reactnative.tests</string>
+  <string>io.approov.reactnative.tests.minisdk</string>
   <key>CFBundleName</key>
-  <string>ApproovNativeTests</string>
+  <string>ApproovNativeMiniSDKTests</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -40,12 +41,16 @@ xcrun clang \
   -DDEBUG=1 \
   -I"$REPO_ROOT" \
   -I"$REPO_ROOT/ios" \
-  -I"$TEST_ROOT/TestSupport" \
-  "$TEST_ROOT/ApproovNativeTests.m" \
-  "$TEST_ROOT/TestSupport/Approov/Approov.m" \
-  "$TEST_ROOT/TestSupport/ApproovServiceMutatorBridgeStub.m" \
-  "$TEST_ROOT/TestSupport/ApproovPinningDelegateStub.m" \
-  "$TEST_ROOT/TestSupport/ApproovPropsStub.m" \
+  -I"$TEST_ROOT" \
+  -I"$REPO_ROOT/tests/ios/native/TestSupport" \
+  -I"$MINI_SDK_ROOT/Sources/Approov/include" \
+  -I"$MINI_SDK_ROOT/Sources/MiniSDKTestSupport/include" \
+  "$TEST_ROOT/ApproovNativeMiniSDKTests.m" \
+  "$MINI_SDK_ROOT/Sources/Approov/Approov.m" \
+  "$MINI_SDK_ROOT/Sources/MiniSDKTestSupport/MiniSDKTestSupport.m" \
+  "$REPO_ROOT/tests/ios/native/TestSupport/ApproovServiceMutatorBridgeStub.m" \
+  "$REPO_ROOT/ios/ApproovPinningDelegate.m" \
+  "$REPO_ROOT/tests/ios/native/TestSupport/ApproovPropsStub.m" \
   "$REPO_ROOT/ios/ApproovUtils.m" \
   "$REPO_ROOT/ios/ApproovMockURLProtocol.m" \
   "$REPO_ROOT/ios/RSSwizzle.m" \
@@ -56,7 +61,3 @@ xcrun clang \
   -o "$BINARY"
 
 "$BINARY"
-
-bash "$REPO_ROOT/tests/ios/run_mini_sdk_native_tests.sh"
-
-bash "$REPO_ROOT/tests/ios/run_message_signing_tests.sh"

@@ -1,6 +1,7 @@
 package io.approov.reactnative;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import android.content.res.AssetManager;
 
+import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableType;
@@ -184,6 +186,21 @@ public class ApproovServiceRegressionTest {
         } finally {
             serverSocket.close();
             serverThread.join(5000);
+        }
+    }
+
+    @Test
+    public void initializeWithEmptyConfigMarksLayerInitializedWithoutApproovSdkCalls() {
+        ApproovService service = newService();
+        Promise promise = mock(Promise.class);
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            service.initialize("", promise);
+
+            verify(promise, timeout(2000)).resolve(null);
+            assertTrue(service.isInitialized());
+            assertFalse(service.isApproovEnabled());
+            approov.verifyNoInteractions();
         }
     }
 

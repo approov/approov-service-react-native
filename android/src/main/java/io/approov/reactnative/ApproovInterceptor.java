@@ -126,6 +126,11 @@ public class ApproovInterceptor implements Interceptor {
             }
         }
 
+        if (!approovService.isApproovEnabled()) {
+            Log.d(TAG, "approov disabled, forwarded: " + url);
+            return chain.proceed(request);
+        }
+
         // update the data hash based on any token binding header (presence is optional)
         String bindingHeader = approovService.getBindingHeader();
         if ((bindingHeader != null) && request.headers().names().contains(bindingHeader)) {
@@ -134,10 +139,10 @@ public class ApproovInterceptor implements Interceptor {
         }
 
         // request an Approov token for the domain and log unless suppressed
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(host);
+        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url);
         if (!approovService.isSuppressLoggingUnknownURL()
                 || (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL))
-            Log.d(TAG, "token for " + host + ": " + approovResults.getLoggableToken());
+            Log.d(TAG, "token for " + url + ": " + approovResults.getLoggableToken());
 
         // force a pinning change if there is any dynamic config update, calling
         // fetchConfig to
@@ -163,7 +168,7 @@ public class ApproovInterceptor implements Interceptor {
 
         // check if the request should proceed based on the token fetch result
         try {
-            if (!mutator.handleInterceptorFetchTokenResult(approovService, approovResults, host))
+            if (!mutator.handleInterceptorFetchTokenResult(approovService, approovResults, url))
                 return chain.proceed(request);
         } catch (ApproovException e) {
             throw new IOException(e);

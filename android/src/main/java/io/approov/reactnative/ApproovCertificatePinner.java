@@ -44,7 +44,7 @@ public class ApproovCertificatePinner {
      */
     public static CertificatePinner build(ApproovService approovService) {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
-        if (approovService.isInitialized()) {
+        if (approovService.isApproovEnabled()) {
             // add pins if Approov has been initialized
             Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
             for (Map.Entry<String, List<String>> entry: allPins.entrySet()) {

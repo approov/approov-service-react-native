@@ -1,0 +1,5 @@
+include ':approov-sdk'
+project(':approov-sdk').projectDir = new File('../core-service-layers-testing/mini-sdk/android/approov-sdk')
+
+include ':test-support'
+project(':test-support').projectDir = new File('../core-service-layers-testing/mini-sdk/android/test-support')

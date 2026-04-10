@@ -23,6 +23,8 @@ ApproovService.initialize(config: string);
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
+Passing an empty config string leaves the React Native service layer initialized while disabling Approov SDK processing. In that mode requests are forwarded as standard network traffic without Approov token injection, secure string substitution, message signing, or dynamic pinning.
+
 ## fetchWithApproov
 Provides a secure `fetch()`-compatible API, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs.
 
@@ -192,7 +194,8 @@ ApproovService.removeSubstitutionQueryParam(key: string);
 
 ## addExclusionURLRegex
 Adds an exclusion URL regular expression. If a URL for a request matches this regular expression
-then it will not be subject to any Approov protection. Note that this facility must be used with
+then it will not be subject to Approov request mutation such as token injection, trace headers,
+message signing, or secure string substitution. Note that this facility must be used with
 *EXTREME CAUTION* due to the impact of dynamic pinning. Pinning may be applied to all domains added
 using Approov, and updates to the pins are received when an Approov fetch is performed. If you
 exclude some URLs on domains that are protected with Approov, then these will be protected with

@@ -401,11 +401,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
         if (config != null) {
             // initialize the Approov SDK
             try {
-                Approov.initialize(applicationContext, config, "auto", "init-fetch");
-                Approov.setUserProperty("approov-react-native");
+                if (!config.isEmpty()) {
+                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.setUserProperty("approov-react-native");
+                }
                 initialConfig = config;
                 isInitialized = true;
-                log(LOG_INFO, TAG, "initialized on launch on deviceID " + Approov.getDeviceID());
+                if (isApproovEnabled()) {
+                    log(LOG_INFO, TAG, "initialized on launch on deviceID " + Approov.getDeviceID());
+                } else {
+                    log(LOG_INFO, TAG, "initialized on launch without Approov SDK");
+                }
             } catch (IllegalArgumentException e) {
                 log(LOG_ERROR, TAG, "initialization failed with IllegalArgument: " + e.getMessage());
             } catch (IllegalStateException e) {
@@ -598,13 +604,19 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // now
             // be available
             try {
-                Approov.initialize(applicationContext, config, "auto", "init-fetch");
-                Approov.setUserProperty("approov-react-native");
+                if (!config.isEmpty()) {
+                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.setUserProperty("approov-react-native");
+                }
                 initialConfig = config;
                 isInitialized = true;
                 clearEarliestNetworkRequestTime();
-                log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                notifyPinChangeListeners();
+                if (isApproovEnabled()) {
+                    log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
+                    notifyPinChangeListeners();
+                } else {
+                    log(LOG_INFO, TAG, "initialized without Approov SDK");
+                }
                 if (pendingPrefetch) {
                     prefetch();
                     pendingPrefetch = false;
@@ -627,6 +639,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public synchronized boolean isInitialized() {
         return isInitialized;
+    }
+
+    /**
+     * Returns true when the service layer is initialized and Approov-backed
+     * request protection is active.
+     */
+    public synchronized boolean isApproovEnabled() {
+        return isInitialized && initialConfig != null && !initialConfig.isEmpty();
     }
 
     /**
@@ -1012,9 +1032,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Adds an exclusion URL regular expression. If a URL for a request matches this
-     * regular expression
-     * then it will not be subject to any Approov protection. Note that this
-     * facility must be used with
+     * regular expression then it will bypass Approov request mutation, such as
+     * token injection, trace headers, message signing and secure string
+     * substitution. If the URL belongs to a host that is protected by Approov then
+     * the connection is still subject to Approov pinning. Note that this facility
+     * must be used with
      * EXTREME CAUTION due to the impact of dynamic pinning. Pinning may be applied
      * to all domains added
      * using Approov, and updates to the pins are received when an Approov fetch is
@@ -1083,9 +1105,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public synchronized void prefetch() {
-        if (isInitialized) {
+        if (isApproovEnabled()) {
             log(LOG_INFO, TAG, "prefetch initiated");
             Approov.fetchApproovToken(new PrefetchHandler(), "approov.io");
+        } else if (isInitialized) {
+            log(LOG_INFO, TAG, "prefetch bypassed because Approov is disabled");
         } else {
             log(LOG_INFO, TAG, "prefetch pending");
             pendingPrefetch = true;

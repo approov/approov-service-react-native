@@ -12,6 +12,7 @@ extern BOOL suppressLoggingUnknownURL;
 extern NSString *approovTokenHeader;
 extern NSString *approovTraceIDHeader;
 extern NSString *approovTokenPrefix;
+extern NSString *initialConfigString;
 extern NSString *bindingHeader;
 extern NSMutableDictionary<NSString *, NSString *> *substitutionHeaders;
 extern NSMutableSet<NSString *> *substitutionQueryParams;
@@ -51,6 +52,12 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
 @property(nonatomic, strong, nullable) NSHTTPURLResponse *response;
 @property(nonatomic, strong, nullable) NSError *error;
 @property(nonatomic, strong) dispatch_semaphore_t semaphore;
+@end
+
+@interface ApproovService (NativeTestInitialize)
+- (void)initialize:(NSString *)config
+          resolver:(RCTPromiseResolveBlock)resolve
+          rejecter:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation RCTTestNetworkDelegate
@@ -101,6 +108,7 @@ static ApproovService *FreshService(void) {
   earliestNetworkRequestTime = 0;
   useApproovStatusIfNoToken = NO;
   suppressLoggingUnknownURL = NO;
+  initialConfigString = @"test-config";
   approovTokenHeader = @"Approov-Token";
   approovTraceIDHeader = @"Approov-TraceID";
   approovTokenPrefix = @"";
@@ -166,6 +174,38 @@ static void TestInterceptRequestForwardsWhenUninitialized(void) {
                       @"Expired startup window should forward uninitialized requests");
   AssertEqualObjects(@"uninitalized forwarded", result.message,
                      @"Uninitialized path should forward without mutation");
+}
+
+static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
+  ApproovService *service = FreshService();
+  __block BOOL didResolve = NO;
+  __block NSString *rejectionCode = nil;
+
+  [service initialize:@""
+             resolver:^(__unused id value) {
+               didResolve = YES;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+
+  AssertTrue(didResolve, @"Empty config initialization should resolve");
+  AssertEqualObjects(nil, rejectionCode,
+                     @"Empty config initialization should not reject");
+  AssertTrue(isInitialized,
+             @"Empty config initialization should still mark the layer initialized");
+
+  NSURLRequest *request =
+      [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/data"]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Empty config should forward requests unchanged");
+  AssertEqualObjects(@"approov disabled forwarded", result.message,
+                     @"Empty config should bypass Approov processing");
+  AssertEqualIntegers(0, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
+                      @"Empty config should not fetch Approov tokens");
 }
 
 static void TestInterceptRequestAddsTokenTraceAndFetchesConfig(void) {
@@ -554,6 +594,7 @@ int main(void) {
       ^{ TestInterceptRequestFailsOnBadURL(); },
       ^{ TestInterceptRequestForwardsLocalhost(); },
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
+      ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
       ^{ TestInterceptRequestAddsTokenTraceAndFetchesConfig(); },
       ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },

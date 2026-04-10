@@ -21,6 +21,16 @@ def safeExtGet(prop, fallback) {
 
 apply plugin: 'com.android.library'
 
+def candidateMiniSdkRoots = [
+    new File(projectDir, '../../core-service-layers-testing/mini-sdk/android'),
+    new File(projectDir, '../core-service-layers-testing/mini-sdk/android'),
+]
+def miniSdkAndroidRoot = candidateMiniSdkRoots.find { it.exists() }?.absoluteFile
+if (miniSdkAndroidRoot == null) {
+    miniSdkAndroidRoot = candidateMiniSdkRoots[0].absoluteFile
+}
+def miniSdkApproovJar = new File(miniSdkAndroidRoot, 'approov-sdk/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar')
+
 buildscript {
     // The Android Gradle plugin is only required when opening the android folder stand-alone.
     // This avoids unnecessary downloads and potential conflicts when the library is included as a
@@ -53,6 +63,13 @@ android {
             jvmArgs '-Dnet.bytebuddy.experimental=true', '-XX:+EnableDynamicAgentLoading'
         }
     }
+    sourceSets {
+        test {
+            java.srcDirs += [
+                new File(miniSdkAndroidRoot, 'test-support/src/main/java').absolutePath,
+            ]
+        }
+    }
 }
 
 if (android.hasProperty("lint")) {
@@ -80,8 +97,6 @@ repositories {
     mavenCentral()
 }
 
-def miniSdkAndroidRoot = new File(projectDir, '../../core-service-layers-testing/mini-sdk/android').absoluteFile
-
 dependencies {
     //noinspection GradleDynamicVersion
     implementation fileTree(dir: "libs", include: ["*.aar"])
@@ -99,8 +114,18 @@ dependencies {
     testImplementation 'org.json:json:20231013'
     testImplementation 'androidx.test:core:1.6.1'
     testImplementation 'org.robolectric:robolectric:4.11.1'
-    testImplementation files(new File(miniSdkAndroidRoot, 'approov-sdk/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar'))
-    testImplementation files(new File(miniSdkAndroidRoot, 'test-support/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar'))
+    testImplementation files(miniSdkApproovJar)
+}
+
+def prepareMiniSdkTestJars = tasks.register('prepareMiniSdkTestJars', Exec) {
+    workingDir projectDir
+    commandLine './gradlew',
+        '-p', miniSdkAndroidRoot.absolutePath,
+        ':approov-sdk:bundleLibRuntimeToJarDebug'
+}
+
+tasks.matching { it.name in ['compileDebugUnitTestJavaWithJavac', 'compileReleaseUnitTestJavaWithJavac'] }.configureEach {
+    dependsOn prepareMiniSdkTestJars
 }
 
 def configureReactNativePom(def pom) {

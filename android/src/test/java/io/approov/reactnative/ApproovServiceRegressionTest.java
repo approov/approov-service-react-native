@@ -39,6 +39,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
+import java.util.HashMap;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -113,6 +115,42 @@ public class ApproovServiceRegressionTest {
 
         verify(promise, timeout(2000))
             .reject("bad_request", "fetchWithApproov body must be a string when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonObjectHeaders() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Boolean);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov headers must be an object when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonStringHeaderValues() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+        ReadableMap headers = mock(ReadableMap.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Map);
+        when(options.getMap("headers")).thenReturn(headers);
+
+        HashMap<String, Object> headersMap = new HashMap<>();
+        headersMap.put("X-Bad-Header", true);
+        when(headers.toHashMap()).thenReturn(headersMap);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov header values must be strings");
     }
 
     @Test

@@ -1715,11 +1715,21 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 
                 // Add headers if provided
                 if (options != null && options.hasKey("headers")) {
-                    ReadableMap headersMap = options.getMap("headers");
-                    if (headersMap != null) {
+                    ReadableType headersType = options.getType("headers");
+                    if (headersType != ReadableType.Null && headersType != ReadableType.Map) {
+                        promise.reject("bad_request", "fetchWithApproov headers must be an object when provided");
+                        return;
+                    }
+                    if (headersType == ReadableType.Map) {
+                        ReadableMap headersMap = options.getMap("headers");
                         for (Map.Entry<String, Object> entry : headersMap.toHashMap().entrySet()) {
-                            if (entry.getValue() instanceof String) {
-                                requestBuilder.addHeader(entry.getKey(), (String) entry.getValue());
+                            Object value = entry.getValue();
+                            if (value != null) {
+                                if (!(value instanceof String)) {
+                                    promise.reject("bad_request", "fetchWithApproov header values must be strings");
+                                    return;
+                                }
+                                requestBuilder.addHeader(entry.getKey(), (String) value);
                             }
                         }
                     }

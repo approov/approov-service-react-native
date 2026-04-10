@@ -189,6 +189,14 @@ static NSDictionary *AwaitResolved(void (^work)(RCTPromiseResolveBlock, RCTPromi
   return result;
 }
 
+static NSDictionary *AwaitRejected(void (^work)(RCTPromiseResolveBlock, RCTPromiseRejectBlock)) {
+  NSDictionary *result = AwaitPromise(work);
+  if (result[@"code"] == [NSNull null]) {
+    Fail(@"Expected rejection, but promise resolved");
+  }
+  return result;
+}
+
 static ApproovService *FreshService(void) {
   ResetSharedState();
   return [[ApproovService alloc] init];
@@ -407,6 +415,70 @@ static void TestFetchSecureStringAndCustomJWTUseMiniSDK(void) {
   AssertEqualObjects(@"tester", payload[@"role"], @"Custom JWT payload should be preserved");
 }
 
+static void TestFetchWithApproovRejectsInvalidMethods(void) {
+  ApproovService *service = FreshService();
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{@"method": @(YES)} resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"bad_request", result[@"code"], @"Should reject bad_request");
+  AssertEqualObjects(@"fetchWithApproov method must be a string when provided", result[@"message"], @"Message mismatch");
+}
+
+static void TestFetchWithApproovRejectsInvalidHeaders(void) {
+  ApproovService *service = FreshService();
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{@"headers": @(YES)} resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"bad_request", result[@"code"], @"Should reject bad_request");
+  AssertEqualObjects(@"fetchWithApproov headers must be an object when provided", result[@"message"], @"Message mismatch");
+}
+
+static void TestFetchWithApproovRejectsInvalidHeaderNames(void) {
+  ApproovService *service = FreshService();
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{@"headers": @{@(YES): @"value"}} resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"bad_request", result[@"code"], @"Should reject bad_request");
+  AssertEqualObjects(@"fetchWithApproov header names must be strings", result[@"message"], @"Message mismatch");
+}
+
+static void TestFetchWithApproovRejectsInvalidHeaderValues(void) {
+  ApproovService *service = FreshService();
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{@"headers": @{@"X-Header": @(YES)}} resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"bad_request", result[@"code"], @"Should reject bad_request");
+  AssertEqualObjects(@"fetchWithApproov header values must be strings", result[@"message"], @"Message mismatch");
+}
+
+static void TestFetchWithApproovRejectsInvalidBodies(void) {
+  ApproovService *service = FreshService();
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{@"body": @(YES)} resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"bad_request", result[@"code"], @"Should reject bad_request");
+  AssertEqualObjects(@"fetchWithApproov body must be a string when provided", result[@"message"], @"Message mismatch");
+}
+
+static void TestFetchWithApproovAcceptsValidRequests(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{
+    @"method": @"POST",
+    @"headers": @{
+      @"X-Custom-Header": @"custom-value",
+      @"Accept": @"application/json"
+    },
+    @"body": @"{\"test\":\"payload\"}"
+  });
+
+  AssertEqualObjects(@"POST", reply[@"method"], @"Backend should receive POST method");
+  AssertEqualObjects(@"custom-value", HeaderValue(reply, @"X-Custom-Header"), @"Backend should receive custom header");
+  AssertEqualObjects(@"{\"test\":\"payload\"}", reply[@"body"], @"Backend should receive string body");
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -418,6 +490,12 @@ int main(void) {
       ^{ TestDirectPinningBlocksInvalidPins(); },
       ^{ TestFetchTokenReturnsSignedTokenWithExpectedClaims(); },
       ^{ TestFetchSecureStringAndCustomJWTUseMiniSDK(); },
+      ^{ TestFetchWithApproovRejectsInvalidMethods(); },
+      ^{ TestFetchWithApproovRejectsInvalidHeaders(); },
+      ^{ TestFetchWithApproovRejectsInvalidHeaderNames(); },
+      ^{ TestFetchWithApproovRejectsInvalidHeaderValues(); },
+      ^{ TestFetchWithApproovRejectsInvalidBodies(); },
+      ^{ TestFetchWithApproovAcceptsValidRequests(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

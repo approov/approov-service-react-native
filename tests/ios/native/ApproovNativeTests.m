@@ -338,6 +338,75 @@ static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
              @"Failed initialization should leave the layer uninitialized");
 }
 
+static void TestInitializeIgnoresNativeAlreadyInitializedError(void) {
+  ApproovService *service = FreshService();
+  NSError *alreadyInitializedError =
+      [NSError errorWithDomain:@"Foundation._GenericObjCError"
+                          code:0
+                      userInfo:nil];
+  ApproovTestSetInitializationError(alreadyInitializedError);
+
+  __block BOOL didResolve = NO;
+  __block NSString *rejectionCode = nil;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               didResolve = YES;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+  ApproovTestClearInitializationError();
+
+  AssertTrue(didResolve,
+             @"Already-initialized native SDK error should resolve");
+  AssertEqualObjects(nil, rejectionCode,
+                     @"Already-initialized native SDK error should not reject");
+  AssertTrue(isInitialized,
+             @"Already-initialized native SDK error should still mark the layer initialized");
+  AssertEqualObjects(@"test-config", initialConfigString,
+                     @"Successful guarded initialization should store the config");
+}
+
+static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
+  ApproovService *service = FreshService();
+  NSError *differentConfigurationError =
+      [NSError errorWithDomain:@"com.criticalblue.Approov"
+                          code:0
+                      userInfo:@{
+                        NSLocalizedDescriptionKey :
+                            @"Approov SDK already initialized with a different configuration"
+                      }];
+  ApproovTestSetInitializationError(differentConfigurationError);
+
+  __block BOOL didResolve = NO;
+  __block NSString *rejectionCode = nil;
+  __block NSString *rejectionMessage = nil;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               didResolve = YES;
+             }
+             rejecter:^(NSString *code, NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+               rejectionMessage = message;
+             }];
+  ApproovTestClearInitializationError();
+
+  AssertTrue(!didResolve,
+             @"Different-configuration native SDK error should reject");
+  AssertEqualObjects(@"initialize", rejectionCode,
+                     @"Different-configuration native SDK error should reject with initialize");
+  AssertEqualObjects(
+      @"initialization failed: Approov SDK already initialized with a different configuration",
+      rejectionMessage,
+      @"Different-configuration native SDK error should preserve the platform message");
+  AssertTrue(!isInitialized,
+             @"Different-configuration native SDK error should leave the layer uninitialized");
+}
+
 static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
   ApproovService *service = FreshService();
   __block NSNumber *initializedBefore = nil;
@@ -879,6 +948,8 @@ int main(void) {
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAllowsReinitCommentWithDifferentConfig(); },
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
+      ^{ TestInitializeIgnoresNativeAlreadyInitializedError(); },
+      ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
       ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
       ^{ TestInterceptRequestAddsTokenTraceAndFetchesConfig(); },
       ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },

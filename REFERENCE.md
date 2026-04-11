@@ -25,12 +25,14 @@ This function returns a `Promise` that is resolved when the operation is complet
 
 Passing an empty config string leaves the React Native service layer initialized while disabling Approov SDK processing. In that mode requests are forwarded as standard network traffic without Approov token injection, secure string substitution, message signing, or dynamic pinning.
 
-The optional `comment` parameter is an advanced native SDK feature and most applications should omit it. It is primarily intended for specialist initialization or reinitialization flows supported by the underlying Approov SDK, such as:
+This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a non-empty valid config string is allowed and will then enable the native Approov SDK. By contrast, reinitializing from one non-empty config string to a different non-empty config string still rejects unless you are intentionally using a supported `reinit...` comment flow with the same config.
 
-* comments starting with `reinit` to explicitly allow reinitialization
-* comments starting with `options:` to pass supported initialization options
+The optional `comment` parameter is an advanced native SDK feature and most applications should omit it. It is primarily intended for specialist initialization flows supported by the underlying Approov SDK, such as:
 
-If you do not have a specific need for those features, pass nothing and let the default `null` value be used.
+* comments starting with `reinit` to explicitly allow supported same-config runtime reinitialization
+* comments starting with `options:` to pass supported initialization options on the initial non-empty initialization call
+
+Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If multiple service layers are present in the same app process, React Native also tolerates the native already-initialized outcome for a genuine same-config initialization attempt, while still rejecting real different-configuration failures. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
 
 ## isInitialized
 Returns whether the React Native Approov service layer has been initialized.
@@ -181,7 +183,7 @@ ApproovService.getTraceIDHeader();
 This function returns a `Promise` providing the result.
 
 ## setBindingHeader
-Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then a hash of the header value is included in the issued Approov tokens to bind them to the value. This may then be verified by the backend API integration.
+Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to that value. This may then be verified by the backend API integration.
 
 ```Javascript
 ApproovService.setBindingHeader(header: string);
@@ -282,11 +284,10 @@ ApproovService.getDeviceID();
 This function returns a `Promise` providing the result.
 
 ## setDataHashInToken
-Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash from the given `data` to be included in subsequently fetched Approov tokens. If the hash is
+Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash from the given `data` for subsequently fetched Approov tokens. If the hash is
 different from any previously set value then this will cause the next token fetch operation to
-fetch a new token with the correct payload data hash. The hash appears in the
-'pay' claim of the Approov token as a base64 encoded string of the SHA256 hash of the
-data. Note that the data is hashed locally and never sent to the Approov cloud service.
+fetch a new token with the correct payload data hash. The resulting token is expected to carry the
+`pay` claim as a base64 encoded string of the SHA256 hash of the data. Note that the data is hashed locally and never sent to the Approov cloud service.
 This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
 
 ```Javascript

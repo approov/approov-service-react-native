@@ -124,6 +124,14 @@ static BOOL ApproovIsEnabled(void) {
          [initialConfigString length] != 0;
 }
 
+static BOOL ApproovInitializationErrorIsAlreadyInitialized(NSError *error) {
+  if (error == nil) {
+    return NO;
+  }
+  return error.code == 0 &&
+         [error.domain isEqualToString:@"Foundation._GenericObjCError"];
+}
+
 // proceedOnNetworkFail has been removed; network failure handling is now
 // controlled entirely via ApproovServiceMutator
 
@@ -238,10 +246,16 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
                   comment:nil
                     error:&initializationError];
     }
-    if (initializationError) {
+    if (initializationError &&
+        !ApproovInitializationErrorIsAlreadyInitialized(initializationError)) {
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
     } else {
+      if (initializationError) {
+        ApproovLogI(@"ignoring native already-initialized SDK state during launch "
+                    @"initialization: %@",
+                    [initializationError localizedDescription]);
+      }
       // complete the initialization
       initialConfigString = config;
       isInitialized = YES;
@@ -328,10 +342,17 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * @param resolve is used if the operation resolved without error
  * @param reject is used if the operation failed with an error
  */
-RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
-    RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(initialize : (NSString *)config
+                  comment : (NSString *_Nullable)comment
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
   @synchronized(initializerLock) {
-    if (isInitialized) {
+    BOOL allowReinitialize =
+        comment != nil && [comment hasPrefix:@"reinit"];
+    BOOL allowEnableAfterEmptyInitialization =
+        isInitialized && initialConfigString != nil &&
+        [initialConfigString length] == 0 && [config length] != 0;
+    if (isInitialized && !allowReinitialize && !allowEnableAfterEmptyInitialization) {
       // if the SDK is previously initialized then check the config string is
       // the same
       if (![initialConfigString isEqualToString:config]) {
@@ -351,10 +372,11 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
       if ([config length] != 0) {
         [Approov initialize:config
                updateConfig:@"auto"
-                    comment:nil
+                    comment:comment
                       error:&initializationError];
       }
-      if (initializationError) {
+      if (initializationError &&
+          !ApproovInitializationErrorIsAlreadyInitialized(initializationError)) {
         ApproovLogE(@"initialization failed: %@",
                     [initializationError localizedDescription]);
         NSError *error =
@@ -366,6 +388,11 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
                              [initializationError localizedDescription]];
         reject(@"initialize", details, error);
       } else {
+        if (initializationError) {
+          ApproovLogI(@"ignoring native already-initialized SDK state during "
+                      @"explicit initialization: %@",
+                      [initializationError localizedDescription]);
+        }
         initialConfigString = config;
         isInitialized = YES;
         @synchronized(earliestNetworkRequestTimeLock) {
@@ -385,6 +412,16 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
       }
     }
   }
+}
+
+RCT_EXPORT_METHOD(isInitialized : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@(isInitialized));
+}
+
+RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@(ApproovIsEnabled()));
 }
 
 /**
@@ -1293,26 +1330,29 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   if (status == ApproovTokenFetchStatusSuccess) {
     // add the Approov token to the required header
-    NSString *tokenHeader;
-    @synchronized(approovTokenHeader) {
-      tokenHeader = approovTokenHeader;
+    if ((result.token != nil && result.token.length > 0) ||
+        useApproovStatusIfNoToken) {
+      NSString *tokenHeader;
+      @synchronized(approovTokenHeader) {
+        tokenHeader = approovTokenHeader;
+      }
+      NSString *tokenPrefix;
+      @synchronized(approovTokenPrefix) {
+        tokenPrefix = approovTokenPrefix;
+      }
+      NSString *value = @"";
+      if (useApproovStatusIfNoToken &&
+          (!result.token || result.token.length == 0)) {
+        value = [NSString
+            stringWithFormat:@"%@%@", tokenPrefix,
+                             [Approov
+                                 stringFromApproovTokenFetchStatus:result
+                                                                       .status]];
+      } else {
+        value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
+      }
+      [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
     }
-    NSString *tokenPrefix;
-    @synchronized(approovTokenPrefix) {
-      tokenPrefix = approovTokenPrefix;
-    }
-    NSString *value = @"";
-    if (useApproovStatusIfNoToken &&
-        (!result.token || result.token.length == 0)) {
-      value = [NSString
-          stringWithFormat:@"%@%@", tokenPrefix,
-                           [Approov
-                               stringFromApproovTokenFetchStatus:result
-                                                                     .status]];
-    } else {
-      value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
-    }
-    [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
 
     NSString *traceIDHeader;
     @synchronized(approovTraceIDHeader) {

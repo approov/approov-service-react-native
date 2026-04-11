@@ -134,6 +134,9 @@ const ApproovService = new Proxy(NativeApproovService || {}, {
                 });
             }
         }
+        if (prop === 'initialize') {
+            return (config, comment = null) => target.initialize(config, comment)
+        }
         return target[prop]
     }
 })

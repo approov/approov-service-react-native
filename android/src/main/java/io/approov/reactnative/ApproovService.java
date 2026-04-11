@@ -590,8 +590,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param promise to be fulfilled once the initialization is completed
      */
     @ReactMethod
-    public void initialize(String config, Promise promise) {
-        if (isInitialized) {
+    public void initialize(String config, String comment, Promise promise) {
+        String effectiveComment = comment == null ? "" : comment;
+        boolean allowReinitialize = effectiveComment.startsWith("reinit");
+        boolean allowEnableAfterEmptyInitialization =
+                isInitialized && (initialConfig != null) && initialConfig.isEmpty() && !config.isEmpty();
+
+        if (isInitialized && !allowReinitialize && !allowEnableAfterEmptyInitialization) {
             // if the SDK is previously initialized then the config should be the same
             if (!config.equals(initialConfig)) {
                 log(LOG_ERROR, TAG, "attempt to reinitialize with a different config");
@@ -606,7 +611,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // be available
             try {
                 if (!config.isEmpty()) {
-                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.initialize(applicationContext, config, "auto", effectiveComment);
                     Approov.setUserProperty("approov-react-native");
                 }
                 initialConfig = config;
@@ -643,11 +648,35 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Returns the Approov service-layer initialization status to the React Native
+     * bridge.
+     *
+     * @param promise React Native promise resolved with true if the service layer is
+     *                initialized
+     */
+    @ReactMethod
+    public void isInitialized(Promise promise) {
+        promise.resolve(isInitialized());
+    }
+
+    /**
      * Returns true when the service layer is initialized and Approov-backed
      * request protection is active.
      */
     public synchronized boolean isApproovEnabled() {
         return isInitialized && initialConfig != null && !initialConfig.isEmpty();
+    }
+
+    /**
+     * Returns true when the service layer is initialized and the native Approov SDK
+     * is active.
+     *
+     * @param promise React Native promise resolved with true if Approov-backed
+     *                protection is enabled
+     */
+    @ReactMethod
+    public void isApproovEnabled(Promise promise) {
+        promise.resolve(isApproovEnabled());
     }
 
     /**
@@ -1414,6 +1443,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
         String type = "lookup";
         if (newDef != null)
             type = "definition";
+
+        // The Android SDK treats null/empty/overlong keys as local argument
+        // failures rather than attester-driven BAD_KEY / UNKNOWN_KEY results.
+        if (key == null) {
+            promise.reject("fetchSecureString", "IllegalArgument: secure string key is null", getErrorUserInfo(false));
+            return;
+        }
+        if (key.isEmpty() || key.length() > 64) {
+            promise.reject("fetchSecureString", "IllegalArgument: secure string key is empty or too long", getErrorUserInfo(false));
+            return;
+        }
 
         // fetch any secure string keyed by the value, catching any exceptions the SDK
         // might throw

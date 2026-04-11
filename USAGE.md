@@ -11,6 +11,8 @@ If your application executes a `fetch()` or `axios` request *before* `ApproovSer
 > [!WARNING]
 > You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
 > A request that leaves the device before initialization completes may be forwarded without an Approov token.
+> If you intentionally initialize with `""`, that request path is treated as an explicit no-Approov bootstrap mode: requests will proceed without Approov protection until you later call `ApproovService.initialize("<valid-config>")`.
+> This empty-first then valid-config-later flow is supported for advanced service-layer integrations, but switching directly between different non-empty config strings is still rejected.
 > The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues.
 > On iOS, **turn it off for production** with `ApproovService.setSessionMetadataCollectionEnabled(false)` as part of startup.
 > Android currently does not persist an equivalent session ledger; this toggle is retained there only for API parity.

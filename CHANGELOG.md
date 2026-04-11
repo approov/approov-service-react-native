@@ -4,15 +4,16 @@
 
 - Clarified secure string key handling so React Native now explicitly distinguishes a non-existent key from an invalid key: unknown keys resolve `null`, while invalid keys reject with a permanent `BAD_KEY` error without crashing the service layer.
 - Documented and exposed `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` in the public React Native API, matching the sibling URLSession and OkHttp service layers more closely.
-- Added an optional nullable `comment` parameter to `ApproovService.initialize(config, comment?)` and `ApproovProvider`, for advanced SDK initialization and reinitialization flows.
+- Added an optional nullable `comment` parameter to `ApproovService.initialize(config, comment?)` and `ApproovProvider`, for advanced SDK comments such as initialization-time `options:...` and repeated runtime `reinit...` flows.
 - Aligned missing token and trace artifact handling with sibling service layers so requests proceed without empty `Approov-Token` or trace headers when no usable value is available.
+- Hardened iOS initialization so a genuine non-empty initialization attempt tolerates the native "already initialized" exception when another service layer has already initialized the platform SDK, while still rejecting real different-configuration errors.
 
 All notable changes to this project will be documented in this file.
 
 
 
 ## [3.5.13] - 2026-04-10
-- **Initialization Comment Bridging**: Extended the public React Native `ApproovService.initialize()` API and `ApproovProvider` to accept an optional nullable `comment` parameter and forward it to the native Approov SDK. This enables advanced SDK flows such as explicit `reinit...` and `options:...` comments while remaining optional for normal app startup.
+- **Initialization Comment Bridging**: Extended the public React Native `ApproovService.initialize()` API and `ApproovProvider` to accept an optional nullable `comment` parameter and forward it to the native Approov SDK. This enables advanced SDK comments such as explicit `reinit...` runtime reinitialization and initial-call `options:...` configuration while remaining optional for normal app startup.
 - **Public Initialization Status Methods**: Added `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` to the public React Native API so JavaScript can distinguish between service-layer initialization and active native Approov protection, matching the sibling URLSession and OkHttp service layers more closely.
 - **Missing Token Artifact Handling Alignment**: Updated Android and iOS request interception so when a request is allowed to proceed without a usable Approov token or trace ID, the corresponding headers are omitted rather than being sent with empty values. This matches the sibling URLSession and OkHttp service layers more closely and is now covered by explicit mini-sdk and native regression tests.
 - **Empty-Config Bypass Fix**: Fixed Android and iOS so initializing with an empty Approov config keeps the React Native service layer initialized while correctly disabling Approov SDK initialization, token fetches, prefetch, dynamic pinning, and request mutation. Requests now continue in plain fetch mode without Approov protection.

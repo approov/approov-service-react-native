@@ -181,7 +181,8 @@ public class ApproovInterceptor implements Interceptor {
         String addedTokenPrefix = null;
         String addedTokenValue = null;
         String addedTraceIDHeader = null;
-        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
+        if ((approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
+                && (approovResults.getToken() != null) && !approovResults.getToken().isEmpty()) {
             addedTokenHeader = approovService.getTokenHeader();
             addedTokenPrefix = approovService.getTokenPrefix();
             addedTokenValue = approovResults.getToken();

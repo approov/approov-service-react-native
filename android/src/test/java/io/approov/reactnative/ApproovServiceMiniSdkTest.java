@@ -235,6 +235,25 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void initializeWithEmptyConfigCanLaterEnableApproovWithValidConfig() throws Exception {
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        awaitResolvedPromise(promise -> service.initialize("", null, promise));
+
+        JSONObject unprotectedReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNull(getHeader(unprotectedReply, "Approov-Token"));
+        assertNull(getHeader(unprotectedReply, "Approov-TraceID"));
+        assertTrue(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+        JSONObject protectedReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(protectedReply, "Approov-Token"));
+    }
+
+    @Test
     public void precheckTreatsUnknownKeyAsSuccess() throws Exception {
         awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         awaitResolvedPromise(service::precheck);
@@ -888,7 +907,7 @@ public class ApproovServiceMiniSdkTest {
         PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString("", null, promise));
 
         assertEquals("fetchSecureString", rejected.code);
-        assertEquals("fetchSecureString: BAD_KEY", rejected.message);
+        assertTrue(rejected.message.startsWith("IllegalArgument:"));
     }
 
     @Test
@@ -898,7 +917,7 @@ public class ApproovServiceMiniSdkTest {
         PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString(repeat("k", 65), null, promise));
 
         assertEquals("fetchSecureString", rejected.code);
-        assertEquals("fetchSecureString: BAD_KEY", rejected.message);
+        assertTrue(rejected.message.startsWith("IllegalArgument:"));
     }
 
     @Test

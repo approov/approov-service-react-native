@@ -26,6 +26,8 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
            comment:(NSString *_Nullable)comment
           resolver:(RCTPromiseResolveBlock)resolve
           rejecter:(RCTPromiseRejectBlock)reject;
+- (void)isApproovEnabled:(RCTPromiseResolveBlock)resolve
+                rejecter:(RCTPromiseRejectBlock)reject;
 - (void)precheck:(RCTPromiseResolveBlock)resolve
         rejecter:(RCTPromiseRejectBlock)reject;
 - (void)getDeviceID:(RCTPromiseResolveBlock)resolve
@@ -331,6 +333,39 @@ static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
   NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
   AssertNil(HeaderValue(reply, @"Approov-Token"), @"Empty config should not add tokens");
   AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"Empty config should not add trace IDs");
+}
+
+static void TestInitializeWithEmptyConfigCanLaterEnableApproov(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  NSDictionary *unprotectedReply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNil(HeaderValue(unprotectedReply, @"Approov-Token"),
+            @"Empty config should forward without an Approov token");
+  AssertNil(HeaderValue(unprotectedReply, @"Approov-TraceID"),
+            @"Empty config should forward without an Approov trace ID");
+  AssertTrue(isInitialized, @"Layer should stay initialized after empty config");
+  NSDictionary *emptyEnabled = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(NO), emptyEnabled[@"value"], @"Empty config should not enable Approov");
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Layer should remain initialized after enabling Approov");
+  NSDictionary *enabled = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabled[@"value"], @"Valid config after empty init should enable Approov");
+  NSDictionary *protectedReply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(protectedReply, @"Approov-Token"),
+               @"Valid config after empty init should add an Approov token");
 }
 
 static void TestInitializeIgnoresSameConfig(void) {
@@ -1114,6 +1149,7 @@ int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
       ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
+      ^{ TestInitializeWithEmptyConfigCanLaterEnableApproov(); },
       ^{ TestInitializeIgnoresSameConfig(); },
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },

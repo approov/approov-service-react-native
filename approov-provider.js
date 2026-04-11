@@ -25,7 +25,7 @@ const { ApproovService } = NativeModules
 
 const ApproovContext = React.createContext()
 
-const ApproovProvider = ({ config, onInit, children }) => {
+const ApproovProvider = ({ config, comment = null, onInit, children }) => {
   const [status, setStatus] = useState({
     approovReady: false,
     approovError: null,
@@ -40,7 +40,7 @@ const ApproovProvider = ({ config, onInit, children }) => {
         if (onInit) await Promise.resolve(onInit())
 
         // initialize Approov
-        await ApproovService.initialize(config)
+        await ApproovService.initialize(config, comment)
         if (!isMounted) return
 
         setStatus({ approovReady: true, approovError: null })

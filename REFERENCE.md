@@ -54,7 +54,21 @@ ApproovService.isApproovEnabled();
 
 This function returns a `Promise<boolean>`.
 
-This only resolves to `true` after a successful initialization with a non-empty config string. If initialization has not happened yet, failed, or completed with an empty config string, it resolves to `false`.
+This only resolves to `true` after a successful initialization with a non-empty configuration string. If initialization has not happened yet, failed, or completed with an empty configuration string, it resolves to `false`.
+
+## isInterceptorActive
+Returns whether the native networking interception is currently active for the platform's HTTP library.
+
+```Javascript
+ApproovService.isInterceptorActive();
+```
+
+This function returns a `Promise<boolean>`.
+
+- **Android:** Returns `true` if the `ApproovInterceptor` is correctly configured in the active `OkHttpClient`.
+- **iOS:** Returns `true` if swizzling is active and Approov is successfully monitoring `NSURLSession` creations.
+
+If this returns `false`, Approov is not currently intercepting or protecting network requests. On Android, you can use `updateClientFactory(true)` to attempt recovery.
 
 ## fetchWithApproov
 Provides a secure `fetch()`-compatible API, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs.

@@ -882,13 +882,55 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
-    public void fetchSecureStringWithInvalidKeyRejects() throws Exception {
+    public void fetchSecureStringWithEmptyKeyRejects() throws Exception {
         awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
 
         PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString("", null, promise));
 
         assertEquals("fetchSecureString", rejected.code);
         assertEquals("fetchSecureString: BAD_KEY", rejected.message);
+    }
+
+    @Test
+    public void fetchSecureStringWithOverlongKeyRejects() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString(repeat("k", 65), null, promise));
+
+        assertEquals("fetchSecureString", rejected.code);
+        assertEquals("fetchSecureString: BAD_KEY", rejected.message);
+    }
+
+    @Test
+    public void fetchSecureStringWithNilKeyRejects() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString(null, null, promise));
+
+        assertEquals("fetchSecureString", rejected.code);
+        assertTrue(rejected.message.startsWith("IllegalArgument:"));
+    }
+
+    @Test
+    public void fetchWithApproovSubstitutesShortAndLongSecureStringValues() throws Exception {
+        String longValue = repeat("v", 2048);
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"fetchSecureString\": ["
+                + "{\"key\":\"header-key\",\"status\":\"SUCCESS\",\"secureString\":\"x\"},"
+                + "{\"key\":\"query-key\",\"status\":\"SUCCESS\",\"secureString\":" + JSONObject.quote(longValue) + "}"
+                + "]",
+            "reinit-substitution-ranges");
+        service.addSubstitutionHeader("Api-Key", "");
+        service.addSubstitutionQueryParam("api_key");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL() + "?api_key=query-key")
+            .header("Api-Key", "header-key")
+            .build());
+
+        assertEquals("x", getHeader(reply, "Api-Key"));
+        assertTrue(reply.getString("url").contains("api_key=" + longValue));
     }
 
     @Test
@@ -900,6 +942,75 @@ public class ApproovServiceMiniSdkTest {
         assertEquals("tester", payload.getString("role"));
         assertFalse(payload.has("exp"));
         assertFalse(payload.has("did"));
+    }
+
+    @Test
+    public void fetchCustomJwtSupportsEighteenKilobytePayload() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        String largeValue = repeat("a", 18 * 1024);
+        String payloadJson = "{\"blob\":" + JSONObject.quote(largeValue) + "}";
+
+        PromiseResult resolved = awaitResolvedPromise(promise -> service.fetchCustomJWT(payloadJson, promise));
+        JSONObject payload = decodeJWTBody((String) resolved.value);
+
+        assertEquals(18 * 1024, payload.getString("blob").length());
+        assertEquals(largeValue, payload.getString("blob"));
+    }
+
+    @Test
+    public void fetchCustomJwtWithMalformedPayloadDoesNotCallback() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        CountDownLatch latch = new CountDownLatch(1);
+        Promise promise = mock(Promise.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(promise).resolve(org.mockito.ArgumentMatchers.nullable(Object.class));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(promise).reject(any(String.class), any(String.class), any(WritableMap.class));
+
+        service.fetchCustomJWT("{\"role\":", promise);
+
+        assertFalse("Malformed custom JWT payloads currently should not resolve or reject on Android mini-sdk",
+            latch.await(250, TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    public void fetchCustomJwtRejectsWhenApproovServiceIsDisabled() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}");
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchCustomJWT("{\"role\":\"tester\"}", promise));
+
+        assertEquals("fetchCustomJWT", rejected.code);
+        assertEquals("fetchCustomJWT: NO_APPROOV_SERVICE", rejected.message);
+    }
+
+    @Test
+    public void fetchCustomJwtRejectsOnAttestationRejection() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"REJECTED\",\"arc\":\"IXPSB7TRK26LXE3M\",\"rejectionReasons\":\"policy\"}}");
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchCustomJWT("{\"role\":\"tester\"}", promise));
+
+        assertEquals("precheck", rejected.code);
+        assertEquals("fetchCustomJWT: REJECTED IXPSB7TRK26LXE3M policy", rejected.message);
+    }
+
+    @Test
+    public void fetchCustomJwtRejectsOnNetworkFailure() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"NO_NETWORK\"}}");
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchCustomJWT("{\"role\":\"tester\"}", promise));
+
+        assertEquals("fetchCustomJWT", rejected.code);
+        assertEquals("fetchCustomJWT: NO_NETWORK", rejected.message);
     }
 
     private JSONObject fetchNetworkReply(Request request) throws Exception {
@@ -967,6 +1078,10 @@ public class ApproovServiceMiniSdkTest {
         action.run(promise);
         assertTrue("Timed out waiting for promise", latch.await(5, TimeUnit.SECONDS));
         return resultRef.get();
+    }
+
+    private String repeat(String value, int count) {
+        return value.repeat(count);
     }
 
     private void reinitializeServiceWithScenario(String body, String comment) throws Exception {

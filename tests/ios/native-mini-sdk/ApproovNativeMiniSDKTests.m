@@ -168,6 +168,14 @@ static NSString *SHA256Base64(NSString *value) {
   return [[NSData dataWithBytes:digest length:sizeof(digest)] base64EncodedStringWithOptions:0];
 }
 
+static NSString *RepeatString(NSString *value, NSUInteger count) {
+  NSMutableString *result = [NSMutableString stringWithCapacity:value.length * count];
+  for (NSUInteger index = 0; index < count; index += 1) {
+    [result appendString:value];
+  }
+  return result;
+}
+
 static NSDictionary *AwaitPromise(void (^work)(RCTPromiseResolveBlock, RCTPromiseRejectBlock)) {
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block id resolvedValue = nil;
@@ -675,6 +683,60 @@ static void TestFetchSecureStringWithInvalidKeyRejects(void) {
              @"Invalid secure string keys should surface a bad key error distinctly from UNKNOWN_KEY");
 }
 
+static void TestFetchSecureStringWithOverlongKeyRejects(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSString *overlongKey = RepeatString(@"k", 65);
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchSecureString:overlongKey newDef:nil resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchSecureString", rejected[@"code"], @"Overlong secure string keys should reject");
+  AssertTrue([[rejected[@"message"] lowercaseString] containsString:@"bad key"],
+             @"Overlong secure string keys should surface a bad key error");
+}
+
+static void TestFetchSecureStringWithNilKeyRejects(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchSecureString:nil newDef:nil resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchSecureString", rejected[@"code"], @"Nil secure string keys should reject");
+  AssertNotNil(rejected[@"message"], @"Nil secure string keys should include an error message");
+}
+
+static void TestFetchWithApproovSubstitutesShortAndLongSecureStringValues(void) {
+  NSString *longValue = RepeatString(@"v", 2048);
+  ApproovService *headerService = FreshService();
+  LoadProtectedDomainScenario(@"\"initialSecureStrings\":{\"header-key\":\"x\"}");
+  InitializeService(headerService, @"reinit");
+  [headerService addSubstitutionHeader:@"Api-Key" requiredPrefix:@""];
+
+  NSDictionary *headerReply = FetchNetworkReply(headerService,
+                                                TargetURL(),
+                                                @{@"headers": @{@"Api-Key": @"header-key"}});
+  AssertEqualObjects(@"x", HeaderValue(headerReply, @"Api-Key"),
+                     @"Single-character secure strings should substitute into headers");
+
+  ApproovService *queryService = FreshService();
+  NSString *queryBody = [NSString stringWithFormat:
+      @"\"initialSecureStrings\":{\"query-key\":\"%@\"}",
+      longValue];
+  LoadProtectedDomainScenario(queryBody);
+  InitializeService(queryService, @"reinit");
+  [queryService addSubstitutionQueryParam:@"api_key"];
+
+  NSDictionary *queryReply = FetchNetworkReply(queryService,
+                                               [NSString stringWithFormat:@"%@?api_key=query-key", TargetURL()],
+                                               @{});
+  AssertTrue([queryReply[@"url"] containsString:[NSString stringWithFormat:@"api_key=%@", longValue]],
+             @"Long secure strings should substitute into query parameters unchanged");
+}
+
 static void TestFetchCustomJWTUseMiniSDK(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -685,6 +747,76 @@ static void TestFetchCustomJWTUseMiniSDK(void) {
   });
   NSDictionary *payload = DecodeJWTBody(jwt[@"value"]);
   AssertEqualObjects(@"tester", payload[@"role"], @"Custom JWT payload should be preserved");
+}
+
+static void TestFetchCustomJWTSupportsEighteenKilobytePayload(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSString *largeValue = RepeatString(@"a", 18 * 1024);
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{@"blob": largeValue} options:0 error:nil];
+  NSString *payloadJSON = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+  NSDictionary *jwt = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:payloadJSON resolver:resolve rejecter:reject];
+  });
+  NSDictionary *payload = DecodeJWTBody(jwt[@"value"]);
+  AssertEqualObjects(@(18 * 1024), @([payload[@"blob"] length]), @"18KB payload should round-trip through custom JWT");
+  AssertEqualObjects(largeValue, payload[@"blob"], @"Large custom JWT payload should be preserved");
+}
+
+static void TestFetchCustomJWTWithMalformedPayloadRejects(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:@"{\"role\":" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchCustomJWT", rejected[@"code"], @"Malformed custom JWT payloads should reject");
+  AssertNotNil(rejected[@"message"], @"Malformed custom JWT payloads should report an error");
+}
+
+static void TestFetchCustomJWTRejectsWhenApproovServiceIsDisabled(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}"];
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:@"{\"role\":\"tester\"}" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchCustomJWT", rejected[@"code"], @"NO_APPROOV_SERVICE custom JWT fetches should reject");
+  AssertTrue([rejected[@"message"] hasPrefix:@"Error:"],
+             @"Disabled custom JWT fetches should surface a permanent bridge error");
+}
+
+static void TestFetchCustomJWTRejectsOnAttestationRejection(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"REJECTED\",\"arc\":\"IXPSB7TRK26LXE3M\",\"rejectionReasons\":\"policy\"}}"];
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:@"{\"role\":\"tester\"}" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchCustomJWT", rejected[@"code"], @"Rejected custom JWT fetches should reject");
+  AssertTrue([rejected[@"message"] containsString:@"Rejected"],
+             @"Rejected custom JWT fetches should surface rejection details");
+}
+
+static void TestFetchCustomJWTRejectsOnNetworkFailure(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchCustomJWT\",\"response\":{\"status\":\"NO_NETWORK\"}}"];
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:@"{\"role\":\"tester\"}" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchCustomJWT", rejected[@"code"], @"Network-failed custom JWT fetches should reject");
+  AssertTrue([rejected[@"message"] hasPrefix:@"Network error:"],
+             @"Network-failed custom JWT fetches should surface a network bridge error");
 }
 
 static void TestFetchWithApproovRejectsInvalidMethods(void) {
@@ -1003,7 +1135,15 @@ int main(void) {
       ^{ TestFetchSecureStringReturnsConfiguredValue(); },
       ^{ TestFetchSecureStringWithUnknownKeyResolvesNil(); },
       ^{ TestFetchSecureStringWithInvalidKeyRejects(); },
+      ^{ TestFetchSecureStringWithOverlongKeyRejects(); },
+      ^{ TestFetchSecureStringWithNilKeyRejects(); },
+      ^{ TestFetchWithApproovSubstitutesShortAndLongSecureStringValues(); },
       ^{ TestFetchCustomJWTUseMiniSDK(); },
+      ^{ TestFetchCustomJWTSupportsEighteenKilobytePayload(); },
+      ^{ TestFetchCustomJWTWithMalformedPayloadRejects(); },
+      ^{ TestFetchCustomJWTRejectsWhenApproovServiceIsDisabled(); },
+      ^{ TestFetchCustomJWTRejectsOnAttestationRejection(); },
+      ^{ TestFetchCustomJWTRejectsOnNetworkFailure(); },
       ^{ TestFetchWithApproovRejectsInvalidMethods(); },
       ^{ TestFetchWithApproovRejectsInvalidHeaders(); },
       ^{ TestFetchWithApproovRejectsInvalidHeaderNames(); },

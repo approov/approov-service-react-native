@@ -6,7 +6,6 @@
 - Documented and exposed `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` in the public React Native API, matching the sibling URLSession and OkHttp service layers more closely.
 - Added an optional nullable `comment` parameter to `ApproovService.initialize(config, comment?)` and `ApproovProvider`, for advanced SDK comments such as initialization-time `options:...` and repeated runtime `reinit...` flows.
 - Aligned missing token and trace artifact handling with sibling service layers so requests proceed without empty `Approov-Token` or trace headers when no usable value is available.
-- Hardened iOS initialization so a genuine non-empty initialization attempt tolerates the native "already initialized" exception when another service layer has already initialized the platform SDK, while still rejecting real different-configuration errors.
 
 All notable changes to this project will be documented in this file.
 

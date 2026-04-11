@@ -8,6 +8,7 @@ static NSString *gLastDataHash;
 static NSString *gLastDevKey;
 static NSString *gLastInstallAttrs;
 static NSError *gInitializationError;
+static BOOL gInitializationResult;
 
 @implementation ApproovTokenFetchResult
 
@@ -61,6 +62,7 @@ void ApproovTestReset(void) {
   gLastDevKey = nil;
   gLastInstallAttrs = nil;
   gInitializationError = nil;
+  gInitializationResult = YES;
 }
 
 void ApproovTestEnqueueTokenResult(ApproovTokenFetchResult *result) {
@@ -95,9 +97,13 @@ void ApproovTestSetInitializationError(NSError *error) {
 
 void ApproovTestClearInitializationError(void) { gInitializationError = nil; }
 
+void ApproovTestSetInitializationResult(BOOL result) {
+  gInitializationResult = result;
+}
+
 @implementation Approov
 
-+ (void)initialize:(NSString *)config
++ (BOOL)initialize:(NSString *)config
       updateConfig:(NSString *)updateConfig
            comment:(NSString *)comment
              error:(NSError *__autoreleasing  _Nullable *)error {
@@ -107,6 +113,7 @@ void ApproovTestClearInitializationError(void) { gInitializationError = nil; }
   if (error != NULL) {
     *error = gInitializationError;
   }
+  return gInitializationResult;
 }
 
 + (void)setUserProperty:(NSString *)property {

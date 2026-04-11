@@ -418,6 +418,37 @@ static void TestInitializeAcceptsReinitComment(void) {
   AssertTrue(isInitialized, @"Reinit comment should be accepted");
 }
 
+static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
+  ApproovService *service = FreshService();
+
+  NSDictionary *initializedBefore = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isInitialized:resolve rejecter:reject];
+  });
+  NSDictionary *enabledBefore = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  NSDictionary *initializedAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isInitialized:resolve rejecter:reject];
+  });
+  NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@(NO), initializedBefore[@"value"],
+                     @"Service should report uninitialized before initialize");
+  AssertEqualObjects(@(NO), enabledBefore[@"value"],
+                     @"Approov should report disabled before initialize");
+  AssertEqualObjects(@(YES), initializedAfter[@"value"],
+                     @"Empty-config initialize should still mark the layer initialized");
+  AssertEqualObjects(@(NO), enabledAfter[@"value"],
+                     @"Empty-config initialize should keep Approov disabled");
+}
+
 static void TestGetDeviceIDReturnsMiniSDKDeviceID(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1153,6 +1184,7 @@ int main(void) {
       ^{ TestInitializeIgnoresSameConfig(); },
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },
+      ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
       ^{ TestGetDeviceIDReturnsMiniSDKDeviceID(); },
       ^{ TestGetPinningDiagnosticsReturnsExpectedShape(); },
       ^{ TestFetchWithApproovAddsTokenTraceAndSubstitutions(); },

@@ -124,14 +124,6 @@ static BOOL ApproovIsEnabled(void) {
          [initialConfigString length] != 0;
 }
 
-static BOOL ApproovInitializationErrorIsAlreadyInitialized(NSError *error) {
-  if (error == nil) {
-    return NO;
-  }
-  return error.code == 0 &&
-         [error.domain isEqualToString:@"Foundation._GenericObjCError"];
-}
-
 // proceedOnNetworkFail has been removed; network failure handling is now
 // controlled entirely via ApproovServiceMutator
 
@@ -240,22 +232,20 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (config != nil) {
     // initialize the SDK
     NSError *initializationError = nil;
+    BOOL initializationResult = YES;
     if ([config length] != 0) {
-      [Approov initialize:config
-             updateConfig:@"auto"
-                  comment:nil
-                    error:&initializationError];
+      initializationResult = [Approov initialize:config
+                                    updateConfig:@"auto"
+                                         comment:nil
+                                           error:&initializationError];
     }
-    if (initializationError &&
-        !ApproovInitializationErrorIsAlreadyInitialized(initializationError)) {
+    if (!initializationResult && initializationError == nil) {
+      ApproovLogI(@"native SDK reported already initialized during launch "
+                  @"initialization");
+    } else if (initializationError) {
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
     } else {
-      if (initializationError) {
-        ApproovLogI(@"ignoring native already-initialized SDK state during launch "
-                    @"initialization: %@",
-                    [initializationError localizedDescription]);
-      }
       // complete the initialization
       initialConfigString = config;
       isInitialized = YES;
@@ -369,14 +359,33 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     } else {
       // initialize the Approov SDK
       NSError *initializationError = nil;
+      BOOL initializationResult = YES;
       if ([config length] != 0) {
-        [Approov initialize:config
-               updateConfig:@"auto"
-                    comment:comment
-                      error:&initializationError];
+        initializationResult = [Approov initialize:config
+                                      updateConfig:@"auto"
+                                           comment:comment
+                                             error:&initializationError];
       }
-      if (initializationError &&
-          !ApproovInitializationErrorIsAlreadyInitialized(initializationError)) {
+      if (!initializationResult && initializationError == nil) {
+        ApproovLogI(@"native SDK reported already initialized during explicit "
+                    @"initialization");
+        initialConfigString = config;
+        isInitialized = YES;
+        @synchronized(earliestNetworkRequestTimeLock) {
+          earliestNetworkRequestTime = 0.0;
+        }
+        if (ApproovIsEnabled()) {
+          [Approov setUserProperty:@"approov-react-native"];
+          ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
+        } else {
+          ApproovLogI(@"initialized without Approov SDK");
+        }
+        if (pendingPrefetch) {
+          [self prefetch];
+          pendingPrefetch = NO;
+        }
+        resolve(nil);
+      } else if (initializationError) {
         ApproovLogE(@"initialization failed: %@",
                     [initializationError localizedDescription]);
         NSError *error =
@@ -388,11 +397,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
                              [initializationError localizedDescription]];
         reject(@"initialize", details, error);
       } else {
-        if (initializationError) {
-          ApproovLogI(@"ignoring native already-initialized SDK state during "
-                      @"explicit initialization: %@",
-                      [initializationError localizedDescription]);
-        }
         initialConfigString = config;
         isInitialized = YES;
         @synchronized(earliestNetworkRequestTimeLock) {

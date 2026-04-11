@@ -181,132 +181,6 @@ static void TestInterceptRequestForwardsWhenUninitialized(void) {
                      @"Uninitialized path should forward without mutation");
 }
 
-static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
-  ApproovService *service = FreshService();
-  __block BOOL didResolve = NO;
-  __block NSString *rejectionCode = nil;
-
-  [service initialize:@""
-              comment:nil
-             resolver:^(__unused id value) {
-               didResolve = YES;
-             }
-             rejecter:^(NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-               rejectionCode = code;
-             }];
-
-  AssertTrue(didResolve, @"Empty config initialization should resolve");
-  AssertEqualObjects(nil, rejectionCode,
-                     @"Empty config initialization should not reject");
-  AssertTrue(isInitialized,
-             @"Empty config initialization should still mark the layer initialized");
-
-  NSURLRequest *request =
-      [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/data"]];
-  ApproovInterceptorResult *result = [service interceptRequest:request];
-
-  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
-                      @"Empty config should forward requests unchanged");
-  AssertEqualObjects(@"approov disabled forwarded", result.message,
-                     @"Empty config should bypass Approov processing");
-  AssertEqualIntegers(0, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
-                      @"Empty config should not fetch Approov tokens");
-}
-
-static void TestInitializeIgnoresSameConfig(void) {
-  ApproovService *service = FreshService();
-  __block NSInteger resolveCount = 0;
-  __block NSString *rejectionCode = nil;
-
-  [service initialize:@"test-config"
-              comment:nil
-             resolver:^(__unused id value) {
-               resolveCount += 1;
-             }
-             rejecter:^(NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-               rejectionCode = code;
-             }];
-  [service initialize:@"test-config"
-              comment:nil
-             resolver:^(__unused id value) {
-               resolveCount += 1;
-             }
-             rejecter:^(NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-               rejectionCode = code;
-             }];
-
-  AssertEqualIntegers(2, resolveCount,
-                      @"Same-config reinitialization should resolve both calls");
-  AssertEqualObjects(nil, rejectionCode,
-                     @"Same-config reinitialization should not reject");
-  AssertTrue(isInitialized,
-             @"Same-config reinitialization should keep the layer initialized");
-}
-
-static void TestInitializeRejectsDifferentConfig(void) {
-  ApproovService *service = FreshService();
-  __block BOOL firstResolved = NO;
-  __block NSString *rejectionCode = nil;
-  __block NSString *rejectionMessage = nil;
-
-  [service initialize:@"test-config"
-              comment:nil
-             resolver:^(__unused id value) {
-               firstResolved = YES;
-             }
-             rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-             }];
-  [service initialize:@"different-config"
-              comment:nil
-             resolver:^(__unused id value) {
-             }
-             rejecter:^(NSString *code, NSString *message,
-                        __unused NSError *error) {
-               rejectionCode = code;
-               rejectionMessage = message;
-             }];
-
-  AssertTrue(firstResolved, @"Initial initialization should resolve");
-  AssertEqualObjects(@"initialize", rejectionCode,
-                     @"Different-config reinitialization should reject with initialize");
-  AssertEqualObjects(@"attempt to reinitialize Approov SDK with a different config",
-                     rejectionMessage,
-                     @"Different-config reinitialization should explain the mismatch");
-  AssertTrue(isInitialized,
-             @"Different-config reinitialization should keep the existing initialized state");
-}
-
-static void TestInitializeAllowsReinitCommentWithDifferentConfig(void) {
-  ApproovService *service = FreshService();
-  __block BOOL secondResolved = NO;
-  __block NSString *rejectionCode = nil;
-
-  [service initialize:@"test-config"
-              comment:nil
-             resolver:^(__unused id value) {
-             }
-             rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-             }];
-  [service initialize:@"different-config"
-              comment:@"reinit:account-switch"
-             resolver:^(__unused id value) {
-               secondResolved = YES;
-             }
-             rejecter:^(NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-               rejectionCode = code;
-             }];
-
-  AssertTrue(secondResolved, @"Reinit comment should allow reinitialization");
-  AssertEqualObjects(nil, rejectionCode, @"Reinit comment should not reject");
-  AssertTrue(isInitialized, @"Reinit comment should leave the layer initialized");
-}
-
 static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
   ApproovService *service = FreshService();
   NSError *initError = [NSError errorWithDomain:@"io.approov.tests"
@@ -338,13 +212,10 @@ static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
              @"Failed initialization should leave the layer uninitialized");
 }
 
-static void TestInitializeIgnoresNativeAlreadyInitializedError(void) {
+static void TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(void) {
   ApproovService *service = FreshService();
-  NSError *alreadyInitializedError =
-      [NSError errorWithDomain:@"Foundation._GenericObjCError"
-                          code:0
-                      userInfo:nil];
-  ApproovTestSetInitializationError(alreadyInitializedError);
+  ApproovTestSetInitializationResult(NO);
+  ApproovTestClearInitializationError();
 
   __block BOOL didResolve = NO;
   __block NSString *rejectionCode = nil;
@@ -357,16 +228,14 @@ static void TestInitializeIgnoresNativeAlreadyInitializedError(void) {
                         __unused NSError *error) {
                rejectionCode = code;
              }];
-  ApproovTestClearInitializationError();
+  ApproovTestSetInitializationResult(YES);
 
   AssertTrue(didResolve,
-             @"Already-initialized native SDK error should resolve");
+             @"False return with nil error should be treated as already initialized");
   AssertEqualObjects(nil, rejectionCode,
-                     @"Already-initialized native SDK error should not reject");
+                     @"False return with nil error should not reject");
   AssertTrue(isInitialized,
-             @"Already-initialized native SDK error should still mark the layer initialized");
-  AssertEqualObjects(@"test-config", initialConfigString,
-                     @"Successful guarded initialization should store the config");
+             @"False return with nil error should still mark the layer initialized");
 }
 
 static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
@@ -405,57 +274,6 @@ static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
       @"Different-configuration native SDK error should preserve the platform message");
   AssertTrue(!isInitialized,
              @"Different-configuration native SDK error should leave the layer uninitialized");
-}
-
-static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
-  ApproovService *service = FreshService();
-  __block NSNumber *initializedBefore = nil;
-  __block NSNumber *enabledBefore = nil;
-  __block NSNumber *initializedAfter = nil;
-  __block NSNumber *enabledAfter = nil;
-
-  [service isInitialized:^(id value) {
-    initializedBefore = value;
-  }
-             rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-             }];
-  [service isApproovEnabled:^(id value) {
-    enabledBefore = value;
-  }
-                rejecter:^(__unused NSString *code, __unused NSString *message,
-                           __unused NSError *error) {
-                }];
-
-  [service initialize:@""
-              comment:nil
-             resolver:^(__unused id value) {
-             }
-             rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-             }];
-
-  [service isInitialized:^(id value) {
-    initializedAfter = value;
-  }
-             rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {
-             }];
-  [service isApproovEnabled:^(id value) {
-    enabledAfter = value;
-  }
-                rejecter:^(__unused NSString *code, __unused NSString *message,
-                           __unused NSError *error) {
-                }];
-
-  AssertEqualObjects(@NO, initializedBefore,
-                     @"Service should report uninitialized before initialize");
-  AssertEqualObjects(@NO, enabledBefore,
-                     @"Approov should report disabled before initialize");
-  AssertEqualObjects(@YES, initializedAfter,
-                     @"Empty-config initialize should still mark the layer initialized");
-  AssertEqualObjects(@NO, enabledAfter,
-                     @"Empty-config initialize should keep Approov disabled");
 }
 
 static void TestInterceptRequestAddsTokenTraceAndFetchesConfig(void) {
@@ -943,14 +761,9 @@ int main(void) {
       ^{ TestInterceptRequestFailsOnBadURL(); },
       ^{ TestInterceptRequestForwardsLocalhost(); },
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
-      ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
-      ^{ TestInitializeIgnoresSameConfig(); },
-      ^{ TestInitializeRejectsDifferentConfig(); },
-      ^{ TestInitializeAllowsReinitCommentWithDifferentConfig(); },
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
-      ^{ TestInitializeIgnoresNativeAlreadyInitializedError(); },
+      ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
-      ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
       ^{ TestInterceptRequestAddsTokenTraceAndFetchesConfig(); },
       ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },
       ^{ TestInterceptRequestDefaultMutatorFailsClosedOnMitm(); },

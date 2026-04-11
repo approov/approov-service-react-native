@@ -46,7 +46,7 @@ typedef void (^ApproovTokenFetchCallback)(ApproovTokenFetchResult *result);
 
 @interface Approov : NSObject
 
-+ (void)initialize:(NSString *)config
++ (BOOL)initialize:(NSString *)config
       updateConfig:(NSString *)updateConfig
            comment:(nullable NSString *)comment
              error:(NSError *_Nullable *_Nullable)error;
@@ -85,5 +85,6 @@ FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastDevKey(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastInstallAttrs(void);
 FOUNDATION_EXPORT void ApproovTestSetInitializationError(NSError *_Nullable error);
 FOUNDATION_EXPORT void ApproovTestClearInitializationError(void);
+FOUNDATION_EXPORT void ApproovTestSetInitializationResult(BOOL result);
 
 NS_ASSUME_NONNULL_END

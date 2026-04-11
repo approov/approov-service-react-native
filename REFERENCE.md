@@ -32,7 +32,7 @@ The optional `comment` parameter is an advanced native SDK feature and most appl
 * comments starting with `reinit` to explicitly allow supported same-config runtime reinitialization
 * comments starting with `options:` to pass supported initialization options on the initial non-empty initialization call
 
-Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If multiple service layers are present in the same app process, React Native also tolerates the native already-initialized outcome for a genuine same-config initialization attempt, while still rejecting real different-configuration failures. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
+Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
 
 ## isInitialized
 Returns whether the React Native Approov service layer has been initialized.

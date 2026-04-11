@@ -48,6 +48,32 @@ describe('ApproovService JS interface', () => {
     expect(ApproovService.ping).toBe(nativeService.ping);
   });
 
+  test('initialize forwards the optional comment and defaults it to null', async () => {
+    const initialize = jest.fn().mockResolvedValue(undefined);
+    setNativeService({ initialize });
+
+    await ApproovService.initialize('cfg', 'reinit:test');
+    await ApproovService.initialize('cfg');
+
+    expect(initialize).toHaveBeenNthCalledWith(1, 'cfg', 'reinit:test');
+    expect(initialize).toHaveBeenNthCalledWith(2, 'cfg', null);
+  });
+
+  test('status methods forward to the native bridge and preserve initialized versus enabled semantics', async () => {
+    const isInitialized = jest.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const isApproovEnabled = jest.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    setNativeService({ isInitialized, isApproovEnabled });
+
+    await expect(ApproovService.isInitialized()).resolves.toBe(false);
+    await expect(ApproovService.isApproovEnabled()).resolves.toBe(false);
+    await expect(ApproovService.isInitialized()).resolves.toBe(true);
+    await expect(ApproovService.isApproovEnabled()).resolves.toBe(false);
+  });
+
   test('fetchWithApproov extracts Request headers and body before crossing the native bridge', async () => {
     const nativeFetch = jest.fn().mockResolvedValue({
       status: 200,

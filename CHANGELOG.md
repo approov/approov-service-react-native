@@ -1,10 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Clarified secure string key handling so React Native now explicitly distinguishes a non-existent key from an invalid key: unknown keys resolve `null`, while invalid keys reject with a permanent `BAD_KEY` error without crashing the service layer.
+- Documented and exposed `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` in the public React Native API, matching the sibling URLSession and OkHttp service layers more closely.
+- Added an optional nullable `comment` parameter to `ApproovService.initialize(config, comment?)` and `ApproovProvider`, for advanced SDK initialization and reinitialization flows.
+- Aligned missing token and trace artifact handling with sibling service layers so requests proceed without empty `Approov-Token` or trace headers when no usable value is available.
+
 All notable changes to this project will be documented in this file.
 
 
 
 ## [3.5.13] - 2026-04-10
+- **Initialization Comment Bridging**: Extended the public React Native `ApproovService.initialize()` API and `ApproovProvider` to accept an optional nullable `comment` parameter and forward it to the native Approov SDK. This enables advanced SDK flows such as explicit `reinit...` and `options:...` comments while remaining optional for normal app startup.
+- **Public Initialization Status Methods**: Added `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` to the public React Native API so JavaScript can distinguish between service-layer initialization and active native Approov protection, matching the sibling URLSession and OkHttp service layers more closely.
+- **Missing Token Artifact Handling Alignment**: Updated Android and iOS request interception so when a request is allowed to proceed without a usable Approov token or trace ID, the corresponding headers are omitted rather than being sent with empty values. This matches the sibling URLSession and OkHttp service layers more closely and is now covered by explicit mini-sdk and native regression tests.
 - **Empty-Config Bypass Fix**: Fixed Android and iOS so initializing with an empty Approov config keeps the React Native service layer initialized while correctly disabling Approov SDK initialization, token fetches, prefetch, dynamic pinning, and request mutation. Requests now continue in plain fetch mode without Approov protection.
 - **Interception URL Handling Alignment**: Fixed Android and iOS native interception to request Approov tokens using the full request URL during protected request processing, matching the shared service-layer contract used by the sibling URLSession and OkHttp implementations.
 - **Disabled-State Pinning Guard**: Fixed Android and iOS so empty-config initialization is treated as "Approov disabled" for pinning decisions as well as token injection, preventing unintended pin enforcement when the service layer is running without active Approov protection.

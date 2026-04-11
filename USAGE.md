@@ -240,6 +240,145 @@ If you need HTTP Message Signing, or you need to change other networking behavio
 
 You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or enabling HTTP Message Signing.
 
+### Proceed On Selected Failure Statuses And Sign The Request
+
+The example below shows a custom mutator that:
+
+- uses the normal Approov token flow on `SUCCESS`
+- allows requests to continue on `MITM_DETECTED` and `NO_APPROOV_SERVICE`
+- signs the final outbound request with `ApproovDefaultMessageSigning`
+
+To send the failure reason in the token header when the request is allowed to continue without a real token, you must also enable:
+
+```javascript
+ApproovService.setUseApproovStatusIfNoToken(true);
+```
+
+With that setting enabled, the service layer places the failure status string into the configured token header, for example `Approov-Token: MITM_DETECTED`. Because the request now carries a non-empty token header, the message-signing mutator still signs the request.
+
+Verified behavior for this flow in `approov-service-react-native`:
+
+- `SUCCESS`: normal Approov token flow, trace header can be added, substitutions can run, and message signing can run
+- `MITM_DETECTED` or `NO_APPROOV_SERVICE` when your mutator allows proceed:
+  - the request can continue
+  - if `setUseApproovStatusIfNoToken(true)` is enabled, the token header contains the status string instead of a real token
+  - message signing can still run, because the signing mutator sees that token header
+  - no secure-string header substitution or query-parameter substitution is performed on these failure paths
+  - any trace header is only preserved if the SDK actually returned a non-empty trace ID for that result
+- if `setUseApproovStatusIfNoToken(false)` is left disabled, the request may still continue, but there is no token header for the signer to use, so message signing is skipped
+
+### Android Implementation (Java)
+
+```java
+package com.yourcompany.yourapp;
+
+import com.criticalblue.approovsdk.Approov;
+
+import io.approov.reactnative.ApproovDefaultMessageSigning;
+import io.approov.reactnative.ApproovException;
+import io.approov.reactnative.ApproovService;
+import io.approov.reactnative.ApproovServiceMutator;
+
+public class ProceedOnSelectedStatusesMutator extends ApproovDefaultMessageSigning {
+
+    public ProceedOnSelectedStatusesMutator() {
+        setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+    }
+
+    @Override
+    public boolean handleInterceptorFetchTokenResult(ApproovService service,
+            Approov.TokenFetchResult approovResults,
+            String url) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+
+        if (status == Approov.TokenFetchStatus.SUCCESS ||
+            status == Approov.TokenFetchStatus.MITM_DETECTED ||
+            status == Approov.TokenFetchStatus.NO_APPROOV_SERVICE) {
+            return true;
+        }
+
+        return ApproovServiceMutator.super
+            .handleInterceptorFetchTokenResult(service, approovResults, url);
+    }
+}
+```
+
+Register it before React Native networking starts:
+
+```java
+import android.app.Application;
+
+import io.approov.reactnative.ApproovService;
+
+public class MainApplication extends Application {
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        ApproovService.setServiceMutator(new ProceedOnSelectedStatusesMutator());
+    }
+}
+```
+
+### iOS Implementation (Swift)
+
+```swift
+import Foundation
+import approov_service_react_native
+
+final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
+    private let signer: ApproovDefaultMessageSigning
+
+    init() {
+        let signer = ApproovDefaultMessageSigning()
+        _ = signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+        )
+        self.signer = signer
+    }
+
+    func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                           url: String) throws -> Bool {
+        switch approovResults.status {
+        case .success, .mitmDetected, .noApproovService:
+            return true
+        default:
+            return try ApproovServiceMutatorDefault.shared
+                .handleInterceptorFetchTokenResult(approovResults, url: url)
+        }
+    }
+
+    func handleInterceptorProcessedRequest(_ request: URLRequest,
+                                           changes: ApproovRequestMutations) throws -> URLRequest {
+        return try signer.handleInterceptorProcessedRequest(request, changes: changes)
+    }
+}
+```
+
+Register it during app startup:
+
+```swift
+import approov_service_react_native
+
+@UIApplicationMain
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        ApproovServiceMutatorBridge.shared.serviceMutator = ProceedOnSelectedStatusesMutator()
+        return true
+    }
+}
+```
+
+In JavaScript, enable status-as-token before making protected requests:
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+await ApproovService.initialize('<your-config-string>');
+ApproovService.setUseApproovStatusIfNoToken(true);
+```
+
 ### Enabling Message Signing
 
 To enable HTTP Message Signing, you must register the `ApproovDefaultMessageSigning` mutator. If you also want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.

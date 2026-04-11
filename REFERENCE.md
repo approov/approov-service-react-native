@@ -18,12 +18,41 @@ You will not generally need to call this function directly, since this is called
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the Approov CLI. This will generate an error if a second attempt is made at initialization with a different `config` but will succeed if called multiple times with the same `config`.
 
 ```Javascript
-ApproovService.initialize(config: string);
+ApproovService.initialize(config: string, comment?: string | null);
 ```
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
 
 Passing an empty config string leaves the React Native service layer initialized while disabling Approov SDK processing. In that mode requests are forwarded as standard network traffic without Approov token injection, secure string substitution, message signing, or dynamic pinning.
+
+The optional `comment` parameter is an advanced native SDK feature and most applications should omit it. It is primarily intended for specialist initialization or reinitialization flows supported by the underlying Approov SDK, such as:
+
+* comments starting with `reinit` to explicitly allow reinitialization
+* comments starting with `options:` to pass supported initialization options
+
+If you do not have a specific need for those features, pass nothing and let the default `null` value be used.
+
+## isInitialized
+Returns whether the React Native Approov service layer has been initialized.
+
+```Javascript
+ApproovService.isInitialized();
+```
+
+This function returns a `Promise<boolean>`.
+
+This reflects service-layer readiness, not whether the native Approov SDK is actively protecting requests. For example, if you initialize with an empty config string, `isInitialized()` resolves to `true` while `isApproovEnabled()` resolves to `false`.
+
+## isApproovEnabled
+Returns whether the native Approov SDK is active and request protection is enabled.
+
+```Javascript
+ApproovService.isApproovEnabled();
+```
+
+This function returns a `Promise<boolean>`.
+
+This only resolves to `true` after a successful initialization with a non-empty config string. If initialization has not happened yet, failed, or completed with an empty config string, it resolves to `false`.
 
 ## fetchWithApproov
 Provides a secure `fetch()`-compatible API, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs.

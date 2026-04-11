@@ -22,12 +22,15 @@ extern NSMutableSet<NSString *> *substitutionQueryParams;
 extern NSMutableSet<NSString *> *exclusionURLRegexs;
 
 @interface ApproovService (MiniSDKNativeTests)
++ (id)networkRequestLock;
 - (void)initialize:(NSString *)config
            comment:(NSString *_Nullable)comment
           resolver:(RCTPromiseResolveBlock)resolve
           rejecter:(RCTPromiseRejectBlock)reject;
 - (void)isApproovEnabled:(RCTPromiseResolveBlock)resolve
                 rejecter:(RCTPromiseRejectBlock)reject;
+- (void)isInitialized:(RCTPromiseResolveBlock)resolve
+             rejecter:(RCTPromiseRejectBlock)reject;
 - (void)precheck:(RCTPromiseResolveBlock)resolve
         rejecter:(RCTPromiseRejectBlock)reject;
 - (void)getDeviceID:(RCTPromiseResolveBlock)resolve
@@ -85,6 +88,13 @@ static void AssertEqualObjects(id expected, id actual, NSString *message) {
     return;
   }
   Fail([NSString stringWithFormat:@"%@ (expected %@, got %@)", message, expected, actual]);
+}
+
+static void AssertEqualIntegers(NSInteger expected, NSInteger actual, NSString *message) {
+  if (expected == actual) {
+    return;
+  }
+  Fail([NSString stringWithFormat:@"%@ (expected %ld, got %ld)", message, (long)expected, (long)actual]);
 }
 
 static void AssertNotNil(id value, NSString *message) {
@@ -1176,6 +1186,191 @@ static void TestSetBindingHeaderEmpty(void) {
   AssertNil(payload[@"pay"], @"Pay claim should be missing when binding header value is empty");
 }
 
+static void TestInterceptRequestFailsOnBadURL(void) {
+  ApproovService *service = FreshService();
+  NSURL *url = [NSURL URLWithString:@"file:///tmp/no-host"];
+  NSURLRequest *request = [NSURLRequest requestWithURL:url];
+
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionFail, result.action,
+                      @"Bad URLs should fail");
+  AssertEqualObjects(@"bad url", result.message,
+                     @"Bad URL message should use the Approov status string");
+}
+
+static void TestInterceptRequestForwardsLocalhost(void) {
+  ApproovService *service = FreshService();
+  NSURLRequest *request =
+      [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://localhost/health"]];
+
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"localhost should proceed");
+  AssertEqualObjects(@"localhost forwarded", result.message,
+                     @"localhost should be forwarded unchanged");
+}
+
+static void TestInterceptRequestForwardsWhenUninitialized(void) {
+  ApproovService *service = FreshService();
+  @synchronized([ApproovService networkRequestLock]) {
+    earliestNetworkRequestTime = [[NSDate date] timeIntervalSince1970] - 1.0;
+  }
+  NSURLRequest *request =
+      [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/data"]];
+
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Expired startup window should forward uninitialized requests");
+  AssertEqualObjects(@"uninitalized forwarded", result.message,
+                     @"Uninitialized path should forward without mutation");
+}
+
+static void TestInterceptRequestAddsTokenTrace(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setTokenHeader:@"Approov-Token" prefix:@"Bearer "];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Successful intercept should proceed");
+  NSString *token = [result.request valueForHTTPHeaderField:@"Approov-Token"];
+  AssertTrue([token hasPrefix:@"Bearer "], @"Success path should add the Approov token with prefix");
+  AssertNotNil([result.request valueForHTTPHeaderField:@"Approov-TraceID"],
+               @"Success path should add the trace header");
+}
+
+static void TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\",\"token\":\"\",\"traceID\":\"\"}}"];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Empty-token success (or unprotected) should still proceed");
+  AssertNil([result.request valueForHTTPHeaderField:@"Approov-Token"],
+            @"Empty-token success should omit the token header");
+  AssertNil([result.request valueForHTTPHeaderField:@"Approov-TraceID"],
+            @"Empty-token success should omit the trace header");
+}
+
+static void TestInterceptRequestDefaultMutatorFailsClosedOnMitm(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"MITM_DETECTED\"}}"];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionRetry, result.action,
+                      @"Default mutator should fail closed on MITM by blocking the request");
+  AssertEqualObjects(@"mitm detected", result.message,
+                     @"Fail-closed MITM behavior should surface the status");
+}
+
+static void TestInterceptRequestCanProceedOnMitmWithStatusHeader(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setTokenHeader:@"Approov-Token" prefix:@"Bearer "];
+  useApproovStatusIfNoToken = YES;
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"MITM_DETECTED\"}}"];
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url, NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    (void)errorPointer;
+    return YES;
+  });
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Custom mutator should be able to proceed on MITM");
+  AssertEqualObjects(@"Bearer mitm detected",
+                     [result.request valueForHTTPHeaderField:@"Approov-Token"],
+                     @"Proceeding failure states should expose the status header");
+  
+  ApproovMutatorBridgeReset();
+}
+
+static void TestInterceptRequestRetriesOnNetworkFailure(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}"];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionRetry, result.action,
+                      @"No-network fetches should recommend retry");
+  AssertEqualObjects(@"no network", result.message,
+                     @"Retry path should expose the network status");
+}
+
+static void TestInterceptRequestDefaultsNoApproovServiceToProceed(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}"];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"NO_APPROOV_SERVICE should proceed by default");
+  AssertEqualObjects(@"no approov service", result.message,
+                     @"Proceed path should surface the service status");
+}
+
+static void TestInterceptRequestHonorsCustomNoApproovServiceBlocks(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}"];
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url, NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    if (errorPointer != NULL) {
+      *errorPointer = [NSError errorWithDomain:@"io.approov.reactnative.tests"
+                                          code:1
+                                      userInfo:@{
+                                        NSLocalizedDescriptionKey :
+                                            @"custom no service block"
+                                      }];
+    }
+    return NO;
+  });
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionFail, result.action,
+                      @"Custom mutators should be able to block NO_APPROOV_SERVICE");
+  AssertEqualObjects(@"custom no service block", result.message,
+                     @"Custom mutator failures should be surfaced");
+  
+  ApproovMutatorBridgeReset();
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -1232,6 +1427,16 @@ int main(void) {
       ^{ TestSetDataHashInTokenNilClearsPayClaim(); },
       ^{ TestSetBindingHeaderMissing(); },
       ^{ TestSetBindingHeaderEmpty(); },
+      ^{ TestInterceptRequestFailsOnBadURL(); },
+      ^{ TestInterceptRequestForwardsLocalhost(); },
+      ^{ TestInterceptRequestForwardsWhenUninitialized(); },
+      ^{ TestInterceptRequestAddsTokenTrace(); },
+      ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },
+      ^{ TestInterceptRequestDefaultMutatorFailsClosedOnMitm(); },
+      ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },
+      ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
+      ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
+      ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

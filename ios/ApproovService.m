@@ -428,6 +428,10 @@ RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
   resolve(@(ApproovIsEnabled()));
 }
 
++ (id)networkRequestLock {
+  return earliestNetworkRequestTimeLock;
+}
+
 /**
  * Gets the last ARC (Attestation Response Code) code.
  *

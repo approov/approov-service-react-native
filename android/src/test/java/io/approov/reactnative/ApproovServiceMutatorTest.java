@@ -117,6 +117,23 @@ public class ApproovServiceMutatorTest {
     }
 
     @Test
+    public void handleInterceptorFetchTokenResultDefaultsToFailClosedForMitmDetected() {
+        ApproovService service = mock(ApproovService.class);
+        when(service.getUseApproovStatusIfNoToken()).thenReturn(false);
+
+        ApproovNetworkException error = assertThrows(
+            ApproovNetworkException.class,
+            () -> mutator.handleInterceptorFetchTokenResult(
+                service,
+                mockResult(Approov.TokenFetchStatus.MITM_DETECTED),
+                "example.com"
+            )
+        );
+
+        assertTrue(error.getMessage().contains("MITM_DETECTED"));
+    }
+
+    @Test
     public void handleInterceptorFetchTokenResultSkipsUnknownAndUnprotectedUrls() throws Exception {
         ApproovService service = mock(ApproovService.class);
         when(service.getUseApproovStatusIfNoToken()).thenReturn(false);

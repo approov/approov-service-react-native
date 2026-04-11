@@ -83,5 +83,7 @@ FOUNDATION_EXPORT NSUInteger ApproovTestFetchApproovTokenCallCount(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastDataHash(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastDevKey(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastInstallAttrs(void);
+FOUNDATION_EXPORT void ApproovTestSetInitializationError(NSError *_Nullable error);
+FOUNDATION_EXPORT void ApproovTestClearInitializationError(void);
 
 NS_ASSUME_NONNULL_END

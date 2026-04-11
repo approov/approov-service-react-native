@@ -27,7 +27,9 @@ import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
 
 import okhttp3.OkHttpClient;
+import okhttp3.MediaType;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
@@ -49,11 +51,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.lang.reflect.Field;
-import java.util.Set;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class ApproovServiceMiniSdkTest {
+    private static final MediaType APPLICATION_JSON = MediaType.get("application/json");
     private final String validInitialConfig = "#cb-ivol#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
 
     private ReactApplicationContext reactContext;
@@ -68,6 +70,79 @@ public class ApproovServiceMiniSdkTest {
             this.value = value;
             this.code = code;
             this.message = message;
+        }
+    }
+
+    private static final class RecordingProceedingSigningMutator extends ApproovDefaultMessageSigning {
+        private final java.util.List<String> installMessages = new java.util.ArrayList<>();
+
+        @Override
+        public boolean handleInterceptorFetchTokenResult(ApproovService service,
+                Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+            Approov.TokenFetchStatus status = approovResults.getStatus();
+            return (status == Approov.TokenFetchStatus.MITM_DETECTED)
+                || (status == Approov.TokenFetchStatus.NO_APPROOV_SERVICE)
+                || (status == Approov.TokenFetchStatus.SUCCESS)
+                || ApproovServiceMutator.DEFAULT.handleInterceptorFetchTokenResult(service, approovResults, url);
+        }
+
+        @Override
+        protected String getInstallMessageSignature(String message) {
+            installMessages.add(message);
+            return "MAYCAQECAS0=";
+        }
+
+        @Override
+        protected byte[] decodeBase64(String base64) {
+            return Base64.getDecoder().decode(base64);
+        }
+
+        java.util.List<String> getInstallMessages() {
+            return installMessages;
+        }
+    }
+
+    private static final class RecordingMessageSigningMutator extends ApproovDefaultMessageSigning {
+        private final java.util.List<String> installMessages = new java.util.ArrayList<>();
+        private final java.util.List<String> accountMessages = new java.util.ArrayList<>();
+
+        @Override
+        protected String getInstallMessageSignature(String message) {
+            installMessages.add(message);
+            return "MAYCAQECAS0=";
+        }
+
+        @Override
+        protected String getAccountMessageSignature(String message) {
+            accountMessages.add(message);
+            return Base64.getEncoder().encodeToString("account-signature".getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        protected byte[] decodeBase64(String base64) {
+            return Base64.getDecoder().decode(base64);
+        }
+
+        java.util.List<String> getInstallMessages() {
+            return installMessages;
+        }
+
+        java.util.List<String> getAccountMessages() {
+            return accountMessages;
+        }
+    }
+
+    private static final class FailingInstallMessageSigningMutator extends ApproovDefaultMessageSigning {
+        private final java.util.List<String> installMessages = new java.util.ArrayList<>();
+
+        @Override
+        protected String getInstallMessageSignature(String message) {
+            installMessages.add(message);
+            return "";
+        }
+
+        java.util.List<String> getInstallMessages() {
+            return installMessages;
         }
     }
 
@@ -96,18 +171,63 @@ public class ApproovServiceMiniSdkTest {
 
     @Test
     public void initializeIgnoresSameConfig() throws Exception {
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+    }
+
+    @Test
+    public void initializeRejectsDifferentConfig() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        PromiseResult rejected = awaitPromise(promise -> service.initialize(
+            "#stg1006#aprv2stg-attest.api.approov.io#https://dev.approoval.com/token#dpcv6jv45r6LGC4E6ZXSMLhBVLrrhAoDcjizU/t9/Eg=",
+            null,
+            promise
+        ));
+
+        assertEquals("initialize", rejected.code);
+        assertEquals("attempt to reinitialize with a different config", rejected.message);
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+    }
+
+    @Test
+    public void initializeFailureRejectsAndKeepsLayerUninitialized() throws Exception {
+        try (org.mockito.MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            approov.when(() -> Approov.initialize(any(Context.class), any(String.class), any(String.class), any(String.class)))
+                .thenThrow(new IllegalArgumentException("bad config"));
+
+            PromiseResult rejected = awaitPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+            assertEquals("initialize", rejected.code);
+            assertEquals("initialize IllegalArgument: bad config", rejected.message);
+            assertFalse(service.isInitialized());
+            assertFalse(service.isApproovEnabled());
+        }
+    }
+
+    @Test
+    public void initializeAcceptsReinitializeComment() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        awaitResolvedPromise(promise -> service.initialize(
+            validInitialConfig,
+            "reinit:account-switch",
+            promise
+        ));
+
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
     }
 
     @Test
     public void initializeWithEmptyConfigKeepsLayerInitializedButDisablesApproov() throws Exception {
         AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
-        awaitResolvedPromise(promise -> service.initialize("", promise));
+        awaitResolvedPromise(promise -> service.initialize("", null, promise));
 
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
-        assertEquals(0, getPinCount(ApproovCertificatePinner.build(service)));
+        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNull(getHeader(reply, "Approov-Token"));
@@ -116,13 +236,13 @@ public class ApproovServiceMiniSdkTest {
 
     @Test
     public void precheckTreatsUnknownKeyAsSuccess() throws Exception {
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         awaitResolvedPromise(service::precheck);
     }
 
     @Test
     public void getDeviceIdReturnsMiniSdkDeviceId() throws Exception {
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         PromiseResult resolved = awaitResolvedPromise(service::getDeviceID);
         assertEquals("daIvmEWBA2gvZny7a/RC/w==", resolved.value);
     }
@@ -164,6 +284,36 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void pinningAcceptAnyAllowsProtectedRequestsWithoutExplicitPins() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-accept-any");
+
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
+        service.notifyPinChangeListeners();
+
+        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(reply, "Approov-Token"));
+    }
+
+    @Test
+    public void dynamicPinningUpdateRefreshesPinnerAndKeepsProtectedRequestsWorking() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-dynamic-pins");
+
+        JSONObject firstReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(firstReply, "Approov-Token"));
+
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
+        service.notifyPinChangeListeners();
+
+        CertificatePinner refreshedPinner = ApproovCertificatePinner.build(service);
+        assertEquals(0, refreshedPinner.getPins().size());
+
+        JSONObject secondReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(secondReply, "Approov-Token"));
+    }
+
+    @Test
     public void fetchWithApproovAddsTokenTraceBindingHashAndSubstitutions() throws Exception {
         reinitializeServiceWithScenario(
             "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
@@ -193,6 +343,45 @@ public class ApproovServiceMiniSdkTest {
 
         JSONObject payload = decodeJWTBody(token.replaceFirst("^Bearer\\s+", ""));
         assertEquals(sha256Base64("Bearer oauth-token"), payload.getString("pay"));
+    }
+
+    @Test
+    public void fetchWithApproovLeavesHeaderPlaceholderWhenSecureStringResolvesEmpty() throws Exception {
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"fetchSecureString\": ["
+                + "{\"key\":\"header-key\",\"status\":\"SUCCESS\",\"secureString\":\"\"}"
+                + "]",
+            "reinit-empty-header-substitution");
+
+        service.addSubstitutionHeader("Api-Key", "Bearer ");
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .header("Api-Key", "Bearer header-key")
+            .build();
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertEquals("Bearer header-key", getHeader(reply, "Api-Key"));
+    }
+
+    @Test
+    public void fetchWithApproovLeavesQueryPlaceholderWhenSecureStringResolvesEmpty() throws Exception {
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"fetchSecureString\": ["
+                + "{\"key\":\"query-key\",\"status\":\"SUCCESS\",\"secureString\":\"\"}"
+                + "]",
+            "reinit-empty-query-substitution");
+
+        service.addSubstitutionQueryParam("api_key");
+
+        Request request = new Request.Builder()
+            .url(getTargetURL() + "?api_key=query-key")
+            .build();
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertTrue(reply.getString("url").contains("api_key=query-key"));
     }
     
     @Test
@@ -331,9 +520,208 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void fetchWithApproovCanSignProceedingFailureStatusesWhenStatusIsUsedAsToken() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        service.setUseApproovStatusIfNoToken(true);
+        RecordingProceedingSigningMutator signer = new RecordingProceedingSigningMutator();
+        signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+        ApproovService.setServiceMutator(signer);
+
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"MITM_DETECTED\"}}");
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertEquals("MITM_DETECTED", getHeader(reply, "Approov-Token"));
+        assertNotNull(getHeader(reply, "Approov-TraceID"));
+        assertNotNull(getHeader(reply, "Signature"));
+        assertNotNull(getHeader(reply, "Signature-Input"));
+        assertNotNull(getHeader(reply, "Content-Digest"));
+        assertTrue(signer.getInstallMessages().size() == 1);
+        String message = signer.getInstallMessages().get(0);
+        assertTrue(message.contains("\"approov-token\""));
+        assertTrue(message.contains("\"approov-traceid\""));
+    }
+
+    @Test
+    public void fetchWithApproovAddsInstallMessageSigningHeaders() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-install-signing");
+
+        RecordingMessageSigningMutator signer = new RecordingMessageSigningMutator();
+        signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()
+        );
+        ApproovService.setServiceMutator(signer);
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNotNull(getHeader(reply, "Approov-TraceID"));
+        assertNotNull(getHeader(reply, "Content-Digest"));
+        assertTrue(getHeader(reply, "Signature-Input").startsWith("install="));
+        assertFalse(getHeader(reply, "Signature-Input").contains("account="));
+        assertTrue(getHeader(reply, "Signature").startsWith("install="));
+        assertFalse(getHeader(reply, "Signature").contains("account="));
+        assertEquals(1, signer.getInstallMessages().size());
+        assertEquals(0, signer.getAccountMessages().size());
+        assertTrue(signer.getInstallMessages().get(0).contains("\"approov-token\""));
+    }
+
+    @Test
+    public void fetchWithApproovAddsAccountMessageSigningHeaders() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-account-signing");
+
+        RecordingMessageSigningMutator signer = new RecordingMessageSigningMutator();
+        signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseAccountMessageSigning()
+        );
+        ApproovService.setServiceMutator(signer);
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNotNull(getHeader(reply, "Approov-TraceID"));
+        assertNotNull(getHeader(reply, "Content-Digest"));
+        assertTrue(getHeader(reply, "Signature-Input").startsWith("account="));
+        assertFalse(getHeader(reply, "Signature-Input").contains("install="));
+        assertTrue(getHeader(reply, "Signature").startsWith("account="));
+        assertFalse(getHeader(reply, "Signature").contains("install="));
+        assertEquals(0, signer.getInstallMessages().size());
+        assertEquals(1, signer.getAccountMessages().size());
+        assertTrue(signer.getAccountMessages().get(0).contains("\"approov-token\""));
+    }
+
+    @Test
+    public void fetchWithApproovSkipsSigningWhenInstallSignatureIsUnavailable() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-signing-fallback");
+
+        FailingInstallMessageSigningMutator signer = new FailingInstallMessageSigningMutator();
+        signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()
+        );
+        ApproovService.setServiceMutator(signer);
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNotNull(getHeader(reply, "Approov-TraceID"));
+        assertNull(getHeader(reply, "Content-Digest"));
+        assertNull(getHeader(reply, "Signature"));
+        assertNull(getHeader(reply, "Signature-Input"));
+        assertEquals(1, signer.getInstallMessages().size());
+        assertTrue(signer.getInstallMessages().get(0).contains("\"approov-token\""));
+    }
+
+    @Test
+    public void fetchWithApproovOnlyAddsDigestWhenSignedRequestHasABody() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-digest-body");
+
+        RecordingMessageSigningMutator signer = new RecordingMessageSigningMutator();
+        signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()
+        );
+        ApproovService.setServiceMutator(signer);
+
+        JSONObject postReply = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build());
+        assertNotNull(getHeader(postReply, "Content-Digest"));
+        assertNotNull(getHeader(postReply, "Signature"));
+
+        JSONObject getReply = fetchNetworkReply(new Request.Builder()
+            .url(getTargetURL())
+            .get()
+            .header("Authorization", "Bearer oauth-token")
+            .build());
+        assertNull(getHeader(getReply, "Content-Digest"));
+        assertNotNull(getHeader(getReply, "Signature"));
+        assertNotNull(getHeader(getReply, "Signature-Input"));
+    }
+
+    @Test
+    public void fetchWithApproovReplacesStaleSigningHeadersWithoutDuplicatingThem() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-single-signature");
+
+        RecordingMessageSigningMutator signer = new RecordingMessageSigningMutator();
+        signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()
+        );
+        ApproovService.setServiceMutator(signer);
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .header("Signature", "stale-signature")
+            .header("Signature-Input", "stale-input")
+            .header("Signature-Base-Digest", "stale-digest")
+            .build();
+
+        JSONObject reply = fetchNetworkReply(request);
+
+        String signature = getHeader(reply, "Signature");
+        String signatureInput = getHeader(reply, "Signature-Input");
+        assertNotNull(signature);
+        assertNotNull(signatureInput);
+        assertFalse(signature.contains("stale-signature"));
+        assertFalse(signatureInput.contains("stale-input"));
+        assertEquals(1, countOccurrences("install=:", signature));
+        assertEquals(1, countOccurrences("install=", signatureInput));
+    }
+
+    @Test
     public void fetchWithApproovProceedsWithoutTokenForNoApproovService() throws Exception {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
         AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+    }
+
+    @Test
+    public void fetchWithApproovOmitsEmptyTokenAndTraceHeadersWhenProceedingWithoutArtifacts() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\",\"token\":\"\",\"traceID\":\"\"}}"
+        );
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNull(getHeader(reply, "Approov-Token"));
@@ -350,6 +738,17 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void unprotectedDomainsAreUnaffectedByPinningFailures() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-unprotected-pinning");
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"shouldFail\": true}");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getUnprotectedURL()).build());
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+        assertTrue(reply.getString("url").startsWith(getUnprotectedURL()));
+    }
+
+    @Test
     public void exclusionUrlForProtectedWorkerLeavesRequestUnmodified() throws Exception {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
         service.addExclusionURLRegex("^.*excluded.*$");
@@ -358,6 +757,34 @@ public class ApproovServiceMiniSdkTest {
         assertNull(getHeader(reply, "Approov-Token"));
         assertNull(getHeader(reply, "Approov-TraceID"));
         assertTrue(reply.getString("url").contains("/excluded"));
+    }
+
+    @Test
+    public void excludedProtectedUrlGetsPinningWithoutTokenTraceOrSigning() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-excluded-pinning-only");
+        service.addExclusionURLRegex("^.*excluded.*$");
+
+        Request request = new Request.Builder()
+            .url(getTargetURL() + "/excluded")
+            .post(RequestBody.create("{\"hello\":\"world\"}", APPLICATION_JSON))
+            .build();
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+        assertNull(getHeader(reply, "Content-Digest"));
+        assertNull(getHeader(reply, "Signature"));
+        assertNull(getHeader(reply, "Signature-Input"));
+    }
+
+    @Test
+    public void excludedProtectedUrlLeavesRequestArtifactFree() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-excluded-pinning-failure");
+        service.addExclusionURLRegex("^.*excluded.*$");
+
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL() + "/excluded").build());
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
     }
 
     @Test
@@ -439,20 +866,34 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
-    public void fetchSecureStringReturnsConfiguredValueAndUnknownKeyResolvesNull() throws Exception {
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+    public void fetchSecureStringReturnsConfiguredValue() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchSecureString\",\"response\":{\"status\":\"SUCCESS\",\"secureString\":\"mini-secret\"}}");
         PromiseResult configured = awaitResolvedPromise(promise -> service.fetchSecureString("api-key", null, promise));
         assertEquals("mini-secret", configured.value);
+    }
 
+    @Test
+    public void fetchSecureStringWithUnknownKeyResolvesNull() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchSecureString\",\"response\":{\"status\":\"UNKNOWN_KEY\"}}");
         PromiseResult missing = awaitResolvedPromise(promise -> service.fetchSecureString("missing-key", null, promise));
         assertNull(missing.value);
     }
 
     @Test
+    public void fetchSecureStringWithInvalidKeyRejects() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+        PromiseResult rejected = awaitPromise(promise -> service.fetchSecureString("", null, promise));
+
+        assertEquals("fetchSecureString", rejected.code);
+        assertEquals("fetchSecureString: BAD_KEY", rejected.message);
+    }
+
+    @Test
     public void fetchCustomJwtReturnsSignedPayload() throws Exception {
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         PromiseResult resolved = awaitResolvedPromise(promise -> service.fetchCustomJWT("{\"role\":\"tester\"}", promise));
         JSONObject payload = decodeJWTBody((String) resolved.value);
 
@@ -484,6 +925,19 @@ public class ApproovServiceMiniSdkTest {
             return headers.get(key).toString();
         }
         return null;
+    }
+
+    private int countOccurrences(String needle, String haystack) {
+        int count = 0;
+        int start = 0;
+        while (true) {
+            int found = haystack.indexOf(needle, start);
+            if (found < 0) {
+                return count;
+            }
+            count++;
+            start = found + needle.length();
+        }
     }
 
     private PromiseResult awaitResolvedPromise(PromiseAction action) throws Exception {
@@ -521,7 +975,7 @@ public class ApproovServiceMiniSdkTest {
         AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), body));
         service = new ApproovService(reactContext);
         resetServiceState();
-        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, promise));
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, comment, promise));
     }
 
     private String getTargetURL() {
@@ -584,10 +1038,4 @@ public class ApproovServiceMiniSdkTest {
         return Base64.getEncoder().encodeToString(digest.digest(data.getBytes(StandardCharsets.UTF_8)));
     }
 
-    private int getPinCount(CertificatePinner pinner) throws Exception {
-        Field pinsField = CertificatePinner.class.getDeclaredField("pins");
-        pinsField.setAccessible(true);
-        Object pins = pinsField.get(pinner);
-        return (pins instanceof Set) ? ((Set<?>) pins).size() : 0;
-    }
 }

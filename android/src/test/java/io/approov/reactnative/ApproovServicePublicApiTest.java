@@ -25,7 +25,10 @@ import org.junit.Test;
 import org.mockito.MockedStatic;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.CertificatePinner;
@@ -54,6 +57,12 @@ public class ApproovServicePublicApiTest {
 
     private ApproovService newService() {
         return new ApproovService(reactContext);
+    }
+
+    private void setStaticField(String name, Object value) throws Exception {
+        Field field = ApproovService.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(null, value);
     }
 
     @Test
@@ -125,5 +134,79 @@ public class ApproovServicePublicApiTest {
             }
             assertTrue(foundApproovInterceptor);
         }
+    }
+
+    @Test
+    public void clientBuilderRefreshesCertificatePinsWhenPinListenersAreNotified() throws Exception {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
+            setStaticField("isInitialized", true);
+            setStaticField("initialConfig", "test-config");
+
+            Map<String, List<String>> initialPins = Collections.singletonMap(
+                "example.com",
+                Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
+            );
+            Map<String, List<String>> updatedPins = Collections.singletonMap(
+                "example.com",
+                Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+            );
+
+            approov.when(() -> Approov.getPins("public-key-sha256"))
+                .thenReturn(initialPins)
+                .thenReturn(updatedPins);
+
+            ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
+            OkHttpClient.Builder firstBuilder = new OkHttpClient.Builder();
+            clientBuilder.apply(firstBuilder);
+            CertificatePinner firstPinner = firstBuilder.build().certificatePinner();
+
+            assertTrue("expected initial pinner to contain BBB... pin but was " + firstPinner.getPins(),
+                hasPinHash(firstPinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
+
+            service.notifyPinChangeListeners();
+
+            OkHttpClient.Builder secondBuilder = new OkHttpClient.Builder();
+            clientBuilder.apply(secondBuilder);
+            CertificatePinner secondPinner = secondBuilder.build().certificatePinner();
+
+            assertTrue("expected refreshed pinner to contain AAA... pin but was " + secondPinner.getPins(),
+                hasPinHash(secondPinner, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+        }
+    }
+
+    @Test
+    public void exclusionRegexDoesNotDisableCertificatePinning() throws Exception {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
+            setStaticField("isInitialized", true);
+            setStaticField("initialConfig", "test-config");
+            service.addExclusionURLRegex("^.*excluded.*$");
+
+            approov.when(() -> Approov.getPins("public-key-sha256"))
+                .thenReturn(Collections.singletonMap(
+                    "example.com",
+                    Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
+                ));
+
+            ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
+            OkHttpClient.Builder builder = new OkHttpClient.Builder();
+            clientBuilder.apply(builder);
+            CertificatePinner pinner = builder.build().certificatePinner();
+
+            assertTrue("expected exclusion regex to leave certificate pinning active",
+                hasPinHash(pinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
+        }
+    }
+
+    private boolean hasPinHash(CertificatePinner pinner, String expectedHashBase64) throws Exception {
+        for (Object pin : pinner.getPins()) {
+            Object hash = pin.getClass().getMethod("getHash").invoke(pin);
+            String actualHashBase64 = (String) hash.getClass().getMethod("base64").invoke(hash);
+            if (expectedHashBase64.equals(actualHashBase64)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

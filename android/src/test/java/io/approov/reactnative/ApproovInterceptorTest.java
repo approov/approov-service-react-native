@@ -3,6 +3,7 @@ package io.approov.reactnative;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,15 +17,21 @@ import static org.mockito.Mockito.when;
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import io.approov.util.sig.ComponentProvider;
+import io.approov.util.sig.SignatureParameters;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.Protocol;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
@@ -37,6 +44,9 @@ import org.mockito.MockedStatic;
 public class ApproovInterceptorTest {
 
     private static final MediaType TEXT_PLAIN = MediaType.get("text/plain");
+    private static final MediaType APPLICATION_JSON = MediaType.get("application/json");
+    private static final long FIXED_CREATED = 1_717_171_717L;
+    private static final long FIXED_EXPIRES_LIFETIME = 15L;
 
     private ApproovService service;
     private Interceptor.Chain chain;
@@ -80,6 +90,62 @@ public class ApproovInterceptorTest {
                 .header("X-Mutated", processedRequestMarker)
                 .build();
         }
+    }
+
+    private static final class RecordingSigningMutator extends ApproovDefaultMessageSigning {
+        private final List<String> installMessages = new ArrayList<>();
+        private String installSignatureBase64 = "";
+
+        @Override
+        protected String getInstallMessageSignature(String message) {
+            installMessages.add(message);
+            return installSignatureBase64;
+        }
+
+        @Override
+        protected byte[] decodeBase64(String base64) {
+            return Base64.getDecoder().decode(base64);
+        }
+
+        void setInstallSignatureBase64(String signature) {
+            installSignatureBase64 = signature;
+        }
+
+        List<String> getInstallMessages() {
+            return installMessages;
+        }
+    }
+
+    private static final class FixedDefaultSignatureParametersFactory
+        extends ApproovDefaultMessageSigning.SignatureParametersFactory {
+
+        FixedDefaultSignatureParametersFactory() {
+            setBaseParameters(new SignatureParameters()
+                .addComponentIdentifier(ComponentProvider.DC_METHOD)
+                .addComponentIdentifier(ComponentProvider.DC_TARGET_URI));
+            setUseInstallMessageSigning();
+            setAddCreated(true);
+            setExpiresLifetime(FIXED_EXPIRES_LIFETIME);
+            setAddApproovTokenHeader(true);
+            setAddApproovTraceIDHeader(true);
+            addOptionalHeaders("Authorization", "Content-Length", "Content-Type");
+            setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, false);
+        }
+
+        @Override
+        protected SignatureParameters buildSignatureParameters(
+                ApproovDefaultMessageSigning.OkHttpComponentProvider provider,
+                ApproovRequestMutations changes) {
+            SignatureParameters params = super.buildSignatureParameters(provider, changes);
+            params.setCreated(FIXED_CREATED);
+            params.setExpires(FIXED_CREATED + FIXED_EXPIRES_LIFETIME);
+            return params;
+        }
+    }
+
+    private static String derEncodedInstallSignature() {
+        byte[] der = new byte[] { 0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02 };
+        return Base64.getEncoder().encodeToString(der);
     }
 
     @Before
@@ -189,6 +255,30 @@ public class ApproovInterceptorTest {
 
             assertEquals(request, response.request());
             approov.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    public void successWithEmptyTokenOmitsTokenAndTraceHeaders() throws Exception {
+        Request request = request("https://api.example.com/data");
+        when(chain.request()).thenReturn(request);
+        when(service.getTraceIDHeader()).thenReturn("Approov-TraceID");
+
+        Approov.TokenFetchResult tokenResult = result(
+            Approov.TokenFetchStatus.SUCCESS,
+            "",
+            "",
+            "unused"
+        );
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+                .thenReturn(tokenResult);
+
+            Response response = interceptor.intercept(chain);
+
+            assertNull(response.request().header("Approov-Token"));
+            assertNull(response.request().header("Approov-TraceID"));
         }
     }
 
@@ -305,6 +395,47 @@ public class ApproovInterceptorTest {
             Response response = interceptor.intercept(chain);
 
             assertEquals("Bearer MITM_DETECTED", response.request().header("Approov-Token"));
+        }
+    }
+
+    @Test
+    public void messageSigningMutatorRunsAfterInterceptorMutationsEndToEnd() throws Exception {
+        RecordingSigningMutator signingMutator = new RecordingSigningMutator();
+        signingMutator.setDefaultFactory(new FixedDefaultSignatureParametersFactory());
+        signingMutator.setInstallSignatureBase64(derEncodedInstallSignature());
+        ApproovService.setServiceMutator(signingMutator);
+
+        Request request = new Request.Builder()
+            .url("https://api.example.com/reply")
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer auth-token")
+            .header("Content-Type", "application/json")
+            .build();
+        when(chain.request()).thenReturn(request);
+
+        Approov.TokenFetchResult tokenResult = result(
+            Approov.TokenFetchStatus.SUCCESS,
+            "jwt-token",
+            "trace-123",
+            "unused"
+        );
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/reply"))
+                .thenReturn(tokenResult);
+
+            Response response = interceptor.intercept(chain);
+            Request proceeded = response.request();
+
+            assertEquals("Bearer jwt-token", proceeded.header("Approov-Token"));
+            assertEquals("trace-123", proceeded.header("Approov-TraceID"));
+            assertNotNull(proceeded.header("Content-Digest"));
+            assertNotNull(proceeded.header("Signature"));
+            assertNotNull(proceeded.header("Signature-Input"));
+            assertTrue(proceeded.header("Signature").contains("install=:"));
+            assertEquals(1, signingMutator.getInstallMessages().size());
+            assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-token\""));
+            assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-traceid\""));
         }
     }
 

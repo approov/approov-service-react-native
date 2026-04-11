@@ -23,6 +23,7 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
 
 @interface ApproovService (MiniSDKNativeTests)
 - (void)initialize:(NSString *)config
+           comment:(NSString *_Nullable)comment
           resolver:(RCTPromiseResolveBlock)resolve
           rejecter:(RCTPromiseRejectBlock)reject;
 - (void)precheck:(RCTPromiseResolveBlock)resolve
@@ -218,10 +219,12 @@ static ApproovService *FreshService(void) {
 
 static void InitializeService(ApproovService *service, NSString *comment) {
   NSDictionary *result = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
-    [service initialize:kValidInitialConfig resolver:resolve rejecter:reject];
+    [service initialize:kValidInitialConfig
+                comment:comment
+               resolver:resolve
+               rejecter:reject];
   });
   (void)result;
-  (void)comment;
 }
 
 static NSDictionary *FetchNetworkReply(ApproovService *service, NSString *url, NSDictionary *options) {
@@ -310,7 +313,7 @@ static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
   AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
-    [service initialize:@"" resolver:resolve rejecter:reject];
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
   });
 
   AssertTrue(isInitialized, @"Empty config should still initialize the layer");
@@ -320,6 +323,56 @@ static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
   NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
   AssertNil(HeaderValue(reply, @"Approov-Token"), @"Empty config should not add tokens");
   AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"Empty config should not add trace IDs");
+}
+
+static void TestInitializeIgnoresSameConfig(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+  NSDictionary *second = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Same-config reinitialization should keep the layer initialized");
+  AssertEqualObjects([NSNull null], second[@"value"], @"Same-config reinitialization should resolve");
+}
+
+static void TestInitializeRejectsDifferentConfig(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"#different-config" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"initialize", rejected[@"code"], @"Different-config reinitialization should reject");
+  AssertEqualObjects(@"attempt to reinitialize Approov SDK with a different config",
+                     rejected[@"message"],
+                     @"Different-config reinitialization should explain the mismatch");
+  AssertTrue(isInitialized, @"Different-config reinitialization should keep the existing initialized state");
+}
+
+static void TestInitializeAcceptsReinitComment(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig
+                comment:@"reinit:account-switch"
+               resolver:resolve
+               rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Reinit comment should be accepted");
 }
 
 static void TestGetDeviceIDReturnsMiniSDKDeviceID(void) {
@@ -392,6 +445,36 @@ static void TestExcludedProtectedURLLeavesRequestUnmodified(void) {
   AssertTrue([reply[@"url"] containsString:@"/excluded"], @"Excluded URL path should be forwarded unchanged");
 }
 
+static void TestFetchWithApproovLeavesHeaderPlaceholderWhenSecureStringResolvesEmpty(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@",\"fetchSecureString\":[{\"key\":\"header-key\",\"status\":\"SUCCESS\",\"secureString\":\"\"}]");
+  InitializeService(service, @"reinit");
+
+  [service addSubstitutionHeader:@"Api-Key" requiredPrefix:@"Bearer "];
+
+  NSDictionary *reply = FetchNetworkReply(service,
+                                          TargetURL(),
+                                          @{@"headers": @{@"Api-Key": @"Bearer header-key"}});
+
+  AssertEqualObjects(@"Bearer header-key", HeaderValue(reply, @"Api-Key"),
+                     @"Empty secure strings should leave the original header placeholder in place");
+}
+
+static void TestFetchWithApproovLeavesQueryPlaceholderWhenSecureStringResolvesEmpty(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@",\"fetchSecureString\":[{\"key\":\"query-key\",\"status\":\"SUCCESS\",\"secureString\":\"\"}]");
+  InitializeService(service, @"reinit");
+
+  [service addSubstitutionQueryParam:@"api_key"];
+
+  NSDictionary *reply = FetchNetworkReply(service,
+                                          [NSString stringWithFormat:@"%@?api_key=query-key", TargetURL()],
+                                          @{});
+
+  AssertTrue([reply[@"url"] containsString:@"api_key=query-key"],
+             @"Empty secure strings should leave the original query placeholder in place");
+}
+
 static void TestDirectPinningAllowsValidPins(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -422,6 +505,122 @@ static void TestDirectPinningBlocksInvalidPins(void) {
   AssertEqualObjects(@(ApproovTrustDecisionBlock), @(decision), @"Pinning delegate should block invalid pins");
 }
 
+static void TestFetchWithApproovAllowsValidPins(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+
+  AssertNotNil(reply, @"Valid pins should allow fetchWithApproov to return a worker reply");
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"),
+               @"Valid pinned fetchWithApproov requests should still include an Approov token");
+}
+
+static void TestFetchWithApproovRejectsInvalidPins(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"shouldFail\": true}"];
+
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:TargetURL() options:@{} resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"network_error", result[@"code"],
+                     @"Invalid pins should reject fetchWithApproov as a network error");
+  AssertTrue(result[@"message"] != [NSNull null],
+             @"Invalid pins should provide a rejection message");
+}
+
+static void TestExcludedProtectedURLUsesPinningOnlyWithoutTokenTraceOrSigning(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit-excluded-pinning-only");
+
+  [service addExclusionURLRegex:@"^.*excluded.*$"];
+
+  NSDictionary *reply = FetchNetworkReply(service,
+                                          [NSString stringWithFormat:@"%@/excluded", TargetURL()],
+                                          @{@"method": @"POST", @"body": @"{\"hello\":\"world\"}"});
+
+  AssertNil(HeaderValue(reply, @"Approov-Token"),
+            @"Excluded protected URLs should not receive an Approov token");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"),
+            @"Excluded protected URLs should not receive an Approov trace header");
+  AssertNil(HeaderValue(reply, @"Content-Digest"),
+            @"Excluded protected URLs should not receive message-signing digest headers");
+  AssertNil(HeaderValue(reply, @"Signature"),
+            @"Excluded protected URLs should not receive Signature headers");
+  AssertNil(HeaderValue(reply, @"Signature-Input"),
+            @"Excluded protected URLs should not receive Signature-Input headers");
+}
+
+static void TestExcludedProtectedURLStillExercisesPinning(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit-excluded-pinning-failure");
+
+  [service addExclusionURLRegex:@"^.*excluded.*$"];
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"shouldFail\": true}"];
+
+  NSDictionary *result = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:[NSString stringWithFormat:@"%@/excluded", TargetURL()]
+                      options:@{}
+                     resolver:resolve
+                     rejecter:reject];
+  });
+
+  AssertEqualObjects(@"network_error", result[@"code"],
+                     @"Excluded protected URLs should still fail if pinning fails");
+  AssertTrue(result[@"message"] != [NSNull null],
+             @"Excluded protected URLs should surface a network error when pinning fails");
+}
+
+static void TestUnprotectedDomainsAreUnaffectedByPinningFailures(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit-unprotected-pinning");
+
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"shouldFail\": true}"];
+
+  NSDictionary *reply = FetchNetworkReply(service, UnprotectedURL(), @{});
+
+  AssertNil(HeaderValue(reply, @"Approov-Token"),
+            @"Unprotected domains should not receive an Approov token even when pinning fails for protected domains");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"),
+            @"Unprotected domains should not receive an Approov trace header even when pinning fails for protected domains");
+  AssertTrue([reply[@"url"] hasPrefix:UnprotectedURL()],
+             @"Unprotected domains should be forwarded unchanged");
+}
+
+static void TestDynamicPinningUpdateChangesTrustDecisionEndToEnd(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit-dynamic-pins");
+
+  ApproovTrustDecision firstDecision = ApproovTrustDecisionNotPinned;
+  NSError *firstError = nil;
+  NSDictionary *firstReply = PerformPinnedRequest(service, TargetURL(), &firstDecision, &firstError);
+
+  AssertNil(firstError, @"Initial protected request should succeed before a pin update");
+  AssertNotNil(firstReply, @"Initial protected request should return a worker reply");
+  AssertEqualObjects(@(ApproovTrustDecisionAllow), @(firstDecision),
+                     @"Initial protected request should use the configured pins");
+
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"acceptAny\": true}"];
+
+  ApproovTrustDecision secondDecision = ApproovTrustDecisionNotPinned;
+  NSError *secondError = nil;
+  NSDictionary *secondReply = PerformPinnedRequest(service, TargetURL(), &secondDecision, &secondError);
+
+  AssertNil(secondError, @"Protected request should still succeed after the dynamic pin update");
+  AssertNotNil(secondReply, @"Protected request should still return a worker reply after the pin update");
+  AssertTrue(secondDecision != ApproovTrustDecisionBlock,
+             @"After the dynamic pin update the protected request should continue rather than being blocked");
+}
+
 static void TestFetchTokenReturnsSignedTokenWithExpectedClaims(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -438,7 +637,7 @@ static void TestFetchTokenReturnsSignedTokenWithExpectedClaims(void) {
   AssertEqualObjects(@"IXPSB7TRK26LXE3M", payload[@"arc"], @"Token should contain the ARC");
 }
 
-static void TestFetchSecureStringAndCustomJWTUseMiniSDK(void) {
+static void TestFetchSecureStringReturnsConfiguredValue(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
   InitializeService(service, @"reinit");
@@ -448,6 +647,38 @@ static void TestFetchSecureStringAndCustomJWTUseMiniSDK(void) {
     [service fetchSecureString:@"api-key" newDef:nil resolver:resolve rejecter:reject];
   });
   AssertEqualObjects(@"mini-secret", secure[@"value"], @"Secure string should resolve via mini-sdk");
+}
+
+static void TestFetchSecureStringWithUnknownKeyResolvesNil(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchSecureString\",\"response\":{\"status\":\"UNKNOWN_KEY\"}}"];
+  NSDictionary *secure = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchSecureString:@"missing-key" newDef:nil resolver:resolve rejecter:reject];
+  });
+  AssertTrue((secure[@"value"] == nil) || [secure[@"value"] isKindOfClass:[NSNull class]],
+             @"Unknown secure string keys should resolve nil");
+}
+
+static void TestFetchSecureStringWithInvalidKeyRejects(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchSecureString:@"" newDef:nil resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"fetchSecureString", rejected[@"code"], @"Invalid secure string keys should reject");
+  AssertTrue([[rejected[@"message"] lowercaseString] containsString:@"bad key"],
+             @"Invalid secure string keys should surface a bad key error distinctly from UNKNOWN_KEY");
+}
+
+static void TestFetchCustomJWTUseMiniSDK(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
 
   NSDictionary *jwt = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
     [service fetchCustomJWT:@"{\"role\":\"tester\"}" resolver:resolve rejecter:reject];
@@ -627,6 +858,18 @@ static void TestFetchWithApproovInjectsStatusWhenNoToken(void) {
   AssertEqualObjects(@"no approov service", token, @"Should inject status when token is missing");
 }
 
+static void TestFetchWithApproovOmitsEmptyTokenAndTraceHeadersWhenProceedingWithoutArtifacts(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\",\"token\":\"\",\"traceID\":\"\"}}"];
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNil(HeaderValue(reply, @"Approov-Token"), @"Proceeding without artifacts should omit the token header");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"Proceeding without artifacts should omit the trace header");
+}
+
 static void TestFetchWithApproovInjectsStatusWithCustomMutator(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -739,14 +982,28 @@ int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
       ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
+      ^{ TestInitializeIgnoresSameConfig(); },
+      ^{ TestInitializeRejectsDifferentConfig(); },
+      ^{ TestInitializeAcceptsReinitComment(); },
       ^{ TestGetDeviceIDReturnsMiniSDKDeviceID(); },
       ^{ TestGetPinningDiagnosticsReturnsExpectedShape(); },
       ^{ TestFetchWithApproovAddsTokenTraceAndSubstitutions(); },
+      ^{ TestFetchWithApproovLeavesHeaderPlaceholderWhenSecureStringResolvesEmpty(); },
+      ^{ TestFetchWithApproovLeavesQueryPlaceholderWhenSecureStringResolvesEmpty(); },
       ^{ TestExcludedProtectedURLLeavesRequestUnmodified(); },
       ^{ TestDirectPinningAllowsValidPins(); },
       ^{ TestDirectPinningBlocksInvalidPins(); },
+      ^{ TestFetchWithApproovAllowsValidPins(); },
+      ^{ TestFetchWithApproovRejectsInvalidPins(); },
+      ^{ TestExcludedProtectedURLUsesPinningOnlyWithoutTokenTraceOrSigning(); },
+      ^{ TestExcludedProtectedURLStillExercisesPinning(); },
+      ^{ TestUnprotectedDomainsAreUnaffectedByPinningFailures(); },
+      ^{ TestDynamicPinningUpdateChangesTrustDecisionEndToEnd(); },
       ^{ TestFetchTokenReturnsSignedTokenWithExpectedClaims(); },
-      ^{ TestFetchSecureStringAndCustomJWTUseMiniSDK(); },
+      ^{ TestFetchSecureStringReturnsConfiguredValue(); },
+      ^{ TestFetchSecureStringWithUnknownKeyResolvesNil(); },
+      ^{ TestFetchSecureStringWithInvalidKeyRejects(); },
+      ^{ TestFetchCustomJWTUseMiniSDK(); },
       ^{ TestFetchWithApproovRejectsInvalidMethods(); },
       ^{ TestFetchWithApproovRejectsInvalidHeaders(); },
       ^{ TestFetchWithApproovRejectsInvalidHeaderNames(); },
@@ -760,6 +1017,7 @@ int main(void) {
       ^{ TestRemoveSubstitutionQueryParamRevertsBehavior(); },
       ^{ TestRemoveExclusionURLRegexRevertsBehavior(); },
       ^{ TestFetchWithApproovInjectsStatusWhenNoToken(); },
+      ^{ TestFetchWithApproovOmitsEmptyTokenAndTraceHeadersWhenProceedingWithoutArtifacts(); },
       ^{ TestFetchWithApproovInjectsStatusWithCustomMutator(); },
       ^{ TestSetDataHashInTokenDirect(); },
       ^{ TestSetDataHashInTokenEmptyClearsPayClaim(); },

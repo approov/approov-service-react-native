@@ -58,6 +58,14 @@ private func rawP1363SignatureBase64() -> String {
     return raw.base64EncodedString()
 }
 
+private func targetURL() -> URL {
+    if let value = ProcessInfo.processInfo.environment["TESTING_REPLY_URL"],
+       let url = URL(string: value) {
+        return url
+    }
+    return URL(string: "https://replay.ivol.workers.dev")!
+}
+
 private func defaultSigner() -> ApproovDefaultMessageSigning {
     return ApproovDefaultMessageSigning()
         .setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
@@ -128,6 +136,75 @@ private final class RecordingMutator: ApproovServiceMutator {
                                            changes: ApproovRequestMutations) throws -> URLRequest {
         return try processRequest(request, changes)
     }
+}
+
+private final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
+    private let signer: ApproovDefaultMessageSigning
+
+    init() {
+        self.signer = defaultSigner()
+    }
+
+    func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                           url: String) throws -> Bool {
+        switch approovResults.status {
+        case .success, .mitmDetected, .noApproovService:
+            return true
+        default:
+            return try ApproovServiceMutatorDefault.shared.handleInterceptorFetchTokenResult(approovResults, url: url)
+        }
+    }
+
+    func handleInterceptorProcessedRequest(_ request: URLRequest,
+                                           changes: ApproovRequestMutations) throws -> URLRequest {
+        return try signer.handleInterceptorProcessedRequest(request, changes: changes)
+    }
+}
+
+private func bouncedReply(for request: URLRequest) throws -> [String: Any] {
+    let semaphore = DispatchSemaphore(value: 0)
+    var reply: [String: Any]?
+    var responseError: Error?
+
+    URLSession.shared.dataTask(with: request) { data, _, error in
+        responseError = error
+        defer { semaphore.signal() }
+
+        guard let data else { return }
+        reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }.resume()
+
+    _ = semaphore.wait(timeout: .now() + 10)
+
+    if let responseError {
+        throw responseError
+    }
+
+    guard let reply else {
+        throw NSError(domain: "ApproovMessageSigningTests",
+                      code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Failed to decode worker reply"])
+    }
+    return reply
+}
+
+private func headerValue(_ key: String, in reply: [String: Any]) -> String? {
+    guard let headers = reply["headers"] as? [String: Any] else {
+        return nil
+    }
+    if let value = headers[key.lowercased()] as? String {
+        return value
+    }
+    if let value = headers[key] as? String {
+        return value
+    }
+    if let values = headers[key.lowercased()] as? [String], let first = values.first {
+        return first
+    }
+    if let values = headers[key] as? [String], let first = values.first {
+        return first
+    }
+    return nil
 }
 
 private func testDefaultSigningAddsRequiredHeadersAndComputesTheSignature() throws {
@@ -232,6 +309,267 @@ private func testMutatorBridgeSignsWithCustomTokenHeaderAndOptionalTrace() throw
                 "The mutator bridge should not require a trace header when none is present")
 }
 
+private func testMutatorBridgeIntegratesMessageSigningEndToEnd() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("Bearer auth-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    assertEqual("Bearer jwt-token",
+                request.value(forHTTPHeaderField: "Approov-Token"),
+                "The mutator bridge should preserve the injected Approov token")
+    assertEqual("trace-123",
+                request.value(forHTTPHeaderField: "Approov-TraceID"),
+                "The mutator bridge should preserve the injected Approov trace header")
+    assertTrue(request.value(forHTTPHeaderField: "Content-Digest")?.isEmpty == false,
+               "The mutator bridge should add Content-Digest when message signing runs")
+    assertTrue(request.value(forHTTPHeaderField: "Signature")?.contains("install=:") == true,
+               "The mutator bridge should add the Signature header")
+    assertTrue(request.value(forHTTPHeaderField: "Signature-Input")?.contains("install=(") == true,
+               "The mutator bridge should add the Signature-Input header")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-token\"") == true,
+               "The signature base should include the dynamic Approov token header")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-traceid\"") == true,
+               "The signature base should include the Approov trace header when present")
+}
+
+private func testProceedingFailureStatusCanBeSignedAndBounced() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    let mutator = ProceedOnSelectedStatusesMutator()
+    bridge.serviceMutator = mutator
+
+    let allowsSuccess = try mutator.handleInterceptorFetchTokenResult(
+        ApproovTokenFetchResult(status: .success),
+        url: targetURL().absoluteString
+    )
+    let allowsMitm = try mutator.handleInterceptorFetchTokenResult(
+        ApproovTokenFetchResult(status: .mitmDetected),
+        url: targetURL().absoluteString
+    )
+    let allowsNoService = try mutator.handleInterceptorFetchTokenResult(
+        ApproovTokenFetchResult(status: .noApproovService),
+        url: targetURL().absoluteString
+    )
+    assertTrue(allowsSuccess, "Custom mutator should allow SUCCESS")
+    assertTrue(allowsMitm, "Custom mutator should allow MITM_DETECTED")
+    assertTrue(allowsNoService, "Custom mutator should allow NO_APPROOV_SERVICE")
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("MITM_DETECTED", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("Bearer auth-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    let reply = try bouncedReply(for: request as URLRequest)
+
+    assertEqual("MITM_DETECTED",
+                headerValue("Approov-Token", in: reply),
+                "Worker should receive the failure reason in the Approov token header")
+    assertEqual("trace-123",
+                headerValue("Approov-TraceID", in: reply),
+                "Worker should receive the preserved trace header")
+    assertTrue(headerValue("Content-Digest", in: reply)?.isEmpty == false,
+               "Worker should receive Content-Digest when the bounced request is signed")
+    assertTrue(headerValue("Signature", in: reply)?.contains("install=:") == true,
+               "Worker should receive the Signature header for a signed proceeding failure status")
+    assertTrue(headerValue("Signature-Input", in: reply)?.contains("install=(") == true,
+               "Worker should receive the Signature-Input header for a signed proceeding failure status")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-token\"") == true,
+               "The signature base should include the status-valued Approov token header")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-traceid\"") == true,
+               "The signature base should include the trace header when it is present")
+}
+
+private func testInstallSigningCanBeBouncedEndToEnd() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("Bearer auth-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    let reply = try bouncedReply(for: request as URLRequest)
+
+    assertTrue(headerValue("Signature", in: reply)?.contains("install=:") == true,
+               "Worker should receive install Signature headers")
+    assertTrue(headerValue("Signature-Input", in: reply)?.contains("install=(") == true,
+               "Worker should receive install Signature-Input headers")
+    assertFalse(headerValue("Signature", in: reply)?.contains("account=") == true,
+                "Install signing should not emit account signatures")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-token\"") == true,
+               "Install signing should include the Approov token header in the signature base")
+    assertNil(ApproovServiceStubState.lastAccountMessage,
+              "Install signing should not call account signing")
+}
+
+private func testAccountSigningCanBeBouncedEndToEnd() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.accountSignatureBase64 = Data("account-signature".utf8).base64EncodedString()
+
+    let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+    _ = factory.setUseAccountMessageSigning()
+    let signer = ApproovDefaultMessageSigning().setDefaultFactory(factory)
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = signer
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("Bearer auth-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    let reply = try bouncedReply(for: request as URLRequest)
+
+    assertTrue(headerValue("Signature", in: reply)?.contains("account=:") == true,
+               "Worker should receive account Signature headers")
+    assertTrue(headerValue("Signature-Input", in: reply)?.contains("account=(") == true,
+               "Worker should receive account Signature-Input headers")
+    assertFalse(headerValue("Signature", in: reply)?.contains("install=") == true,
+                "Account signing should not emit install signatures")
+    assertTrue(ApproovServiceStubState.lastAccountMessage?.contains("\"approov-token\"") == true,
+               "Account signing should include the Approov token header in the signature base")
+    assertNil(ApproovServiceStubState.lastInstallMessage,
+              "Account signing should not call install signing")
+}
+
+private func testSigningFailureFallbackCanBeBouncedEndToEnd() throws {
+    ApproovServiceStubState.reset()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("Bearer auth-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    let reply = try bouncedReply(for: request as URLRequest)
+
+    assertEqual("Bearer jwt-token",
+                headerValue("Approov-Token", in: reply),
+                "Signing fallback should preserve the Approov token header")
+    assertEqual("trace-123",
+                headerValue("Approov-TraceID", in: reply),
+                "Signing fallback should preserve the Approov trace header")
+    assertNil(headerValue("Content-Digest", in: reply),
+              "Signing fallback should not leave a Content-Digest header behind")
+    assertNil(headerValue("Signature", in: reply),
+              "Signing fallback should not add a Signature header")
+    assertNil(headerValue("Signature-Input", in: reply),
+              "Signing fallback should not add a Signature-Input header")
+    assertTrue(ApproovServiceStubState.lastInstallMessage?.contains("\"approov-token\"") == true,
+               "Signing fallback should still attempt to sign the request")
+}
+
+private func testDigestBodyBehaviorCanBeBouncedEndToEnd() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let postRequest = NSMutableURLRequest(url: targetURL())
+    postRequest.httpMethod = "POST"
+    postRequest.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    postRequest.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    postRequest.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    postRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    bridge.processRequest(postRequest, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+    let postReply = try bouncedReply(for: postRequest as URLRequest)
+    assertTrue(headerValue("Content-Digest", in: postReply)?.isEmpty == false,
+               "Signed POST requests should include Content-Digest")
+    assertTrue(headerValue("Signature", in: postReply)?.contains("install=:") == true,
+               "Signed POST requests should include Signature")
+
+    let getRequest = NSMutableURLRequest(url: targetURL())
+    getRequest.httpMethod = "GET"
+    getRequest.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    getRequest.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    bridge.processRequest(getRequest, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+    let getReply = try bouncedReply(for: getRequest as URLRequest)
+    assertNil(headerValue("Content-Digest", in: getReply),
+              "Signed GET requests without a body should not include Content-Digest")
+    assertTrue(headerValue("Signature", in: getReply)?.contains("install=:") == true,
+               "Signed GET requests should still include Signature")
+    assertTrue(headerValue("Signature-Input", in: getReply)?.contains("install=(") == true,
+               "Signed GET requests should still include Signature-Input")
+}
+
+private func testSingleSignatureApplicationCanBeBouncedEndToEnd() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("stale-signature", forHTTPHeaderField: "Signature")
+    request.setValue("stale-input", forHTTPHeaderField: "Signature-Input")
+    request.setValue("stale-digest", forHTTPHeaderField: "Signature-Base-Digest")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    let reply = try bouncedReply(for: request as URLRequest)
+    let signature = headerValue("Signature", in: reply)
+    let signatureInput = headerValue("Signature-Input", in: reply)
+
+    assertTrue(signature?.contains("install=:") == true,
+               "Signed requests should include the install signature")
+    assertTrue(signatureInput?.contains("install=(") == true,
+               "Signed requests should include the install Signature-Input")
+    assertFalse(signature?.contains("stale-signature") == true,
+                "Signed requests should replace stale Signature values")
+    assertFalse(signatureInput?.contains("stale-input") == true,
+                "Signed requests should replace stale Signature-Input values")
+    assertTrue(countOccurrences("install=:", in: signature) == 1,
+               "Bounced requests should only contain one Signature entry")
+    assertTrue(countOccurrences("install=", in: signatureInput) == 1,
+               "Bounced requests should only contain one Signature-Input entry")
+}
+
 private func testMutatorBridgeCopiesBackFullRequestState() {
     let bridge = ApproovServiceMutatorBridge.shared
     bridge.serviceMutator = RecordingMutator { request, _ in
@@ -327,6 +665,13 @@ struct ApproovMessageSigningTestsRunner {
             try testDefaultSigningIsIdempotentAndDoesNotDoubleSign()
             try testDefaultSigningCanonicalizesRootTargetUri()
             try testMutatorBridgeSignsWithCustomTokenHeaderAndOptionalTrace()
+            try testMutatorBridgeIntegratesMessageSigningEndToEnd()
+            try testProceedingFailureStatusCanBeSignedAndBounced()
+            try testInstallSigningCanBeBouncedEndToEnd()
+            try testAccountSigningCanBeBouncedEndToEnd()
+            try testSigningFailureFallbackCanBeBouncedEndToEnd()
+            try testDigestBodyBehaviorCanBeBouncedEndToEnd()
+            try testSingleSignatureApplicationCanBeBouncedEndToEnd()
             testMutatorBridgeCopiesBackFullRequestState()
             testMutatorBridgePreservesHttpBodyStreams()
             testMutatorBridgePropagatesCustomFetchTokenErrors()

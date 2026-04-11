@@ -256,12 +256,37 @@ public class ApproovServiceRegressionTest {
         approovStatic.reset();
         approovStatic.when(() -> Approov.getPins("public-key-sha256")).thenReturn(java.util.Collections.emptyMap());
 
-        service.initialize("", promise);
+        service.initialize("", null, promise);
 
         verify(promise, timeout(2000)).resolve(null);
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
         approovStatic.verifyNoInteractions();
+    }
+
+    @Test
+    public void statusMethodsReflectServiceLayerAndApproovEnabledStates() {
+        ApproovService service = newService();
+        Promise initializedPromise = mock(Promise.class);
+        Promise enabledPromise = mock(Promise.class);
+
+        service.isInitialized(initializedPromise);
+        service.isApproovEnabled(enabledPromise);
+
+        verify(initializedPromise).resolve(false);
+        verify(enabledPromise).resolve(false);
+
+        Promise initializePromise = mock(Promise.class);
+        service.initialize("", null, initializePromise);
+        verify(initializePromise, timeout(2000)).resolve(null);
+
+        Promise initializedAfterEmptyConfig = mock(Promise.class);
+        Promise enabledAfterEmptyConfig = mock(Promise.class);
+        service.isInitialized(initializedAfterEmptyConfig);
+        service.isApproovEnabled(enabledAfterEmptyConfig);
+
+        verify(initializedAfterEmptyConfig).resolve(true);
+        verify(enabledAfterEmptyConfig).resolve(false);
     }
 
     @Test

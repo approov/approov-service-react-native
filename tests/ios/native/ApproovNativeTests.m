@@ -56,8 +56,13 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
 
 @interface ApproovService (NativeTestInitialize)
 - (void)initialize:(NSString *)config
+           comment:(NSString *_Nullable)comment
           resolver:(RCTPromiseResolveBlock)resolve
           rejecter:(RCTPromiseRejectBlock)reject;
+- (void)isInitialized:(RCTPromiseResolveBlock)resolve
+             rejecter:(RCTPromiseRejectBlock)reject;
+- (void)isApproovEnabled:(RCTPromiseResolveBlock)resolve
+                rejecter:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation RCTTestNetworkDelegate
@@ -182,6 +187,7 @@ static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
   __block NSString *rejectionCode = nil;
 
   [service initialize:@""
+              comment:nil
              resolver:^(__unused id value) {
                didResolve = YES;
              }
@@ -208,6 +214,181 @@ static void TestInitializeWithEmptyConfigForwardsWithoutApproov(void) {
                       @"Empty config should not fetch Approov tokens");
 }
 
+static void TestInitializeIgnoresSameConfig(void) {
+  ApproovService *service = FreshService();
+  __block NSInteger resolveCount = 0;
+  __block NSString *rejectionCode = nil;
+
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               resolveCount += 1;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               resolveCount += 1;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+
+  AssertEqualIntegers(2, resolveCount,
+                      @"Same-config reinitialization should resolve both calls");
+  AssertEqualObjects(nil, rejectionCode,
+                     @"Same-config reinitialization should not reject");
+  AssertTrue(isInitialized,
+             @"Same-config reinitialization should keep the layer initialized");
+}
+
+static void TestInitializeRejectsDifferentConfig(void) {
+  ApproovService *service = FreshService();
+  __block BOOL firstResolved = NO;
+  __block NSString *rejectionCode = nil;
+  __block NSString *rejectionMessage = nil;
+
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               firstResolved = YES;
+             }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+             }];
+  [service initialize:@"different-config"
+              comment:nil
+             resolver:^(__unused id value) {
+             }
+             rejecter:^(NSString *code, NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+               rejectionMessage = message;
+             }];
+
+  AssertTrue(firstResolved, @"Initial initialization should resolve");
+  AssertEqualObjects(@"initialize", rejectionCode,
+                     @"Different-config reinitialization should reject with initialize");
+  AssertEqualObjects(@"attempt to reinitialize Approov SDK with a different config",
+                     rejectionMessage,
+                     @"Different-config reinitialization should explain the mismatch");
+  AssertTrue(isInitialized,
+             @"Different-config reinitialization should keep the existing initialized state");
+}
+
+static void TestInitializeAllowsReinitCommentWithDifferentConfig(void) {
+  ApproovService *service = FreshService();
+  __block BOOL secondResolved = NO;
+  __block NSString *rejectionCode = nil;
+
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) {
+             }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+             }];
+  [service initialize:@"different-config"
+              comment:@"reinit:account-switch"
+             resolver:^(__unused id value) {
+               secondResolved = YES;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+
+  AssertTrue(secondResolved, @"Reinit comment should allow reinitialization");
+  AssertEqualObjects(nil, rejectionCode, @"Reinit comment should not reject");
+  AssertTrue(isInitialized, @"Reinit comment should leave the layer initialized");
+}
+
+static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
+  ApproovService *service = FreshService();
+  NSError *initError = [NSError errorWithDomain:@"io.approov.tests"
+                                           code:1
+                                       userInfo:@{NSLocalizedDescriptionKey : @"bad config"}];
+  ApproovTestSetInitializationError(initError);
+
+  __block BOOL didResolve = NO;
+  __block NSString *rejectionCode = nil;
+  __block NSString *rejectionMessage = nil;
+  [service initialize:@"bad-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               didResolve = YES;
+             }
+             rejecter:^(NSString *code, NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+               rejectionMessage = message;
+             }];
+  ApproovTestClearInitializationError();
+
+  AssertTrue(!didResolve, @"Failed initialization should reject instead of resolve");
+  AssertEqualObjects(@"initialize", rejectionCode,
+                     @"Failed initialization should reject with initialize");
+  AssertEqualObjects(@"initialization failed: bad config", rejectionMessage,
+                     @"Failed initialization should surface the initialization error");
+  AssertTrue(!isInitialized,
+             @"Failed initialization should leave the layer uninitialized");
+}
+
+static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
+  ApproovService *service = FreshService();
+  __block NSNumber *initializedBefore = nil;
+  __block NSNumber *enabledBefore = nil;
+  __block NSNumber *initializedAfter = nil;
+  __block NSNumber *enabledAfter = nil;
+
+  [service isInitialized:^(id value) {
+    initializedBefore = value;
+  }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+             }];
+  [service isApproovEnabled:^(id value) {
+    enabledBefore = value;
+  }
+                rejecter:^(__unused NSString *code, __unused NSString *message,
+                           __unused NSError *error) {
+                }];
+
+  [service initialize:@""
+              comment:nil
+             resolver:^(__unused id value) {
+             }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+             }];
+
+  [service isInitialized:^(id value) {
+    initializedAfter = value;
+  }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+             }];
+  [service isApproovEnabled:^(id value) {
+    enabledAfter = value;
+  }
+                rejecter:^(__unused NSString *code, __unused NSString *message,
+                           __unused NSError *error) {
+                }];
+
+  AssertEqualObjects(@NO, initializedBefore,
+                     @"Service should report uninitialized before initialize");
+  AssertEqualObjects(@NO, enabledBefore,
+                     @"Approov should report disabled before initialize");
+  AssertEqualObjects(@YES, initializedAfter,
+                     @"Empty-config initialize should still mark the layer initialized");
+  AssertEqualObjects(@NO, enabledAfter,
+                     @"Empty-config initialize should keep Approov disabled");
+}
+
 static void TestInterceptRequestAddsTokenTraceAndFetchesConfig(void) {
   ApproovService *service = FreshService();
   isInitialized = YES;
@@ -229,6 +410,26 @@ static void TestInterceptRequestAddsTokenTraceAndFetchesConfig(void) {
                      @"Success path should add the trace header");
   AssertEqualIntegers(1, (NSInteger)ApproovTestFetchConfigCallCount(),
                       @"Config changes should trigger a fetchConfig refresh");
+}
+
+static void TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+
+  ApproovTestEnqueueTokenResult(Result(ApproovTokenFetchStatusSuccess,
+                                       @"", @"", @"", NO));
+
+  NSMutableURLRequest *request = MutableRequest(@"https://example.com/data");
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Empty-token success should still proceed");
+  AssertEqualObjects(nil,
+                     [result.request valueForHTTPHeaderField:@"Approov-Token"],
+                     @"Empty-token success should omit the token header");
+  AssertEqualObjects(nil,
+                     [result.request valueForHTTPHeaderField:@"Approov-TraceID"],
+                     @"Empty-token success should omit the trace header");
 }
 
 static void TestInterceptRequestCanProceedOnMitmWithStatusHeader(void) {
@@ -256,6 +457,23 @@ static void TestInterceptRequestCanProceedOnMitmWithStatusHeader(void) {
   AssertEqualObjects(@"Bearer MITM_DETECTED",
                      [result.request valueForHTTPHeaderField:@"Approov-Token"],
                      @"Proceeding failure states should expose the status header");
+}
+
+static void TestInterceptRequestDefaultMutatorFailsClosedOnMitm(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusMITMDetected, @"", @"", @"", NO));
+
+  ApproovInterceptorResult *result =
+      [service interceptRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:
+                                                                 @"https://example.com/data"]]];
+
+  AssertEqualIntegers(ApproovInterceptorActionRetry, result.action,
+                      @"Default mutator should fail closed on MITM by blocking the request");
+  AssertEqualObjects(@"MITM_DETECTED", result.message,
+                     @"Fail-closed MITM behavior should surface the status");
 }
 
 static void TestInterceptRequestRetriesOnNetworkFailure(void) {
@@ -657,7 +875,14 @@ int main(void) {
       ^{ TestInterceptRequestForwardsLocalhost(); },
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
       ^{ TestInitializeWithEmptyConfigForwardsWithoutApproov(); },
+      ^{ TestInitializeIgnoresSameConfig(); },
+      ^{ TestInitializeRejectsDifferentConfig(); },
+      ^{ TestInitializeAllowsReinitCommentWithDifferentConfig(); },
+      ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
+      ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
       ^{ TestInterceptRequestAddsTokenTraceAndFetchesConfig(); },
+      ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },
+      ^{ TestInterceptRequestDefaultMutatorFailsClosedOnMitm(); },
       ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },

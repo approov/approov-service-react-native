@@ -444,23 +444,56 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } else
             log(LOG_INFO, TAG, "started");
 
-        // set the custom Approov OkHttp client builder in the React Native networking
-        // stack. We need to use reflection to see if a custom builder is already
-        // set, because if so we need to wrap it to ensure that the other SDK (e.g. New
-        // Relic)
-        // still works.
-        NetworkingModule.CustomClientBuilder previousBuilder = null;
+        // Register Approov protection in the React Native networking stack.
+        // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
+        // (RN < 0.73) versions.
+        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, null);
+
+        // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on 0.73+) ---
+        // Capture any existing factory set by another SDK so we can chain through it.
+        OkHttpClientFactory existingFactory = null;
         try {
-            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
-            field.setAccessible(true);
-            previousBuilder = (NetworkingModule.CustomClientBuilder) field.get(null);
-            if (previousBuilder != null)
-                Log.d(TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
+            Field factoryField = OkHttpClientProvider.class.getDeclaredField("sFactory");
+            factoryField.setAccessible(true);
+            existingFactory = (OkHttpClientFactory) factoryField.get(null);
+            if (existingFactory != null)
+                log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
         } catch (Exception e) {
-            Log.d(TAG, "failed to check for existing custom client builder: " + e.getMessage());
+            log(LOG_DEBUG, TAG, "could not check for existing OkHttpClientFactory: " + e.getMessage());
         }
-        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, previousBuilder);
-        NetworkingModule.setCustomClientBuilder(clientBuilder);
+        final OkHttpClientFactory wrappedFactory = existingFactory;
+        OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
+            @Override
+            public OkHttpClient createNewNetworkModuleClient() {
+                OkHttpClient.Builder builder;
+                if (wrappedFactory != null) {
+                    // Chain: let the existing factory build its client, then layer Approov on top
+                    builder = wrappedFactory.createNewNetworkModuleClient().newBuilder();
+                } else {
+                    // No prior factory — start from the RN default builder
+                    builder = OkHttpClientProvider.createClientBuilder();
+                }
+                clientBuilder.apply(builder);
+                return builder.build();
+            }
+        });
+        log(LOG_INFO, TAG, "registered Approov via OkHttpClientFactory");
+
+        // --- LEGACY FALLBACK: setCustomClientBuilder (RN < 0.73 only) ---
+        // On RN 0.73+ this method was removed so we call it via reflection and
+        // silently skip if it does not exist. On older RN where both paths fire,
+        // ApproovClientBuilder.apply() has a deduplication guard that prevents
+        // the interceptor from being added twice.
+        try {
+            Method setBuilder = NetworkingModule.class.getMethod(
+                    "setCustomClientBuilder", NetworkingModule.CustomClientBuilder.class);
+            setBuilder.invoke(null, clientBuilder);
+            log(LOG_DEBUG, TAG, "registered Approov via legacy setCustomClientBuilder");
+        } catch (NoSuchMethodException e) {
+            log(LOG_DEBUG, TAG, "setCustomClientBuilder not available (expected on RN 0.73+)");
+        } catch (Exception e) {
+            log(LOG_DEBUG, TAG, "setCustomClientBuilder failed: " + e.getMessage());
+        }
 
         // add the Approov client builder to any rn-fetch-blob instances
         configureRNFetchBlobIfFound(clientBuilder);
@@ -468,21 +501,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Checks if the Approov interceptor is currently active in the React Native
-     * networking stack.
+     * networking stack by inspecting the actual OkHttpClient interceptor chain.
      *
      * @param promise to be fulfilled with the boolean result
      */
     @ReactMethod
     public void isInterceptorActive(Promise promise) {
         try {
-            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
-            field.setAccessible(true);
-            NetworkingModule.CustomClientBuilder currentBuilder = (NetworkingModule.CustomClientBuilder) field
-                    .get(null);
-            if ((currentBuilder != null) && (currentBuilder instanceof ApproovClientBuilder))
-                promise.resolve(true);
-            else
-                promise.resolve(false);
+            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
+            boolean found = false;
+            for (Interceptor interceptor : client.interceptors()) {
+                if (interceptor instanceof ApproovInterceptor) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                for (Interceptor interceptor : client.networkInterceptors()) {
+                    if (interceptor instanceof ApproovInterceptor) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            promise.resolve(found);
         } catch (Exception e) {
             promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
         }
@@ -524,7 +566,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *                       type
      */
     private WritableMap getErrorUserInfo(boolean isNetworkError) {
-        WritableMap userInfo = new JavaOnlyMap();
+        WritableMap userInfo = Arguments.createMap();
         if (isNetworkError)
             userInfo.putString("type", "network");
         else
@@ -539,7 +581,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param rejectionReasons the rejection reasons or empty string if not enabled
      */
     private WritableMap getRejectionUserInfo(String rejectionARC, String rejectionReasons) {
-        WritableMap userInfo = new JavaOnlyMap();
+        WritableMap userInfo = Arguments.createMap();
         userInfo.putString("type", "rejection");
         userInfo.putString("rejectionARC", rejectionARC);
         userInfo.putString("rejectionReasons", rejectionReasons);
@@ -868,6 +910,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public synchronized void getSessionMetadataCollectionEnabled(Promise promise) {
         promise.resolve(sessionMetadataCollectionEnabled);
+    }
+
+    /**
+     * Retrieves session diagnostics functionality for React Native cross-platform parity.
+     * Note: Android does not retain an equivalent granular session ledger today.
+     *
+     * @param promise resolves to the session diagnostics
+     */
+    @ReactMethod
+    public void getSessionDiagnostics(Promise promise) {
+        WritableMap diagnostics = Arguments.createMap();
+        diagnostics.putBoolean("enabled", sessionMetadataCollectionEnabled);
+        diagnostics.putString("message", "Android does not retain an extended session ledger.");
+        promise.resolve(diagnostics);
     }
 
     /**
@@ -1596,9 +1652,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void getPinningDiagnostics(Promise promise) {
         try {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            WritableMap diagnostics = new JavaOnlyMap();
+            WritableMap diagnostics = Arguments.createMap();
             boolean isInterceptorPresent = false;
-            WritableArray interceptors = new JavaOnlyArray();
+            WritableArray interceptors = Arguments.createArray();
 
             for (Interceptor interceptor : client.interceptors()) {
                 String name = interceptor.getClass().getName();
@@ -1680,14 +1736,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
             });
 
             // we also need to use reflection to set the client on the NetworkingModule
-            // since it has
-            // already grasped a reference to the previous client
+            // since it has already grasped a reference to the previous client
             try {
-                Field clientField = NetworkingModule.class.getDeclaredField("mClient");
-                clientField.setAccessible(true);
-                clientField.set(networkingModule, newClient);
+                Field clientField = null;
+                try {
+                    // React Native 0.73+ (Kotlin NetworkingModule)
+                    clientField = NetworkingModule.class.getDeclaredField("client");
+                } catch (NoSuchFieldException e) {
+                    // React Native < 0.73 (Java NetworkingModule)
+                    clientField = NetworkingModule.class.getDeclaredField("mClient");
+                }
+                if (clientField != null) {
+                    clientField.setAccessible(true);
+                    clientField.set(networkingModule, newClient);
+                }
             } catch (Exception e) {
-                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client: " + e.getMessage());
+                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
                 // we determine this is not a fatal error as the provider update should work for
                 // future requests
             }

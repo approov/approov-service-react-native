@@ -106,7 +106,21 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
             wrappedBuilder.apply(builder);
 
         if (builder != null) {
-            builder.addInterceptor(interceptor).certificatePinner(pinner);
+            // Guard against double-registration: on RN < 0.73 both the
+            // OkHttpClientFactory and legacy setCustomClientBuilder paths may
+            // fire for the same builder. Adding the interceptor twice would
+            // cause duplicate token fetches and signature generations.
+            boolean alreadyPresent = false;
+            for (Interceptor existing : builder.interceptors()) {
+                if (existing instanceof ApproovInterceptor) {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (!alreadyPresent) {
+                builder.addInterceptor(interceptor);
+            }
+            builder.certificatePinner(pinner);
         }
     }
 }

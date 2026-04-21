@@ -78,23 +78,25 @@ if (android.hasProperty("lint")) {
     android.lintOptions.abortOnError = false
 }
 
-repositories {
-    // ref: https://www.baeldung.com/maven-local-repository
-    mavenLocal()
-    maven {
-        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
-        url "$rootDir/../node_modules/react-native/android"
-    }
-    maven {
-        // Android JSC is installed from npm
-        url "$rootDir/../node_modules/jsc-android/dist"
+allprojects {
+    repositories {
+        // ref: https://www.baeldung.com/maven-local-repository
+        mavenLocal()
+        maven {
+            // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+            url "$rootDir/../node_modules/react-native/android"
+        }
+        maven {
+            // Android JSC is installed from npm
+            url "$rootDir/../node_modules/jsc-android/dist"
 
-        // Obsolete: Approov SDK installed via jitpack
-        // We use mavenCentral() instead
-        //url "https://jitpack.io"
+            // Obsolete: Approov SDK installed via jitpack
+            // We use mavenCentral() instead
+            //url "https://jitpack.io"
+        }
+        google()
+        mavenCentral()
     }
-    google()
-    mavenCentral()
 }
 
 dependencies {

@@ -664,7 +664,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *                       type
      */
     private WritableMap getErrorUserInfo(boolean isNetworkError) {
-        WritableMap userInfo = Arguments.createMap();
+        WritableMap userInfo = safeCreateMap();
         if (isNetworkError)
             userInfo.putString("type", "network");
         else
@@ -679,7 +679,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param rejectionReasons the rejection reasons or empty string if not enabled
      */
     private WritableMap getRejectionUserInfo(String rejectionARC, String rejectionReasons) {
-        WritableMap userInfo = Arguments.createMap();
+        WritableMap userInfo = safeCreateMap();
         userInfo.putString("type", "rejection");
         userInfo.putString("rejectionARC", rejectionARC);
         userInfo.putString("rejectionReasons", rejectionReasons);
@@ -1024,7 +1024,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void getSessionDiagnostics(Promise promise) {
-        WritableMap diagnostics = Arguments.createMap();
+        WritableMap diagnostics = safeCreateMap();
         diagnostics.putBoolean("enabled", sessionMetadataCollectionEnabled);
         diagnostics.putString("message", "Android does not retain an extended session ledger.");
         promise.resolve(diagnostics);
@@ -1757,9 +1757,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void getPinningDiagnostics(Promise promise) {
         try {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            WritableMap diagnostics = Arguments.createMap();
+            WritableMap diagnostics = safeCreateMap();
             boolean isInterceptorPresent = false;
-            WritableArray interceptors = Arguments.createArray();
+            WritableArray interceptors = safeCreateArray();
 
             for (Interceptor interceptor : client.interceptors()) {
                 String name = interceptor.getClass().getName();
@@ -1961,10 +1961,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 // the underlying connection.
                 try (Response response = secureClient.newCall(request).execute()) {
                     // 4. Format the response for React Native
-                    WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
+                    WritableMap responseMap = safeCreateMap();
                     responseMap.putInt("status", response.code());
 
-                    WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
+                    WritableMap responseHeaders = safeCreateMap();
                     for (String headerName : response.headers().names()) {
                         responseHeaders.putString(headerName, response.header(headerName));
                     }

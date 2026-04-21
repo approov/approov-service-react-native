@@ -1371,6 +1371,28 @@ static void TestInterceptRequestHonorsCustomNoApproovServiceBlocks(void) {
   ApproovMutatorBridgeReset();
 }
 
+static void TestInterceptFailureCachingValidation(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit-cache-test");
+
+  useApproovStatusIfNoToken = YES;
+
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}"];
+
+  // First fetch gets NO_NETWORK
+  NSMutableURLRequest *request1 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result1 = [service interceptRequest:request1];
+  AssertEqualIntegers(ApproovInterceptorActionRetry, result1.action, @"First fetch should cause action retry");
+  AssertEqualObjects(@"no network", result1.message, @"First fetch should return NO_NETWORK message");
+
+  // Second fetch within 500ms gets NO_NETWORK from cache immediately
+  NSMutableURLRequest *request2 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result2 = [service interceptRequest:request2];
+  AssertEqualIntegers(ApproovInterceptorActionRetry, result2.action, @"Cached fetch should cause action retry");
+  AssertEqualObjects(@"no network", result2.message, @"Cached fetch should return NO_NETWORK message");
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -1437,6 +1459,7 @@ int main(void) {
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
       ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
+      ^{ TestInterceptFailureCachingValidation(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

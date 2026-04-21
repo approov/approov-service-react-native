@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -868,6 +869,38 @@ public class ApproovServiceMiniSdkTest {
         service.removeExclusionURLRegex(regex);
         JSONObject reply2 = fetchNetworkReply(new Request.Builder().url(getTargetURL() + "/excluded").build());
         assertNotNull(getHeader(reply2, "Approov-Token"));
+    }
+
+    // =========================================================================
+    // $7 Request Caching Validation
+    // =========================================================================
+
+    @Test
+    public void fetchWithApproovCachesFailuresForShortDuration() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-cache-test");
+        service.setUseApproovStatusIfNoToken(true);
+
+        // Configure the proxy to fail once, simulating prolonged network failure.
+        // It should only be polled once because the caching kicks in.
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}"
+        );
+
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        new ApproovClientBuilder(service, null).apply(builder);
+        OkHttpClient client = builder.build();
+        Request request = new Request.Builder().url(getTargetURL()).build();
+
+        // 1. First fetch triggers NO_NETWORK and caches the failure.
+        // The interceptor throws an IOException wrapping an ApproovNetworkException.
+        IOException error1 = assertThrows(IOException.class, () -> client.newCall(request).execute());
+        assertTrue(error1.getCause() instanceof ApproovNetworkException);
+
+        // 2. Second fetch within 500ms gets NO_NETWORK instantly from cache.
+        // If caching fails, this will throw an exception because the mock proxy has run out of directives
+        // which might be an unexpected exception type or the proxy itself will crash the execution.
+        IOException error2 = assertThrows(IOException.class, () -> client.newCall(request).execute());
+        assertTrue(error2.getCause() instanceof ApproovNetworkException);
     }
 
     @Test

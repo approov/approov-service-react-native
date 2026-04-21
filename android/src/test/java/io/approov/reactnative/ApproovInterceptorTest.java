@@ -272,7 +272,7 @@ public class ApproovInterceptorTest {
         );
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data"))
                 .thenReturn(tokenResult);
 
             Response response = interceptor.intercept(chain);
@@ -322,7 +322,7 @@ public class ApproovInterceptorTest {
         );
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/reply?secret=query-secret")).thenReturn(tokenResult);
+            when(service.fetchApproovTokenCached("https://api.example.com/reply?secret=query-secret")).thenReturn(tokenResult);
             approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null)).thenReturn(headerResult);
             approov.when(() -> Approov.fetchSecureStringAndWait("query-secret", null)).thenReturn(queryResult);
 
@@ -354,7 +354,7 @@ public class ApproovInterceptorTest {
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_NETWORK);
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data"))
                 .thenReturn(tokenResult);
 
             IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
@@ -371,7 +371,7 @@ public class ApproovInterceptorTest {
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_APPROOV_SERVICE);
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data"))
                 .thenReturn(tokenResult);
 
             Response response = interceptor.intercept(chain);
@@ -389,7 +389,7 @@ public class ApproovInterceptorTest {
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.MITM_DETECTED, "", "", "");
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data"))
                 .thenReturn(tokenResult);
 
             Response response = interceptor.intercept(chain);
@@ -421,7 +421,7 @@ public class ApproovInterceptorTest {
         );
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/reply"))
+            when(service.fetchApproovTokenCached("https://api.example.com/reply"))
                 .thenReturn(tokenResult);
 
             Response response = interceptor.intercept(chain);
@@ -447,7 +447,7 @@ public class ApproovInterceptorTest {
         when(tokenResult.isConfigChanged()).thenReturn(true);
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+            when(service.fetchApproovTokenCached("https://api.example.com/data")).thenReturn(tokenResult);
 
             interceptor.intercept(chain);
 
@@ -464,7 +464,7 @@ public class ApproovInterceptorTest {
         when(tokenResult.isForceApplyPins()).thenReturn(true);
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+            when(service.fetchApproovTokenCached("https://api.example.com/data")).thenReturn(tokenResult);
 
             IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
@@ -487,7 +487,7 @@ public class ApproovInterceptorTest {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Approov.TokenFetchResult fetchTokenResult = result(Approov.TokenFetchStatus.SUCCESS);
             Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.NO_NETWORK);
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data"))
                 .thenReturn(fetchTokenResult);
             approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
                 .thenReturn(substitutionResult);
@@ -511,7 +511,7 @@ public class ApproovInterceptorTest {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Approov.TokenFetchResult fetchTokenResult = result(Approov.TokenFetchStatus.SUCCESS);
             Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.REJECTED);
-            approov.when(() -> Approov.fetchApproovTokenAndWait("https://api.example.com/data?secret=query-secret"))
+            when(service.fetchApproovTokenCached("https://api.example.com/data?secret=query-secret"))
                 .thenReturn(fetchTokenResult);
             approov.when(() -> Approov.fetchSecureStringAndWait("query-secret", null))
                 .thenReturn(substitutionResult);

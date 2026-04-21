@@ -203,6 +203,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // The mutator instance used to control ApproovService behavior
     private static ApproovServiceMutator serviceMutator;
 
+    // Cached failure result from the last Approov token fetch that returned a
+    // failure status.
+    // Protected by failureCacheLock for thread-safe access. This avoids redundant
+    // ~1s SDK calls
+    // when the platform is in a sustained failure state (e.g. no network, MITM
+    // detected).
+    private static final Object failureCacheLock = new Object();
+    private static Approov.TokenFetchResult cachedFailureResult = null;
+    private static long cachedFailureTimeMs = 0;
+    private static final long FAILURE_CACHE_TTL_MS = 500; // 0.5 seconds
+
     static {
         ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
         signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
@@ -231,6 +242,68 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
+    }
+
+    /**
+     * Returns a cached failure result if one exists and hasn't expired.
+     * Returns null if no cache exists or it has expired (caller should fetch from
+     * SDK).
+     */
+    private static Approov.TokenFetchResult getCachedFailure() {
+        synchronized (failureCacheLock) {
+            if (cachedFailureResult != null
+                    && (System.currentTimeMillis() - cachedFailureTimeMs) < FAILURE_CACHE_TTL_MS) {
+                return cachedFailureResult;
+            }
+            // Cache miss or expired — clear and allow a fresh SDK call
+            cachedFailureResult = null;
+            cachedFailureTimeMs = 0;
+            return null;
+        }
+    }
+
+    /**
+     * Caches a failure result. Only failure statuses are cached; success is never
+     * cached.
+     */
+    private static void cacheFailureIfNeeded(Approov.TokenFetchResult result) {
+        switch (result.getStatus()) {
+            case NO_NETWORK:
+            case POOR_NETWORK:
+            case MITM_DETECTED:
+            case NO_APPROOV_SERVICE:
+                synchronized (failureCacheLock) {
+                    cachedFailureResult = result;
+                    cachedFailureTimeMs = System.currentTimeMillis();
+                }
+                break;
+            default:
+                // Success and other statuses are never cached
+                break;
+        }
+    }
+
+    /**
+     * Performs a cached Approov token fetch. If a failure result is cached and
+     * within
+     * the TTL window, the cached failure is returned instantly. Otherwise a fresh
+     * SDK
+     * call is made and the result is cached if it is a failure.
+     *
+     * @param url is the URL giving the domain for the token fetch
+     * @return the token fetch result
+     */
+    public Approov.TokenFetchResult fetchApproovTokenCached(String url) {
+        Approov.TokenFetchResult cached = getCachedFailure();
+        if (cached != null) {
+            log(LOG_DEBUG, TAG, "Using cached failure: " + cached.getStatus().toString());
+            return cached;
+        }
+
+        // Normal execution
+        Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(url);
+        cacheFailureIfNeeded(result);
+        return result;
     }
 
     /**
@@ -449,7 +522,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // (RN < 0.73) versions.
         ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, null);
 
-        // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on 0.73+) ---
+        // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
+        // 0.73+) ---
         // Capture any existing factory set by another SDK so we can chain through it.
         OkHttpClientFactory existingFactory = null;
         try {
@@ -560,6 +634,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Helper to create a WritableMap, tolerating test environments where native
+     * libraries aren't loaded.
+     */
+    private WritableMap safeCreateMap() {
+        try {
+            return Arguments.createMap();
+        } catch (Throwable t) {
+            return new com.facebook.react.bridge.JavaOnlyMap();
+        }
+    }
+
+    /**
+     * Helper to create a WritableArray, tolerating test environments where native
+     * libraries aren't loaded.
+     */
+    private WritableArray safeCreateArray() {
+        try {
+            return Arguments.createArray();
+        } catch (Throwable t) {
+            return new com.facebook.react.bridge.JavaOnlyArray();
+        }
+    }
+
+    /**
      * Construct a user info map for an error result.
      *
      * @param isNetworkError is true for a network, as opposed to general, error
@@ -635,8 +733,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void initialize(String config, String comment, Promise promise) {
         String effectiveComment = comment == null ? "" : comment;
         boolean allowReinitialize = effectiveComment.startsWith("reinit");
-        boolean allowEnableAfterEmptyInitialization =
-                isInitialized && (initialConfig != null) && initialConfig.isEmpty() && !config.isEmpty();
+        boolean allowEnableAfterEmptyInitialization = isInitialized && (initialConfig != null)
+                && initialConfig.isEmpty() && !config.isEmpty();
 
         if (isInitialized && !allowReinitialize && !allowEnableAfterEmptyInitialization) {
             // if the SDK is previously initialized then the config should be the same
@@ -659,6 +757,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 initialConfig = config;
                 isInitialized = true;
                 clearEarliestNetworkRequestTime();
+                synchronized (failureCacheLock) {
+                    cachedFailureResult = null;
+                    cachedFailureTimeMs = 0;
+                }
                 if (isApproovEnabled()) {
                     log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
                     notifyPinChangeListeners();
@@ -693,7 +795,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * Returns the Approov service-layer initialization status to the React Native
      * bridge.
      *
-     * @param promise React Native promise resolved with true if the service layer is
+     * @param promise React Native promise resolved with true if the service layer
+     *                is
      *                initialized
      */
     @ReactMethod
@@ -913,7 +1016,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Retrieves session diagnostics functionality for React Native cross-platform parity.
+     * Retrieves session diagnostics functionality for React Native cross-platform
+     * parity.
      * Note: Android does not retain an equivalent granular session ledger today.
      *
      * @param promise resolves to the session diagnostics
@@ -1507,7 +1611,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
         if (key.isEmpty() || key.length() > 64) {
-            promise.reject("fetchSecureString", "IllegalArgument: secure string key is empty or too long", getErrorUserInfo(false));
+            promise.reject("fetchSecureString", "IllegalArgument: secure string key is empty or too long",
+                    getErrorUserInfo(false));
             return;
         }
 
@@ -1779,7 +1884,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             try {
                 // 1. Build the explicit OkHttp request
                 Request.Builder requestBuilder = new Request.Builder().url(url);
-                
+
                 String method = "GET";
                 if (options != null && options.hasKey("method")) {
                     ReadableType methodType = options.getType("method");
@@ -1794,7 +1899,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         }
                     }
                 }
-                
+
                 okhttp3.RequestBody requestBody = null;
                 if (options != null && options.hasKey("body")) {
                     ReadableType bodyType = options.getType("body");
@@ -1807,18 +1912,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         requestBody = okhttp3.RequestBody.create(null, bodyString);
                     }
                 }
-                
-                // If the user has omitted a body, but the method is one that OkHttp requires 
+
+                // If the user has omitted a body, but the method is one that OkHttp requires
                 // a body for (like POST/PUT/etc), we must provide an empty body instead of null
                 // to avoid an IllegalArgumentException. This does NOT clear existing content
                 // because it only runs if requestBody is still null.
-                if (requestBody == null && (method.equalsIgnoreCase("POST") || 
-                                           method.equalsIgnoreCase("PUT") || 
-                                           method.equalsIgnoreCase("PATCH") || 
-                                           method.equalsIgnoreCase("PROPPATCH"))) {
+                if (requestBody == null && (method.equalsIgnoreCase("POST") ||
+                        method.equalsIgnoreCase("PUT") ||
+                        method.equalsIgnoreCase("PATCH") ||
+                        method.equalsIgnoreCase("PROPPATCH"))) {
                     requestBody = okhttp3.RequestBody.create(null, new byte[0]);
                 }
-                
+
                 // Add headers if provided
                 if (options != null && options.hasKey("headers")) {
                     ReadableType headersType = options.getType("headers");
@@ -1840,13 +1945,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         }
                     }
                 }
-                
+
                 requestBuilder.method(method, requestBody);
                 Request request = requestBuilder.build();
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on every fetch
+                // ephemeral builder: skip PinChangeListener to avoid leaking references on
+                // every fetch
                 ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
@@ -1857,22 +1963,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     // 4. Format the response for React Native
                     WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
                     responseMap.putInt("status", response.code());
-                    
+
                     WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
                     for (String headerName : response.headers().names()) {
                         responseHeaders.putString(headerName, response.header(headerName));
                     }
                     responseMap.putMap("headers", responseHeaders);
-                    
+
                     if (response.body() != null) {
                         responseMap.putString("body", response.body().string());
                     } else {
                         responseMap.putString("body", "");
                     }
-                    
+
                     promise.resolve(responseMap);
                 }
-                
+
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "fetchWithApproov failed: " + e.getMessage());
                 promise.reject("network_error", e.getMessage(), e);

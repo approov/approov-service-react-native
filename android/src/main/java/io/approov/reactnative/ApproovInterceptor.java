@@ -141,7 +141,7 @@ public class ApproovInterceptor implements Interceptor {
         }
 
         // request an Approov token for the domain and log unless suppressed
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url);
+        Approov.TokenFetchResult approovResults = approovService.fetchApproovTokenCached(url);
         if (!approovService.isSuppressLoggingUnknownURL()
                 || (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL))
             Log.d(TAG, "token for " + url + ": " + approovResults.getLoggableToken());

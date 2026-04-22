@@ -1,7 +1,9 @@
 def localProperties = new Properties()
 def localPropertiesFile = new File(rootDir, 'local.properties')
 if (localPropertiesFile.exists()) {
-    localProperties.load(new FileInputStream(localPropertiesFile))
+    localPropertiesFile.withInputStream { inputStream ->
+        localProperties.load(inputStream)
+    }
 }
 
 def miniSdkRoot = localProperties.getProperty('miniSdkAndroidRoot', '../../core-service-layers-testing/mini-sdk/android')

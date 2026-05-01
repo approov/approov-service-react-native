@@ -345,9 +345,8 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     BOOL allowEnableAfterEmptyInitialization =
         isInitialized && initialConfigString != nil &&
         [initialConfigString length] == 0 && [config length] != 0;
-    if (isInitialized && !allowReinitialize && !allowEnableAfterEmptyInitialization) {
-      // if the SDK is previously initialized then check the config string is
-      // the same
+    if (isInitialized && !allowEnableAfterEmptyInitialization) {
+      // if the SDK is previously initialized then check the config string is the same
       if (![initialConfigString isEqualToString:config]) {
         NSError *error =
             [[NSError alloc] initWithDomain:@"io.approov.reactnative"
@@ -356,14 +355,19 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
         reject(@"initialize",
                @"attempt to reinitialize Approov SDK with a different config",
                error);
-      } else {
-        resolve(nil);
+        return;
       }
-    } else {
-      // initialize the Approov SDK
-      NSError *initializationError = nil;
-      BOOL initializationResult = YES;
-      if ([config length] != 0) {
+      
+      if (!allowReinitialize) {
+        resolve(nil);
+        return;
+      }
+    }
+
+    // initialize the Approov SDK
+    NSError *initializationError = nil;
+    BOOL initializationResult = YES;
+    if ([config length] != 0) {
         initializationResult = [Approov initialize:config
                                       updateConfig:@"auto"
                                            comment:comment
@@ -417,7 +421,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
         }
         resolve(nil);
       }
-    }
   }
 }
 
@@ -444,6 +447,11 @@ RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
  */
 RCT_EXPORT_METHOD(getLastARC : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized || !ApproovIsEnabled()) {
+    resolve(@"");
+    return;
+  }
+
   // Get the dynamic pins from Approov
   NSDictionary<NSString *, NSArray<NSString *> *> *approovPins =
       [Approov getPins:@"public-key-sha256"];

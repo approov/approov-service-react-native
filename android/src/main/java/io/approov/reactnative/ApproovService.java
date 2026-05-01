@@ -673,19 +673,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
         boolean allowEnableAfterEmptyInitialization = isInitialized && (initialConfig != null)
                 && initialConfig.isEmpty() && !config.isEmpty();
 
-        if (isInitialized && !allowReinitialize && !allowEnableAfterEmptyInitialization) {
+        if (isInitialized && !allowEnableAfterEmptyInitialization) {
             // if the SDK is previously initialized then the config should be the same
             if (!config.equals(initialConfig)) {
                 log(LOG_ERROR, TAG, "attempt to reinitialize with a different config");
                 promise.reject("initialize", "attempt to reinitialize with a different config",
                         getErrorUserInfo(false));
-            } else {
-                promise.resolve(null);
+                return;
             }
-        } else {
-            // initialize the Approov SDK and notify any pin change listeners since pins may
-            // now
-            // be available
+            if (!allowReinitialize) {
+                promise.resolve(null);
+                return;
+            }
+        }
+
+        // initialize the Approov SDK and notify any pin change listeners since pins may
+        // now be available
             try {
                 if (!config.isEmpty()) {
                     Approov.initialize(applicationContext, config, "auto", effectiveComment);
@@ -712,7 +715,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 log(LOG_ERROR, TAG, "initialization failed with IllegalState: " + e.getMessage());
                 promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
             }
-        }
     }
 
     /**
@@ -768,6 +770,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getLastARC(Promise promise) {
         log(LOG_INFO, TAG, "ApproovService: getLastARC");
+        if (!isInitialized || !isApproovEnabled()) {
+            promise.resolve("");
+            return;
+        }
+
         // Get the dynamic pins from Approov
         Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
         if (approovPins == null || approovPins.isEmpty()) {

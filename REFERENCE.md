@@ -284,7 +284,7 @@ additional detail.
 ApproovService.precheck();
 ```
 
-This function returns a `Promise` that is resolved when the operation is completed. It is rejected if the `precheck` failed.
+This function returns a `Promise` that is resolved when the operation is completed. It is rejected if the `precheck` failed. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## getDeviceID
 Gets the [device ID](https://approov.io/docs/latest/approov-usage-documentation/#extracting-the-device-id)  used by Approov to identify the particular device that the SDK is running on. Note
@@ -308,7 +308,7 @@ This is an alternative to using `setBindingHeader` and you should not use both m
 ApproovService.setDataHashInToken(data: string);
 ```
 
-This function returns a `Promise` that is resolved when the operation is completed.
+This function returns a `Promise` that is resolved when the operation is completed. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## setDevKey
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
@@ -326,7 +326,7 @@ Performs an Approov token fetch for the given `url`. This should be used in situ
 ApproovService.fetchToken(url: string);
 ```
 
-This function returns a `Promise` providing the result.
+This function returns a `Promise` providing the result. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## getMessageSignature
 Gets the [message signature](https://ext.approov.io/docs/latest/approov-usage-documentation/#account-message-signing) for the given `message`. This uses an account specific message signing key that is transmitted to the SDK after a successful fetch if the facility is enabled for the account. Note that if the attestation failed then the signing key provided is actually random so that the signature will be incorrect. An Approov token should always be included in the message being signed and sent alongside this signature to prevent replay attacks.
@@ -344,7 +344,7 @@ Fetches a [secure string](https://approov.io/docs/latest/approov-usage-documenta
 ApproovService.fetchSecureString(key: string, newDef: string);
 ```
 
-This function returns a `Promise` providing the result, which may be `null` if the `key` is not defined.
+This function returns a `Promise` providing the result, which may be `null` if the `key` is not defined. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 Most often, secure strings are placed in headers using `addSubstitutionHeader` for convenience. If you need to use a secure string in the body or another part of the request, call `fetchSecureString` directly and add the value where appropriate.
 
@@ -355,7 +355,7 @@ Fetches a [custom JWT](https://approov.io/docs/latest/approov-usage-documentatio
 ApproovService.fetchCustomJWT(payload: string);
 ```
 
-This function returns a `Promise` providing the result.
+This function returns a `Promise` providing the result. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code. The promise will also immediately reject with an `IllegalArgument` error if the payload is malformed JSON.
 
 ## getLastARC
 Gets the last [Attestation Response Code](https://ext.approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) code.

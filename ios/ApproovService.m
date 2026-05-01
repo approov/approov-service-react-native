@@ -824,46 +824,54 @@ RCT_EXPORT_METHOD(prefetch) {
  */
 RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
-  ApproovTokenFetchResult *result =
-      [Approov fetchSecureStringAndWait:@"precheck-dummy-key" :nil];
-  if (result.status == ApproovTokenFetchStatusUnknownKey)
-    ApproovLogI(@"precheck: passed");
-  else
-    ApproovLogI(@"precheck: %@",
-                [Approov stringFromApproovTokenFetchStatus:result.status]);
-
-  if (result.status == ApproovTokenFetchStatusRejected) {
-    NSError *error = [[NSError alloc]
-        initWithDomain:@"io.approov.reactnative"
-                  code:0
-              userInfo:[self rejectionUserInfo:result.ARC
-                              rejectionReasons:result.rejectionReasons]];
-    NSString *details =
-        [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
-                                   result.rejectionReasons];
-    reject(@"precheck", details, error);
-  } else if ((result.status == ApproovTokenFetchStatusNoNetwork) ||
-             (result.status == ApproovTokenFetchStatusPoorNetwork) ||
-             (result.status == ApproovTokenFetchStatusMITMDetected)) {
-    NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
-                                                code:0
-                                            userInfo:[self errorUserInfo:YES]];
-    NSString *details = [NSString
-        stringWithFormat:@"Network error: %@",
-                         [Approov stringFromApproovTokenFetchStatus:result.status]];
-    reject(@"precheck", details, error);
-  } else if ((result.status != ApproovTokenFetchStatusSuccess) &&
-             (result.status != ApproovTokenFetchStatusUnknownKey)) {
-    NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
-                                                code:0
-                                            userInfo:[self errorUserInfo:NO]];
-    NSString *details =
-        [NSString stringWithFormat:@"Error: %@",
-                                   [Approov stringFromApproovTokenFetchStatus:
-                                                result.status]];
-    reject(@"precheck", details, error);
-  } else
-    resolve(nil);
+  [Approov
+      fetchSecureString:^(ApproovTokenFetchResult *result) {
+        if (result.status == ApproovTokenFetchStatusUnknownKey)
+          ApproovLogI(@"precheck: passed");
+        else
+          ApproovLogI(
+              @"precheck: %@",
+              [Approov stringFromApproovTokenFetchStatus:result.status]);
+        if (result.status == ApproovTokenFetchStatusRejected) {
+          // fetch failed because the attestation failed
+          NSError *error = [[NSError alloc]
+              initWithDomain:@"io.approov.reactnative"
+                        code:0
+                    userInfo:[self rejectionUserInfo:result.ARC
+                                    rejectionReasons:result.rejectionReasons]];
+          NSString *details =
+              [NSString stringWithFormat:@"Rejected %@ %@", result.ARC,
+                                         result.rejectionReasons];
+          reject(@"precheck", details, error);
+        } else if ((result.status == ApproovTokenFetchStatusNoNetwork) ||
+                   (result.status == ApproovTokenFetchStatusPoorNetwork) ||
+                   (result.status == ApproovTokenFetchStatusMITMDetected)) {
+          // fetch failed with a network related error
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:YES]];
+          NSString *details = [NSString
+              stringWithFormat:
+                  @"Network error: %@",
+                  [Approov stringFromApproovTokenFetchStatus:result.status]];
+          reject(@"precheck", details, error);
+        } else if ((result.status != ApproovTokenFetchStatusSuccess) &&
+                   (result.status != ApproovTokenFetchStatusUnknownKey)) {
+          // fetch failed with a more permanent error
+          NSError *error =
+              [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                         code:0
+                                     userInfo:[self errorUserInfo:NO]];
+          NSString *details = [NSString
+              stringWithFormat:
+                  @"Error: %@",
+                  [Approov stringFromApproovTokenFetchStatus:result.status]];
+          reject(@"precheck", details, error);
+        } else
+          // precheck completed successfully
+          resolve(nil);
+      }:@"precheck-dummy-key":nil];
 }
 
 /**
@@ -1426,7 +1434,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     // We are proceeding (allowed by mutator) with a failure status.
     // Add the status string to the Approov token header if
     // useApproovStatusIfNoToken is set, so callers can observe it.
-    NSLog(@"Approov: Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
+    ApproovLogD(@"Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
     if (useApproovStatusIfNoToken) {
       NSString *tokenHeader;
       @synchronized(approovTokenHeader) {
@@ -1443,10 +1451,6 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
   }
 
-  // we just return early with anything other than a success or unprotected URL
-  // - this is to ensure we don't make further Approov fetches if there has been
-  // a problem and also that we don't do header or query parameter substitutions
-  // in domains not known to Approov (which therefore might not be pinned)
   // we just return early with anything other than a success
   // - this is to ensure we don't make further Approov fetches if there has been
   // a problem and also that we don't do header or query parameter substitutions

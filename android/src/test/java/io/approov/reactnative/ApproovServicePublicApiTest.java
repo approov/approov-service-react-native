@@ -66,9 +66,11 @@ public class ApproovServicePublicApiTest {
     }
 
     @Test
-    public void getLastArcReturnsArcOnlyAfterSuccessfulFetch() {
+    public void getLastArcReturnsArcOnlyAfterSuccessfulFetch() throws Exception {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             ApproovService service = newService();
+            setStaticField("isInitialized", true);
+            setStaticField("initialConfig", "test-config");
             Promise promise = mock(Promise.class);
 
             approov.when(() -> Approov.getPins("public-key-sha256"))

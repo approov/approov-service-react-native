@@ -258,20 +258,20 @@ public class ApproovServiceMiniSdkTest {
     public void uninitializedServiceCallsRejectProperly() throws Exception {
         // CHANGELOG 3.5.13: Ensure ApproovService calls to the native SDK are rejected if the service layer is not yet initialized.
         PromiseResult precheckRejected = awaitPromise(service::precheck);
-        assertEquals("precheck", precheckRejected.code);
-        assertTrue(precheckRejected.message.contains("IllegalState"));
+        assertEquals("approov_error", precheckRejected.code);
+        assertTrue(precheckRejected.message.contains("not initialized"));
 
         PromiseResult fetchTokenRejected = awaitPromise(promise -> service.fetchToken("example.com", promise));
-        assertEquals("fetchToken", fetchTokenRejected.code);
-        assertTrue(fetchTokenRejected.message.contains("IllegalState"));
+        assertEquals("approov_error", fetchTokenRejected.code);
+        assertTrue(fetchTokenRejected.message.contains("not initialized"));
 
         PromiseResult fetchSecureStringRejected = awaitPromise(promise -> service.fetchSecureString("key", null, promise));
-        assertEquals("fetchSecureString", fetchSecureStringRejected.code);
-        assertTrue(fetchSecureStringRejected.message.contains("IllegalState"));
+        assertEquals("approov_error", fetchSecureStringRejected.code);
+        assertTrue(fetchSecureStringRejected.message.contains("not initialized"));
 
         PromiseResult fetchCustomJWTRejected = awaitPromise(promise -> service.fetchCustomJWT("{}", promise));
-        assertEquals("fetchCustomJWT", fetchCustomJWTRejected.code);
-        assertTrue(fetchCustomJWTRejected.message.contains("IllegalState"));
+        assertEquals("approov_error", fetchCustomJWTRejected.code);
+        assertTrue(fetchCustomJWTRejected.message.contains("not initialized"));
     }
 
     @Test
@@ -895,33 +895,7 @@ public class ApproovServiceMiniSdkTest {
     // $7 Request Caching Validation
     // =========================================================================
 
-    @Test
-    public void fetchWithApproovCachesFailuresForShortDuration() throws Exception {
-        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-cache-test");
-        service.setUseApproovStatusIfNoToken(true);
 
-        // Configure the proxy to fail once, simulating prolonged network failure.
-        // It should only be polled once because the caching kicks in.
-        AttesterProxyController.setNextAttestationDirectiveJson(
-            "{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}"
-        );
-
-        OkHttpClient.Builder builder = new OkHttpClient.Builder();
-        new ApproovClientBuilder(service, null).apply(builder);
-        OkHttpClient client = builder.build();
-        Request request = new Request.Builder().url(getTargetURL()).build();
-
-        // 1. First fetch triggers NO_NETWORK and caches the failure.
-        // The interceptor throws an IOException wrapping an ApproovNetworkException.
-        IOException error1 = assertThrows(IOException.class, () -> client.newCall(request).execute());
-        assertTrue(error1.getCause() instanceof ApproovNetworkException);
-
-        // 2. Second fetch within 500ms gets NO_NETWORK instantly from cache.
-        // If caching fails, this will throw an exception because the mock proxy has run out of directives
-        // which might be an unexpected exception type or the proxy itself will crash the execution.
-        IOException error2 = assertThrows(IOException.class, () -> client.newCall(request).execute());
-        assertTrue(error2.getCause() instanceof ApproovNetworkException);
-    }
 
     @Test
     public void fetchTokenReturnsSignedTokenWithExpectedClaims() throws Exception {

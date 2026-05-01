@@ -1318,6 +1318,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void precheck(Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.fetchSecureString(new PrecheckHandler(promise), "precheck-dummy-key", null);
         } catch (IllegalStateException e) {
@@ -1405,6 +1409,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setDataHashInToken(String data, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDataHashInToken(data);
             log(LOG_DEBUG, TAG, "setDataHashInToken");
@@ -1433,6 +1441,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchToken(String url, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.fetchApproovToken(new FetchTokenHandler(promise), url);
         } catch (IllegalStateException e) {
@@ -1532,6 +1544,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchSecureString(String key, String newDef, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
@@ -1630,6 +1646,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchCustomJWT(String payload, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
         try {
             new org.json.JSONObject(payload);
         } catch (org.json.JSONException e) {

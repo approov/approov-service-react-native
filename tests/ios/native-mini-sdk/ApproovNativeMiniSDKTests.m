@@ -459,6 +459,39 @@ static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
                      @"Empty-config initialize should keep Approov disabled");
 }
 
+/*
+ * CHANGELOG 3.5.13: Ensure ApproovService calls to the native SDK are rejected if the service layer is not yet initialized.
+ */
+static void TestUninitializedServiceCallsRejectProperly(void) {
+  ApproovService *service = FreshService();
+
+  NSDictionary *precheckRejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service precheck:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"approov_error", precheckRejected[@"code"], @"Uninitialized precheck should reject with approov_error");
+  AssertEqualObjects(@"Approov is not initialized", precheckRejected[@"message"], @"Message should state not initialized");
+
+  NSDictionary *fetchTokenRejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchToken:@"example.com" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"approov_error", fetchTokenRejected[@"code"], @"Uninitialized fetchToken should reject");
+
+  NSDictionary *fetchSecureStringRejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchSecureString:@"key" newDef:nil resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"approov_error", fetchSecureStringRejected[@"code"], @"Uninitialized fetchSecureString should reject");
+
+  NSDictionary *fetchCustomJWTRejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchCustomJWT:@"{}" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"approov_error", fetchCustomJWTRejected[@"code"], @"Uninitialized fetchCustomJWT should reject");
+
+  NSDictionary *setDataHashRejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service setDataHashInToken:@"hash" resolver:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@"approov_error", setDataHashRejected[@"code"], @"Uninitialized setDataHashInToken should reject");
+}
+
 static void TestGetDeviceIDReturnsMiniSDKDeviceID(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1381,6 +1414,7 @@ int main(void) {
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },
       ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
+      ^{ TestUninitializedServiceCallsRejectProperly(); },
       ^{ TestGetDeviceIDReturnsMiniSDKDeviceID(); },
       ^{ TestGetPinningDiagnosticsReturnsExpectedShape(); },
       ^{ TestFetchWithApproovAddsTokenTraceAndSubstitutions(); },

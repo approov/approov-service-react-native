@@ -255,6 +255,26 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void uninitializedServiceCallsRejectProperly() throws Exception {
+        // CHANGELOG 3.5.13: Ensure ApproovService calls to the native SDK are rejected if the service layer is not yet initialized.
+        PromiseResult precheckRejected = awaitPromise(service::precheck);
+        assertEquals("precheck", precheckRejected.code);
+        assertTrue(precheckRejected.message.contains("IllegalState"));
+
+        PromiseResult fetchTokenRejected = awaitPromise(promise -> service.fetchToken("example.com", promise));
+        assertEquals("fetchToken", fetchTokenRejected.code);
+        assertTrue(fetchTokenRejected.message.contains("IllegalState"));
+
+        PromiseResult fetchSecureStringRejected = awaitPromise(promise -> service.fetchSecureString("key", null, promise));
+        assertEquals("fetchSecureString", fetchSecureStringRejected.code);
+        assertTrue(fetchSecureStringRejected.message.contains("IllegalState"));
+
+        PromiseResult fetchCustomJWTRejected = awaitPromise(promise -> service.fetchCustomJWT("{}", promise));
+        assertEquals("fetchCustomJWT", fetchCustomJWTRejected.code);
+        assertTrue(fetchCustomJWTRejected.message.contains("IllegalState"));
+    }
+
+    @Test
     public void precheckTreatsUnknownKeyAsSuccess() throws Exception {
         awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         awaitResolvedPromise(service::precheck);

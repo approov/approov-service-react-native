@@ -31,8 +31,10 @@ typedef void (^ApproovMockTaskCompletionHandler)(
 /// fetching fails
 @interface ApproovMockURLProtocol : NSURLProtocol <NSURLSessionDataDelegate>
 
+#if DEBUG
 /// Holds the last request processed by the protocol for testing purposes
 @property(class, nonatomic, strong, nullable) NSURLRequest *lastRequest;
+#endif
 
 /// Starts a data task which returns a custom status code.
 ///

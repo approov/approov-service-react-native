@@ -159,6 +159,7 @@
   return mutableRequest;
 }
 
+#if DEBUG
 static NSURLRequest *_lastRequest = nil;
 
 + (NSURLRequest *)lastRequest {
@@ -168,6 +169,7 @@ static NSURLRequest *_lastRequest = nil;
 + (void)setLastRequest:(NSURLRequest *)lastRequest {
   _lastRequest = lastRequest;
 }
+#endif
 
 /**
  * Creates a mocked URL protocol instance to handle the request.
@@ -186,7 +188,9 @@ static NSURLRequest *_lastRequest = nil;
     ApproovLogE(@"mock URL protocol failed to initialize with request");
     return nil;
   }
+#if DEBUG
   [ApproovMockURLProtocol setLastRequest:request];
+#endif
   ApproovLogD(@"mock URL protocol initialized with request");
   return self;
 }

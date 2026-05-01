@@ -142,6 +142,10 @@ static ApproovTokenFetchResult *Result(ApproovTokenFetchStatus status,
 }
 
 
+// Regression guard: verifies that a native SDK initialization failure (e.g. bad
+// config) correctly rejects the RN promise and leaves the service layer in an
+// uninitialized state, preventing subsequent requests from silently proceeding
+// without attestation.
 static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
   ApproovService *service = FreshService();
   NSError *initError = [NSError errorWithDomain:@"io.approov.tests"
@@ -173,6 +177,9 @@ static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
              @"Failed initialization should leave the layer uninitialized");
 }
 
+// Regression guard: the native SDK returns (NO, nil) when already initialized
+// with the same config. This must resolve (not reject) and mark the layer
+// initialized to avoid breaking hot-reload / bridge-reload flows.
 static void TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(void) {
   ApproovService *service = FreshService();
   ApproovTestSetInitializationResult(NO);
@@ -199,6 +206,9 @@ static void TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(void) {
              @"False return with nil error should still mark the layer initialized");
 }
 
+// Regression guard: the native SDK raises a specific error when re-initialized
+// with a different config. The service layer must surface this as a promise
+// rejection so the RN caller can handle it, not silently swallow it.
 static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
   ApproovService *service = FreshService();
   NSError *differentConfigurationError =
@@ -245,6 +255,10 @@ static NSURLSession *MockSession(void) {
   return [NSURLSession sessionWithConfiguration:configuration];
 }
 
+// Regression guard: CHANGELOG 3.5.12 "iOS Mock Completion Handlers"
+// Verifies that ApproovMockURLProtocol status-code mock tasks invoke the
+// NSURLSession completion handler. Before the fix, completion handlers were
+// silently dropped, causing callers to hang indefinitely.
 static void TestMockStatusCompletionHandlersFire(void) {
   NSURLSession *session = MockSession();
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -274,6 +288,10 @@ static void TestMockStatusCompletionHandlersFire(void) {
   [session finishTasksAndInvalidate];
 }
 
+// Regression guard: CHANGELOG 3.5.12 "iOS Mock Completion Handlers"
+// Verifies that ApproovMockURLProtocol error mock tasks invoke the completion
+// handler with the correct NSError. Before the fix, error completion handlers
+// were dropped on the failure path.
 static void TestMockErrorCompletionHandlersFire(void) {
   NSURLSession *session = MockSession();
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -302,6 +320,10 @@ static void TestMockErrorCompletionHandlersFire(void) {
   [session finishTasksAndInvalidate];
 }
 
+// Regression guard: CHANGELOG 3.5.12 "iOS Mock Completion Handlers"
+// Verifies that upload task mock responses created through completion-handler
+// selectors return real upload tasks and invoke the handler correctly. Before
+// the fix, data tasks were incorrectly cast as upload tasks.
 static void TestMockUploadCompletionHandlersFire(void) {
   NSURLSession *session = MockSession();
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -328,6 +350,10 @@ static void TestMockUploadCompletionHandlersFire(void) {
   [session finishTasksAndInvalidate];
 }
 
+// Regression guard: CHANGELOG 3.5.12 "iOS Mock Response Recursion Fix"
+// Verifies that the swizzled dataTaskWithURL: path returns a synthetic 503
+// response on failure rather than recursing through the interceptor. This
+// exercises the mockhttps:// URL-scheme filter that prevents re-interception.
 static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
   ApproovService *service = FreshService();
   isInitialized = YES;
@@ -376,6 +402,11 @@ static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
   (void)service;
 }
 
+// Regression guard: CHANGELOG 3.5.12 "iOS Mock Response Recursion Fix"
+// Verifies that the swizzled dataTaskWithRequest: path on POOR_NETWORK returns
+// a synthetic 503 without recursion. Ensures the token is fetched exactly once
+// and the custom mutator is invoked exactly once — proving the recursion guard
+// is effective.
 static void
 TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
   ApproovService *service = FreshService();
@@ -426,6 +457,9 @@ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
   (void)service;
 }
 
+// Regression guard: verifies that fetchWithApproov rejects non-HTTP URLs
+// (e.g. file://) with a clear error code rather than crashing or silently
+// proceeding with a nil host.
 static void TestFetchWithApproovRejectsInvalidURLs(void) {
   ApproovService *service = FreshService();
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -479,6 +513,10 @@ static void TestFetchWithApproovRejectsInvalidURLs(void) {
 - (void)stopLoading {}
 @end
 
+// Regression guard: verifies that useApproovStatusIfNoToken works through the
+// swizzled NSURLSession path (not just fetchWithApproov). When a MITM is
+// detected and the mutator allows proceeding, the outgoing request must carry
+// "Bearer MITM_DETECTED" in the Approov-Token header.
 static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) {
   ApproovService *service = FreshService();
   isInitialized = YES;
@@ -487,6 +525,8 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   [ApproovMockURLProtocol setLastRequest:nil];
   [NSURLProtocol registerClass:[CaptureProtocol class]];
 
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusMITMDetected, @"", @"", @"", NO));
   ApproovTestEnqueueTokenResult(
       Result(ApproovTokenFetchStatusMITMDetected, @"", @"", @"", NO));
   ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url,
@@ -500,7 +540,7 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   NSURL *url = [NSURL URLWithString:@"https://example.com/data"];
   NSURLRequest *request = [NSURLRequest requestWithURL:url];
   RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
-  NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+  NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
   config.protocolClasses = @[[CaptureProtocol class]];
   NSURLSession *session = [NSURLSession sessionWithConfiguration:config
                                                         delegate:delegate

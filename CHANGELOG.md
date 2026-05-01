@@ -17,6 +17,9 @@
 - **Shared Test SDK Contract Coverage**: Added shared test-SDK-backed native/service-layer tests for Android and iOS with real worker-backed protected request coverage for empty-config forwarding, protected request mutation, exclusion URL forwarding, token fetches, secure strings, and custom JWT flows.
 - **Direct iOS Pinning Verification**: Updated the iOS native test harness to compile the production pinning delegate and added direct protected-worker pinning tests that exercise the real server-trust callback path for both valid and forced-invalid pins.
 - **React Native Regression Suites Kept Separate**: Continued to run the React Native-specific native regression suites alongside the new shared contract tests so RN-only behaviors such as iOS swizzling/task handling and Android client-factory recovery remain covered independently.
+- **Token Binding Header Parity**: Fixed Android and iOS `setDataHashInToken` behavior so the token binding hash is only set if the binding header is actually present on the request. This restores parity with the sibling service layers and prevents hashing of empty strings when the header is absent.
+- **iOS Precheck Bridge Blocking**: Reverted an experimental change that made the iOS `precheck` method synchronous, which was unnecessarily blocking the React Native bridge. It is now safely asynchronous again, matching Android.
+- **iOS Production Path Logging**: Cleaned up the iOS interceptor to remove a bare `NSLog` that was bypassing the configured Approov log level and leaking operational state even at `NONE` level.
 
 ## [3.5.12] - 2026-03-26
 - **iOS Mock Response Recursion Fix**: Prevented internal `mockhttps` retry and error responses from being re-intercepted by the swizzled `NSURLSession` task APIs. This fixes an iOS crash regression in offline and other non-proceed paths where synthetic mock tasks could recurse until stack overflow.

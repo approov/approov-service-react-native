@@ -1,0 +1,1151 @@
+Initialized native services in: /Users/ivoliondov/.gradle/native
+Initialized jansi services in: /Users/ivoliondov/.gradle/native
+Received JVM installation metadata from '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home': {JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home, JAVA_VERSION=21.0.9, JAVA_VENDOR=Oracle Corporation, RUNTIME_NAME=Java(TM) SE Runtime Environment, RUNTIME_VERSION=21.0.9+7-LTS-338, VM_NAME=Java HotSpot(TM) 64-Bit Server VM, VM_VERSION=21.0.9+7-LTS-338, VM_VENDOR=Oracle Corporation, OS_ARCH=aarch64}
+Found daemon DaemonInfo{pid=86505, address=[ee5bd265-8246-4cea-8364-079c628ce78e port:58127, addresses:[/127.0.0.1]], state=Idle, lastBusy=1775823955124, context=DefaultDaemonContext[uid=fff2caa0-9fb8-42af-bc71-67f040210fa8,javaHome=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home,javaVersion=21,daemonRegistryDir=/Users/ivoliondov/.gradle/daemon,pid=86505,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=--add-opens=java.base/java.util=ALL-UNNAMED,--add-opens=java.base/java.lang=ALL-UNNAMED,--add-opens=java.base/java.lang.invoke=ALL-UNNAMED,--add-opens=java.prefs/java.util.prefs=ALL-UNNAMED,--add-opens=java.base/java.nio.charset=ALL-UNNAMED,--add-opens=java.base/java.net=ALL-UNNAMED,--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED,-XX:MaxMetaspaceSize=384m,-XX:+HeapDumpOnOutOfMemoryError,-Xms256m,-Xmx512m,-Dfile.encoding=UTF-8,-Duser.country=GB,-Duser.language=en,-Duser.variant]} however its context does not match the desired criteria.
+At least one daemon option is different.
+Wanted: DaemonRequestContext{requestedJvm=21.0.9 (Oracle Corporation 21.0.9+7-LTS-338), jvmCriteria=null, daemonOpts=[-XX:MaxMetaspaceSize=1g, --add-opens=java.base/java.util=ALL-UNNAMED, --add-opens=java.base/java.lang=ALL-UNNAMED, --add-opens=java.base/java.lang.invoke=ALL-UNNAMED, --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED, --add-opens=java.base/java.nio.charset=ALL-UNNAMED, --add-opens=java.base/java.net=ALL-UNNAMED, --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED, -Xmx4g, -Dfile.encoding=UTF-8, -Duser.country=GB, -Duser.language=en, -Duser.variant], applyInstrumentationAgent=true, nativeServicesMode=ENABLED, priority=NORMAL}
+Actual: DefaultDaemonContext[uid=fff2caa0-9fb8-42af-bc71-67f040210fa8,javaHome=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home,javaVersion=21,daemonRegistryDir=/Users/ivoliondov/.gradle/daemon,pid=86505,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=--add-opens=java.base/java.util=ALL-UNNAMED,--add-opens=java.base/java.lang=ALL-UNNAMED,--add-opens=java.base/java.lang.invoke=ALL-UNNAMED,--add-opens=java.prefs/java.util.prefs=ALL-UNNAMED,--add-opens=java.base/java.nio.charset=ALL-UNNAMED,--add-opens=java.base/java.net=ALL-UNNAMED,--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED,-XX:MaxMetaspaceSize=384m,-XX:+HeapDumpOnOutOfMemoryError,-Xms256m,-Xmx512m,-Dfile.encoding=UTF-8,-Duser.country=GB,-Duser.language=en,-Duser.variant]
+
+  Looking for a different daemon...
+Found daemon DaemonInfo{pid=4124, address=[75276f34-4763-4569-b10d-42649bcb3342 port:49635, addresses:[/127.0.0.1]], state=Idle, lastBusy=1775838057885, context=DefaultDaemonContext[uid=e7448223-6af1-4551-8f75-4d0d85da85f5,javaHome=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home,javaVersion=21,daemonRegistryDir=/Users/ivoliondov/.gradle/daemon,pid=4124,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=--add-opens=java.base/java.util=ALL-UNNAMED,--add-opens=java.base/java.lang=ALL-UNNAMED,--add-opens=java.base/java.lang.invoke=ALL-UNNAMED,--add-opens=java.prefs/java.util.prefs=ALL-UNNAMED,--add-opens=java.base/java.nio.charset=ALL-UNNAMED,--add-opens=java.base/java.net=ALL-UNNAMED,--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED,-Xmx2g,-Dfile.encoding=UTF-8,-Duser.country=GB,-Duser.language=en,-Duser.variant]} however its context does not match the desired criteria.
+At least one daemon option is different.
+Wanted: DaemonRequestContext{requestedJvm=21.0.9 (Oracle Corporation 21.0.9+7-LTS-338), jvmCriteria=null, daemonOpts=[-XX:MaxMetaspaceSize=1g, --add-opens=java.base/java.util=ALL-UNNAMED, --add-opens=java.base/java.lang=ALL-UNNAMED, --add-opens=java.base/java.lang.invoke=ALL-UNNAMED, --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED, --add-opens=java.base/java.nio.charset=ALL-UNNAMED, --add-opens=java.base/java.net=ALL-UNNAMED, --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED, -Xmx4g, -Dfile.encoding=UTF-8, -Duser.country=GB, -Duser.language=en, -Duser.variant], applyInstrumentationAgent=true, nativeServicesMode=ENABLED, priority=NORMAL}
+Actual: DefaultDaemonContext[uid=e7448223-6af1-4551-8f75-4d0d85da85f5,javaHome=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home,javaVersion=21,daemonRegistryDir=/Users/ivoliondov/.gradle/daemon,pid=4124,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=--add-opens=java.base/java.util=ALL-UNNAMED,--add-opens=java.base/java.lang=ALL-UNNAMED,--add-opens=java.base/java.lang.invoke=ALL-UNNAMED,--add-opens=java.prefs/java.util.prefs=ALL-UNNAMED,--add-opens=java.base/java.nio.charset=ALL-UNNAMED,--add-opens=java.base/java.net=ALL-UNNAMED,--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED,-Xmx2g,-Dfile.encoding=UTF-8,-Duser.country=GB,-Duser.language=en,-Duser.variant]
+
+  Looking for a different daemon...
+The client will now receive all logging from the daemon (pid: 4108). The daemon log file: /Users/ivoliondov/.gradle/daemon/8.8/daemon-4108.out.log
+Starting 8th build in daemon [uptime: 1 hrs 28 mins 52.229 secs, performance: 100%, GC rate: 0.00/s, heap usage: 0% of 4 GiB, non-heap usage: 9% of 1 GiB]
+Using 12 worker leases.
+Now considering [/Users/ivoliondov/Github/approov-service-react-native/android] as hierarchies to watch
+Watching the file system is configured to be enabled if available
+File system watching is active
+Starting Build
+Settings evaluated using settings file '/Users/ivoliondov/Github/approov-service-react-native/android/settings.gradle'.
+Projects loaded. Root project using build file '/Users/ivoliondov/Github/approov-service-react-native/android/build.gradle'.
+Included projects: [root project 'android', project ':approov-sdk', project ':test-support']
+
+> Configure project :
+Evaluating root project 'android' using build file '/Users/ivoliondov/Github/approov-service-react-native/android/build.gradle'.
+Transforming gradle-8.5.2.jar (com.android.tools.build:gradle:8.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-settings-api-8.5.2.jar (com.android.tools.build:gradle-settings-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming lint-model-31.5.2.jar (com.android.tools.lint:lint-model:31.5.2) with InstrumentationAnalysisTransform
+Transforming builder-8.5.2.jar (com.android.tools.build:builder:8.5.2) with InstrumentationAnalysisTransform
+Transforming manifest-merger-31.5.2.jar (com.android.tools.build:manifest-merger:31.5.2) with InstrumentationAnalysisTransform
+Transforming sdk-common-31.5.2.jar (com.android.tools:sdk-common:31.5.2) with InstrumentationAnalysisTransform
+Transforming sdklib-31.5.2.jar (com.android.tools:sdklib:31.5.2) with InstrumentationAnalysisTransform
+Transforming repository-31.5.2.jar (com.android.tools:repository:31.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-api-8.5.2.jar (com.android.tools.build:gradle-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming builder-test-api-8.5.2.jar (com.android.tools.build:builder-test-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming ddmlib-31.5.2.jar (com.android.tools.ddms:ddmlib:31.5.2) with InstrumentationAnalysisTransform
+Transforming aaptcompiler-8.5.2.jar (com.android.tools.build:aaptcompiler:8.5.2) with InstrumentationAnalysisTransform
+Transforming bundletool-1.16.0.jar (com.android.tools.build:bundletool:1.16.0) with InstrumentationAnalysisTransform
+Transforming aapt2-proto-8.5.2-11315950.jar (com.android.tools.build:aapt2-proto:8.5.2-11315950) with InstrumentationAnalysisTransform
+Transforming crash-31.5.2.jar (com.android.tools.analytics-library:crash:31.5.2) with InstrumentationAnalysisTransform
+Transforming tracker-31.5.2.jar (com.android.tools.analytics-library:tracker:31.5.2) with InstrumentationAnalysisTransform
+Transforming shared-31.5.2.jar (com.android.tools.analytics-library:shared:31.5.2) with InstrumentationAnalysisTransform
+Transforming lint-typedef-remover-31.5.2.jar (com.android.tools.lint:lint-typedef-remover:31.5.2) with InstrumentationAnalysisTransform
+Transforming databinding-compiler-common-8.5.2.jar (androidx.databinding:databinding-compiler-common:8.5.2) with InstrumentationAnalysisTransform
+Transforming databinding-common-8.5.2.jar (androidx.databinding:databinding-common:8.5.2) with InstrumentationAnalysisTransform
+Transforming baseLibrary-8.5.2.jar (com.android.databinding:baseLibrary:8.5.2) with InstrumentationAnalysisTransform
+Transforming layoutlib-api-31.5.2.jar (com.android.tools.layoutlib:layoutlib-api:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-device-provider-ddmlib-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-ddmlib-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-device-provider-gradle-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-gradle-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-additional-test-output-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-additional-test-output-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-coverage-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-coverage-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-emulator-control-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-emulator-control-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-logcat-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-logcat-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-apk-installer-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-apk-installer-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-retention-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-retention-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-result-listener-gradle-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-result-listener-gradle-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming builder-model-8.5.2.jar (com.android.tools.build:builder-model:8.5.2) with InstrumentationAnalysisTransform
+Transforming dvlib-31.5.2.jar (com.android.tools:dvlib:31.5.2) with InstrumentationAnalysisTransform
+Transforming common-31.5.2.jar (com.android.tools:common:31.5.2) with InstrumentationAnalysisTransform
+Transforming jetifier-processor-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10) with InstrumentationAnalysisTransform
+Transforming jetifier-core-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-core:1.0.0-beta10) with InstrumentationAnalysisTransform
+Transforming kotlin-reflect-1.9.20.jar (org.jetbrains.kotlin:kotlin-reflect:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-jdk7-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-jdk8-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.20) with InstrumentationAnalysisTransform
+Transforming transform-api-2.0.0-deprecated-use-gradle-api.jar (com.android.tools.build:transform-api:2.0.0-deprecated-use-gradle-api) with InstrumentationAnalysisTransform
+Transforming httpmime-4.5.6.jar (org.apache.httpcomponents:httpmime:4.5.6) with InstrumentationAnalysisTransform
+Transforming commons-io-2.13.0.jar (commons-io:commons-io:2.13.0) with InstrumentationAnalysisTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with InstrumentationAnalysisTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with InstrumentationAnalysisTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with InstrumentationAnalysisTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with InstrumentationAnalysisTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with InstrumentationAnalysisTransform
+Transforming apkzlib-8.5.2.jar (com.android.tools.build:apkzlib:8.5.2) with InstrumentationAnalysisTransform
+Transforming bcpkix-jdk18on-1.77.jar (org.bouncycastle:bcpkix-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming jaxb-runtime-2.3.2.jar (org.glassfish.jaxb:jaxb-runtime:2.3.2) with InstrumentationAnalysisTransform
+Transforming jopt-simple-4.9.jar (net.sf.jopt-simple:jopt-simple:4.9) with InstrumentationAnalysisTransform
+Transforming javapoet-1.10.0.jar (com.squareup:javapoet:1.10.0) with InstrumentationAnalysisTransform
+Transforming protobuf-java-util-3.22.3.jar (com.google.protobuf:protobuf-java-util:3.22.3) with InstrumentationAnalysisTransform
+Transforming grpc-protobuf-1.57.0.jar (io.grpc:grpc-protobuf:1.57.0) with InstrumentationAnalysisTransform
+Transforming tink-1.7.0.jar (com.google.crypto.tink:tink:1.7.0) with InstrumentationAnalysisTransform
+Transforming protos-31.5.2.jar (com.android.tools.analytics-library:protos:31.5.2) with InstrumentationAnalysisTransform
+Transforming proto-google-common-protos-2.17.0.jar (com.google.api.grpc:proto-google-common-protos:2.17.0) with InstrumentationAnalysisTransform
+Transforming protobuf-java-3.22.3.jar (com.google.protobuf:protobuf-java:3.22.3) with InstrumentationAnalysisTransform
+Transforming grpc-netty-1.57.0.jar (io.grpc:grpc-netty:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-core-1.57.0.jar (io.grpc:grpc-core:1.57.0) with InstrumentationAnalysisTransform
+Transforming gson-2.10.1.jar (com.google.code.gson:gson:2.10.1) with InstrumentationAnalysisTransform
+Transforming grpc-stub-1.57.0.jar (io.grpc:grpc-stub:1.57.0) with InstrumentationAnalysisTransform
+Transforming core-proto-0.0.9-alpha02.jar (com.google.testing.platform:core-proto:0.0.9-alpha02) with InstrumentationAnalysisTransform
+Transforming kxml2-2.3.0.jar (net.sf.kxml:kxml2:2.3.0) with InstrumentationAnalysisTransform
+Transforming tensorflow-lite-metadata-0.1.0-rc2.jar (org.tensorflow:tensorflow-lite-metadata:0.1.0-rc2) with InstrumentationAnalysisTransform
+Transforming flatbuffers-java-1.12.0.jar (com.google.flatbuffers:flatbuffers-java:1.12.0) with InstrumentationAnalysisTransform
+Transforming jimfs-1.1.jar (com.google.jimfs:jimfs:1.1) with InstrumentationAnalysisTransform
+Transforming grpc-context-1.57.0.jar (io.grpc:grpc-context:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-protobuf-lite-1.57.0.jar (io.grpc:grpc-protobuf-lite:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-api-1.57.0.jar (io.grpc:grpc-api:1.57.0) with InstrumentationAnalysisTransform
+Transforming guava-32.0.1-jre.jar (com.google.guava:guava:32.0.1-jre) with InstrumentationAnalysisTransform
+Transforming dagger-2.28.3.jar (com.google.dagger:dagger:2.28.3) with InstrumentationAnalysisTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with InstrumentationAnalysisTransform
+Transforming bcutil-jdk18on-1.77.jar (org.bouncycastle:bcutil-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming bcprov-jdk18on-1.77.jar (org.bouncycastle:bcprov-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming trove4j-1.0.20200330.jar (org.jetbrains.intellij.deps:trove4j:1.0.20200330) with InstrumentationAnalysisTransform
+Transforming commons-compress-1.21.jar (org.apache.commons:commons-compress:1.21) with InstrumentationAnalysisTransform
+Transforming httpclient-4.5.14.jar (org.apache.httpcomponents:httpclient:4.5.14) with InstrumentationAnalysisTransform
+Transforming httpcore-4.4.16.jar (org.apache.httpcomponents:httpcore:4.4.16) with InstrumentationAnalysisTransform
+Transforming javax.activation-1.2.0.jar (com.sun.activation:javax.activation:1.2.0) with InstrumentationAnalysisTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with InstrumentationAnalysisTransform
+Transforming signflinger-8.5.2.jar (com.android:signflinger:8.5.2) with InstrumentationAnalysisTransform
+Transforming zipflinger-8.5.2.jar (com.android:zipflinger:8.5.2) with InstrumentationAnalysisTransform
+Transforming annotations-31.5.2.jar (com.android.tools:annotations:31.5.2) with InstrumentationAnalysisTransform
+Transforming jna-platform-5.6.0.jar (net.java.dev.jna:jna-platform:5.6.0) with InstrumentationAnalysisTransform
+Transforming juniversalchardet-1.0.3.jar (com.googlecode.juniversalchardet:juniversalchardet:1.0.3) with InstrumentationAnalysisTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with InstrumentationAnalysisTransform
+Transforming stax-ex-1.8.1.jar (org.jvnet.staxex:stax-ex:1.8.1) with InstrumentationAnalysisTransform
+Transforming jakarta.xml.bind-api-2.3.2.jar (jakarta.xml.bind:jakarta.xml.bind-api:2.3.2) with InstrumentationAnalysisTransform
+Transforming txw2-2.3.2.jar (org.glassfish.jaxb:txw2:2.3.2) with InstrumentationAnalysisTransform
+Transforming istack-commons-runtime-3.0.8.jar (com.sun.istack:istack-commons-runtime:3.0.8) with InstrumentationAnalysisTransform
+Transforming FastInfoset-1.2.16.jar (com.sun.xml.fastinfoset:FastInfoset:1.2.16) with InstrumentationAnalysisTransform
+Transforming jakarta.activation-api-1.2.1.jar (jakarta.activation:jakarta.activation-api:1.2.1) with InstrumentationAnalysisTransform
+Transforming auto-value-annotations-1.6.2.jar (com.google.auto.value:auto-value-annotations:1.6.2) with InstrumentationAnalysisTransform
+Transforming error_prone_annotations-2.18.0.jar (com.google.errorprone:error_prone_annotations:2.18.0) with InstrumentationAnalysisTransform
+Transforming jose4j-0.9.5.jar (org.bitbucket.b_c:jose4j:0.9.5) with InstrumentationAnalysisTransform
+Transforming slf4j-api-1.7.30.jar (org.slf4j:slf4j-api:1.7.30) with InstrumentationAnalysisTransform
+Transforming jdom2-2.0.6.jar (org.jdom:jdom2:2.0.6) with InstrumentationAnalysisTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with InstrumentationAnalysisTransform
+Transforming j2objc-annotations-2.8.jar (com.google.j2objc:j2objc-annotations:2.8) with InstrumentationAnalysisTransform
+Transforming annotations-4.1.1.4.jar (com.google.android:annotations:4.1.1.4) with InstrumentationAnalysisTransform
+Transforming animal-sniffer-annotations-1.23.jar (org.codehaus.mojo:animal-sniffer-annotations:1.23) with InstrumentationAnalysisTransform
+Transforming perfmark-api-0.26.0.jar (io.perfmark:perfmark-api:0.26.0) with InstrumentationAnalysisTransform
+Transforming netty-codec-http2-4.1.93.Final.jar (io.netty:netty-codec-http2:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-handler-proxy-4.1.93.Final.jar (io.netty:netty-handler-proxy:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-codec-http-4.1.93.Final.jar (io.netty:netty-codec-http:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-handler-4.1.93.Final.jar (io.netty:netty-handler:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-transport-native-unix-common-4.1.93.Final.jar (io.netty:netty-transport-native-unix-common:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming checker-qual-3.33.0.jar (org.checkerframework:checker-qual:3.33.0) with InstrumentationAnalysisTransform
+Transforming commons-codec-1.11.jar (commons-codec:commons-codec:1.11) with InstrumentationAnalysisTransform
+Transforming apksig-8.5.2.jar (com.android.tools.build:apksig:8.5.2) with InstrumentationAnalysisTransform
+Transforming javawriter-2.5.0.jar (com.squareup:javawriter:2.5.0) with InstrumentationAnalysisTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with InstrumentationAnalysisTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with InstrumentationAnalysisTransform
+Transforming commons-logging-1.2.jar (commons-logging:commons-logging:1.2) with InstrumentationAnalysisTransform
+Transforming jna-5.6.0.jar (net.java.dev.jna:jna:5.6.0) with InstrumentationAnalysisTransform
+Transforming netty-codec-socks-4.1.93.Final.jar (io.netty:netty-codec-socks:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-codec-4.1.93.Final.jar (io.netty:netty-codec:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-transport-4.1.93.Final.jar (io.netty:netty-transport:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-buffer-4.1.93.Final.jar (io.netty:netty-buffer:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-resolver-4.1.93.Final.jar (io.netty:netty-resolver:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-common-4.1.93.Final.jar (io.netty:netty-common:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming gradle-8.5.2.jar (com.android.tools.build:gradle:8.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-8.5.2.jar (com.android.tools.build:gradle:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming gradle-settings-api-8.5.2.jar (com.android.tools.build:gradle-settings-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-settings-api-8.5.2.jar (com.android.tools.build:gradle-settings-api:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming lint-model-31.5.2.jar (com.android.tools.lint:lint-model:31.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-8.5.2.jar (com.android.tools.build:gradle:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming gradle-settings-api-8.5.2.jar (com.android.tools.build:gradle-settings-api:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming lint-model-31.5.2.jar (com.android.tools.lint:lint-model:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming builder-8.5.2.jar (com.android.tools.build:builder:8.5.2) with InstrumentationAnalysisTransform
+Transforming builder-8.5.2.jar (com.android.tools.build:builder:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming lint-model-31.5.2.jar (com.android.tools.lint:lint-model:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming manifest-merger-31.5.2.jar (com.android.tools.build:manifest-merger:31.5.2) with InstrumentationAnalysisTransform
+Transforming manifest-merger-31.5.2.jar (com.android.tools.build:manifest-merger:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming builder-8.5.2.jar (com.android.tools.build:builder:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming sdk-common-31.5.2.jar (com.android.tools:sdk-common:31.5.2) with InstrumentationAnalysisTransform
+Transforming manifest-merger-31.5.2.jar (com.android.tools.build:manifest-merger:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming sdk-common-31.5.2.jar (com.android.tools:sdk-common:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming sdklib-31.5.2.jar (com.android.tools:sdklib:31.5.2) with InstrumentationAnalysisTransform
+Transforming sdklib-31.5.2.jar (com.android.tools:sdklib:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming sdk-common-31.5.2.jar (com.android.tools:sdk-common:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming repository-31.5.2.jar (com.android.tools:repository:31.5.2) with InstrumentationAnalysisTransform
+Transforming repository-31.5.2.jar (com.android.tools:repository:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming sdklib-31.5.2.jar (com.android.tools:sdklib:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming gradle-api-8.5.2.jar (com.android.tools.build:gradle-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-api-8.5.2.jar (com.android.tools.build:gradle-api:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming repository-31.5.2.jar (com.android.tools:repository:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming builder-test-api-8.5.2.jar (com.android.tools.build:builder-test-api:8.5.2) with InstrumentationAnalysisTransform
+Transforming gradle-api-8.5.2.jar (com.android.tools.build:gradle-api:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming builder-test-api-8.5.2.jar (com.android.tools.build:builder-test-api:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming ddmlib-31.5.2.jar (com.android.tools.ddms:ddmlib:31.5.2) with InstrumentationAnalysisTransform
+Transforming ddmlib-31.5.2.jar (com.android.tools.ddms:ddmlib:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming builder-test-api-8.5.2.jar (com.android.tools.build:builder-test-api:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming aaptcompiler-8.5.2.jar (com.android.tools.build:aaptcompiler:8.5.2) with InstrumentationAnalysisTransform
+Transforming aaptcompiler-8.5.2.jar (com.android.tools.build:aaptcompiler:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming ddmlib-31.5.2.jar (com.android.tools.ddms:ddmlib:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming bundletool-1.16.0.jar (com.android.tools.build:bundletool:1.16.0) with InstrumentationAnalysisTransform
+Transforming bundletool-1.16.0.jar (com.android.tools.build:bundletool:1.16.0) with MergeInstrumentationAnalysisTransform
+Transforming aaptcompiler-8.5.2.jar (com.android.tools.build:aaptcompiler:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming aapt2-proto-8.5.2-11315950.jar (com.android.tools.build:aapt2-proto:8.5.2-11315950) with InstrumentationAnalysisTransform
+Transforming bundletool-1.16.0.jar (com.android.tools.build:bundletool:1.16.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming aapt2-proto-8.5.2-11315950.jar (com.android.tools.build:aapt2-proto:8.5.2-11315950) with MergeInstrumentationAnalysisTransform
+Transforming crash-31.5.2.jar (com.android.tools.analytics-library:crash:31.5.2) with InstrumentationAnalysisTransform
+Transforming crash-31.5.2.jar (com.android.tools.analytics-library:crash:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming aapt2-proto-8.5.2-11315950.jar (com.android.tools.build:aapt2-proto:8.5.2-11315950) with ExternalDependencyInstrumentingArtifactTransform
+Transforming tracker-31.5.2.jar (com.android.tools.analytics-library:tracker:31.5.2) with InstrumentationAnalysisTransform
+Transforming crash-31.5.2.jar (com.android.tools.analytics-library:crash:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming tracker-31.5.2.jar (com.android.tools.analytics-library:tracker:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming shared-31.5.2.jar (com.android.tools.analytics-library:shared:31.5.2) with InstrumentationAnalysisTransform
+Transforming shared-31.5.2.jar (com.android.tools.analytics-library:shared:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming tracker-31.5.2.jar (com.android.tools.analytics-library:tracker:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming lint-typedef-remover-31.5.2.jar (com.android.tools.lint:lint-typedef-remover:31.5.2) with InstrumentationAnalysisTransform
+Transforming shared-31.5.2.jar (com.android.tools.analytics-library:shared:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming lint-typedef-remover-31.5.2.jar (com.android.tools.lint:lint-typedef-remover:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming databinding-compiler-common-8.5.2.jar (androidx.databinding:databinding-compiler-common:8.5.2) with InstrumentationAnalysisTransform
+Transforming databinding-compiler-common-8.5.2.jar (androidx.databinding:databinding-compiler-common:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming lint-typedef-remover-31.5.2.jar (com.android.tools.lint:lint-typedef-remover:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming databinding-compiler-common-8.5.2.jar (androidx.databinding:databinding-compiler-common:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming databinding-common-8.5.2.jar (androidx.databinding:databinding-common:8.5.2) with InstrumentationAnalysisTransform
+Transforming databinding-common-8.5.2.jar (androidx.databinding:databinding-common:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming baseLibrary-8.5.2.jar (com.android.databinding:baseLibrary:8.5.2) with InstrumentationAnalysisTransform
+Transforming baseLibrary-8.5.2.jar (com.android.databinding:baseLibrary:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming layoutlib-api-31.5.2.jar (com.android.tools.layoutlib:layoutlib-api:31.5.2) with InstrumentationAnalysisTransform
+Transforming baseLibrary-8.5.2.jar (com.android.databinding:baseLibrary:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming databinding-common-8.5.2.jar (androidx.databinding:databinding-common:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming layoutlib-api-31.5.2.jar (com.android.tools.layoutlib:layoutlib-api:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-device-provider-ddmlib-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-ddmlib-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-device-provider-ddmlib-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-ddmlib-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming layoutlib-api-31.5.2.jar (com.android.tools.layoutlib:layoutlib-api:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-device-provider-gradle-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-gradle-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-device-provider-ddmlib-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-ddmlib-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-device-provider-gradle-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-gradle-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-additional-test-output-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-additional-test-output-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-additional-test-output-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-additional-test-output-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-device-provider-gradle-proto-31.5.2.jar (com.android.tools.utp:android-device-provider-gradle-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-coverage-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-coverage-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-additional-test-output-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-additional-test-output-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-coverage-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-coverage-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-emulator-control-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-emulator-control-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-emulator-control-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-emulator-control-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-coverage-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-coverage-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-logcat-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-logcat-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-emulator-control-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-emulator-control-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-logcat-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-logcat-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-apk-installer-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-apk-installer-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-apk-installer-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-apk-installer-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-logcat-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-logcat-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-retention-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-retention-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-host-apk-installer-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-apk-installer-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming android-test-plugin-host-retention-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-retention-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-result-listener-gradle-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-result-listener-gradle-proto:31.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-result-listener-gradle-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-result-listener-gradle-proto:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming android-test-plugin-host-retention-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-host-retention-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming builder-model-8.5.2.jar (com.android.tools.build:builder-model:8.5.2) with InstrumentationAnalysisTransform
+Transforming android-test-plugin-result-listener-gradle-proto-31.5.2.jar (com.android.tools.utp:android-test-plugin-result-listener-gradle-proto:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming builder-model-8.5.2.jar (com.android.tools.build:builder-model:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming dvlib-31.5.2.jar (com.android.tools:dvlib:31.5.2) with InstrumentationAnalysisTransform
+Transforming dvlib-31.5.2.jar (com.android.tools:dvlib:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming builder-model-8.5.2.jar (com.android.tools.build:builder-model:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming common-31.5.2.jar (com.android.tools:common:31.5.2) with InstrumentationAnalysisTransform
+Transforming dvlib-31.5.2.jar (com.android.tools:dvlib:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming common-31.5.2.jar (com.android.tools:common:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming jetifier-processor-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10) with InstrumentationAnalysisTransform
+Transforming jetifier-processor-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10) with MergeInstrumentationAnalysisTransform
+Transforming jetifier-core-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-core:1.0.0-beta10) with InstrumentationAnalysisTransform
+Transforming common-31.5.2.jar (com.android.tools:common:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jetifier-processor-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jetifier-core-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-core:1.0.0-beta10) with MergeInstrumentationAnalysisTransform
+Transforming kotlin-reflect-1.9.20.jar (org.jetbrains.kotlin:kotlin-reflect:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-reflect-1.9.20.jar (org.jetbrains.kotlin:kotlin-reflect:1.9.20) with MergeInstrumentationAnalysisTransform
+Transforming jetifier-core-1.0.0-beta10.jar (com.android.tools.build.jetifier:jetifier-core:1.0.0-beta10) with ExternalDependencyInstrumentingArtifactTransform
+Transforming kotlin-stdlib-jdk7-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-reflect-1.9.20.jar (org.jetbrains.kotlin:kotlin-reflect:1.9.20) with ExternalDependencyInstrumentingArtifactTransform
+Transforming kotlin-stdlib-jdk7-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20) with MergeInstrumentationAnalysisTransform
+Transforming kotlin-stdlib-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib:1.9.20) with MergeInstrumentationAnalysisTransform
+Transforming kotlin-stdlib-jdk8-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.20) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-jdk7-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20) with ExternalDependencyInstrumentingArtifactTransform
+Transforming kotlin-stdlib-jdk8-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.20) with MergeInstrumentationAnalysisTransform
+Transforming kotlin-stdlib-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib:1.9.20) with ExternalDependencyInstrumentingArtifactTransform
+Transforming transform-api-2.0.0-deprecated-use-gradle-api.jar (com.android.tools.build:transform-api:2.0.0-deprecated-use-gradle-api) with InstrumentationAnalysisTransform
+Transforming kotlin-stdlib-jdk8-1.9.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.20) with ExternalDependencyInstrumentingArtifactTransform
+Transforming transform-api-2.0.0-deprecated-use-gradle-api.jar (com.android.tools.build:transform-api:2.0.0-deprecated-use-gradle-api) with MergeInstrumentationAnalysisTransform
+Transforming httpmime-4.5.6.jar (org.apache.httpcomponents:httpmime:4.5.6) with InstrumentationAnalysisTransform
+Transforming httpmime-4.5.6.jar (org.apache.httpcomponents:httpmime:4.5.6) with MergeInstrumentationAnalysisTransform
+Transforming commons-io-2.13.0.jar (commons-io:commons-io:2.13.0) with InstrumentationAnalysisTransform
+Transforming commons-io-2.13.0.jar (commons-io:commons-io:2.13.0) with MergeInstrumentationAnalysisTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with InstrumentationAnalysisTransform
+Transforming transform-api-2.0.0-deprecated-use-gradle-api.jar (com.android.tools.build:transform-api:2.0.0-deprecated-use-gradle-api) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with MergeInstrumentationAnalysisTransform
+Transforming commons-io-2.13.0.jar (commons-io:commons-io:2.13.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming httpmime-4.5.6.jar (org.apache.httpcomponents:httpmime:4.5.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with InstrumentationAnalysisTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with MergeInstrumentationAnalysisTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with InstrumentationAnalysisTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with MergeInstrumentationAnalysisTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with InstrumentationAnalysisTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with MergeInstrumentationAnalysisTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with InstrumentationAnalysisTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with MergeInstrumentationAnalysisTransform
+Transforming apkzlib-8.5.2.jar (com.android.tools.build:apkzlib:8.5.2) with InstrumentationAnalysisTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming apkzlib-8.5.2.jar (com.android.tools.build:apkzlib:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming bcpkix-jdk18on-1.77.jar (org.bouncycastle:bcpkix-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming apkzlib-8.5.2.jar (com.android.tools.build:apkzlib:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming bcpkix-jdk18on-1.77.jar (org.bouncycastle:bcpkix-jdk18on:1.77) with MergeInstrumentationAnalysisTransform
+Transforming jaxb-runtime-2.3.2.jar (org.glassfish.jaxb:jaxb-runtime:2.3.2) with InstrumentationAnalysisTransform
+Transforming jaxb-runtime-2.3.2.jar (org.glassfish.jaxb:jaxb-runtime:2.3.2) with MergeInstrumentationAnalysisTransform
+Transforming bcpkix-jdk18on-1.77.jar (org.bouncycastle:bcpkix-jdk18on:1.77) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jopt-simple-4.9.jar (net.sf.jopt-simple:jopt-simple:4.9) with InstrumentationAnalysisTransform
+Transforming jaxb-runtime-2.3.2.jar (org.glassfish.jaxb:jaxb-runtime:2.3.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jopt-simple-4.9.jar (net.sf.jopt-simple:jopt-simple:4.9) with MergeInstrumentationAnalysisTransform
+Transforming javapoet-1.10.0.jar (com.squareup:javapoet:1.10.0) with InstrumentationAnalysisTransform
+Transforming javapoet-1.10.0.jar (com.squareup:javapoet:1.10.0) with MergeInstrumentationAnalysisTransform
+Transforming jopt-simple-4.9.jar (net.sf.jopt-simple:jopt-simple:4.9) with ExternalDependencyInstrumentingArtifactTransform
+Transforming protobuf-java-util-3.22.3.jar (com.google.protobuf:protobuf-java-util:3.22.3) with InstrumentationAnalysisTransform
+Transforming javapoet-1.10.0.jar (com.squareup:javapoet:1.10.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming protobuf-java-util-3.22.3.jar (com.google.protobuf:protobuf-java-util:3.22.3) with MergeInstrumentationAnalysisTransform
+Transforming grpc-protobuf-1.57.0.jar (io.grpc:grpc-protobuf:1.57.0) with InstrumentationAnalysisTransform
+Transforming protobuf-java-util-3.22.3.jar (com.google.protobuf:protobuf-java-util:3.22.3) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-protobuf-1.57.0.jar (io.grpc:grpc-protobuf:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming tink-1.7.0.jar (com.google.crypto.tink:tink:1.7.0) with InstrumentationAnalysisTransform
+Transforming tink-1.7.0.jar (com.google.crypto.tink:tink:1.7.0) with MergeInstrumentationAnalysisTransform
+Transforming protos-31.5.2.jar (com.android.tools.analytics-library:protos:31.5.2) with InstrumentationAnalysisTransform
+Transforming grpc-protobuf-1.57.0.jar (io.grpc:grpc-protobuf:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming tink-1.7.0.jar (com.google.crypto.tink:tink:1.7.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming protos-31.5.2.jar (com.android.tools.analytics-library:protos:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming proto-google-common-protos-2.17.0.jar (com.google.api.grpc:proto-google-common-protos:2.17.0) with InstrumentationAnalysisTransform
+Transforming protos-31.5.2.jar (com.android.tools.analytics-library:protos:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming proto-google-common-protos-2.17.0.jar (com.google.api.grpc:proto-google-common-protos:2.17.0) with MergeInstrumentationAnalysisTransform
+Transforming protobuf-java-3.22.3.jar (com.google.protobuf:protobuf-java:3.22.3) with InstrumentationAnalysisTransform
+Transforming protobuf-java-3.22.3.jar (com.google.protobuf:protobuf-java:3.22.3) with MergeInstrumentationAnalysisTransform
+Transforming proto-google-common-protos-2.17.0.jar (com.google.api.grpc:proto-google-common-protos:2.17.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-netty-1.57.0.jar (io.grpc:grpc-netty:1.57.0) with InstrumentationAnalysisTransform
+Transforming protobuf-java-3.22.3.jar (com.google.protobuf:protobuf-java:3.22.3) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-netty-1.57.0.jar (io.grpc:grpc-netty:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming grpc-core-1.57.0.jar (io.grpc:grpc-core:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-core-1.57.0.jar (io.grpc:grpc-core:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming grpc-netty-1.57.0.jar (io.grpc:grpc-netty:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming gson-2.10.1.jar (com.google.code.gson:gson:2.10.1) with InstrumentationAnalysisTransform
+Transforming grpc-core-1.57.0.jar (io.grpc:grpc-core:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming gson-2.10.1.jar (com.google.code.gson:gson:2.10.1) with MergeInstrumentationAnalysisTransform
+Transforming grpc-stub-1.57.0.jar (io.grpc:grpc-stub:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-stub-1.57.0.jar (io.grpc:grpc-stub:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming gson-2.10.1.jar (com.google.code.gson:gson:2.10.1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-stub-1.57.0.jar (io.grpc:grpc-stub:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming core-proto-0.0.9-alpha02.jar (com.google.testing.platform:core-proto:0.0.9-alpha02) with InstrumentationAnalysisTransform
+Transforming core-proto-0.0.9-alpha02.jar (com.google.testing.platform:core-proto:0.0.9-alpha02) with MergeInstrumentationAnalysisTransform
+Transforming kxml2-2.3.0.jar (net.sf.kxml:kxml2:2.3.0) with InstrumentationAnalysisTransform
+Transforming kxml2-2.3.0.jar (net.sf.kxml:kxml2:2.3.0) with MergeInstrumentationAnalysisTransform
+Transforming core-proto-0.0.9-alpha02.jar (com.google.testing.platform:core-proto:0.0.9-alpha02) with ExternalDependencyInstrumentingArtifactTransform
+Transforming tensorflow-lite-metadata-0.1.0-rc2.jar (org.tensorflow:tensorflow-lite-metadata:0.1.0-rc2) with InstrumentationAnalysisTransform
+Transforming kxml2-2.3.0.jar (net.sf.kxml:kxml2:2.3.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming tensorflow-lite-metadata-0.1.0-rc2.jar (org.tensorflow:tensorflow-lite-metadata:0.1.0-rc2) with MergeInstrumentationAnalysisTransform
+Transforming flatbuffers-java-1.12.0.jar (com.google.flatbuffers:flatbuffers-java:1.12.0) with InstrumentationAnalysisTransform
+Transforming flatbuffers-java-1.12.0.jar (com.google.flatbuffers:flatbuffers-java:1.12.0) with MergeInstrumentationAnalysisTransform
+Transforming jimfs-1.1.jar (com.google.jimfs:jimfs:1.1) with InstrumentationAnalysisTransform
+Transforming tensorflow-lite-metadata-0.1.0-rc2.jar (org.tensorflow:tensorflow-lite-metadata:0.1.0-rc2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming flatbuffers-java-1.12.0.jar (com.google.flatbuffers:flatbuffers-java:1.12.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jimfs-1.1.jar (com.google.jimfs:jimfs:1.1) with MergeInstrumentationAnalysisTransform
+Transforming grpc-context-1.57.0.jar (io.grpc:grpc-context:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-context-1.57.0.jar (io.grpc:grpc-context:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming jimfs-1.1.jar (com.google.jimfs:jimfs:1.1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-protobuf-lite-1.57.0.jar (io.grpc:grpc-protobuf-lite:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-protobuf-lite-1.57.0.jar (io.grpc:grpc-protobuf-lite:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming grpc-context-1.57.0.jar (io.grpc:grpc-context:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-api-1.57.0.jar (io.grpc:grpc-api:1.57.0) with InstrumentationAnalysisTransform
+Transforming grpc-protobuf-lite-1.57.0.jar (io.grpc:grpc-protobuf-lite:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming grpc-api-1.57.0.jar (io.grpc:grpc-api:1.57.0) with MergeInstrumentationAnalysisTransform
+Transforming guava-32.0.1-jre.jar (com.google.guava:guava:32.0.1-jre) with InstrumentationAnalysisTransform
+Transforming grpc-api-1.57.0.jar (io.grpc:grpc-api:1.57.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming guava-32.0.1-jre.jar (com.google.guava:guava:32.0.1-jre) with MergeInstrumentationAnalysisTransform
+Transforming dagger-2.28.3.jar (com.google.dagger:dagger:2.28.3) with InstrumentationAnalysisTransform
+Transforming dagger-2.28.3.jar (com.google.dagger:dagger:2.28.3) with MergeInstrumentationAnalysisTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with InstrumentationAnalysisTransform
+Transforming guava-32.0.1-jre.jar (com.google.guava:guava:32.0.1-jre) with ExternalDependencyInstrumentingArtifactTransform
+Transforming dagger-2.28.3.jar (com.google.dagger:dagger:2.28.3) with ExternalDependencyInstrumentingArtifactTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with MergeInstrumentationAnalysisTransform
+Transforming bcutil-jdk18on-1.77.jar (org.bouncycastle:bcutil-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming bcutil-jdk18on-1.77.jar (org.bouncycastle:bcutil-jdk18on:1.77) with MergeInstrumentationAnalysisTransform
+Transforming bcprov-jdk18on-1.77.jar (org.bouncycastle:bcprov-jdk18on:1.77) with InstrumentationAnalysisTransform
+Transforming bcutil-jdk18on-1.77.jar (org.bouncycastle:bcutil-jdk18on:1.77) with ExternalDependencyInstrumentingArtifactTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming bcprov-jdk18on-1.77.jar (org.bouncycastle:bcprov-jdk18on:1.77) with MergeInstrumentationAnalysisTransform
+Transforming trove4j-1.0.20200330.jar (org.jetbrains.intellij.deps:trove4j:1.0.20200330) with InstrumentationAnalysisTransform
+Transforming trove4j-1.0.20200330.jar (org.jetbrains.intellij.deps:trove4j:1.0.20200330) with MergeInstrumentationAnalysisTransform
+Transforming commons-compress-1.21.jar (org.apache.commons:commons-compress:1.21) with InstrumentationAnalysisTransform
+Transforming bcprov-jdk18on-1.77.jar (org.bouncycastle:bcprov-jdk18on:1.77) with ExternalDependencyInstrumentingArtifactTransform
+Transforming trove4j-1.0.20200330.jar (org.jetbrains.intellij.deps:trove4j:1.0.20200330) with ExternalDependencyInstrumentingArtifactTransform
+Transforming commons-compress-1.21.jar (org.apache.commons:commons-compress:1.21) with MergeInstrumentationAnalysisTransform
+Transforming httpclient-4.5.14.jar (org.apache.httpcomponents:httpclient:4.5.14) with InstrumentationAnalysisTransform
+Transforming httpclient-4.5.14.jar (org.apache.httpcomponents:httpclient:4.5.14) with MergeInstrumentationAnalysisTransform
+Transforming httpcore-4.4.16.jar (org.apache.httpcomponents:httpcore:4.4.16) with InstrumentationAnalysisTransform
+Transforming httpcore-4.4.16.jar (org.apache.httpcomponents:httpcore:4.4.16) with MergeInstrumentationAnalysisTransform
+Transforming javax.activation-1.2.0.jar (com.sun.activation:javax.activation:1.2.0) with InstrumentationAnalysisTransform
+Transforming httpcore-4.4.16.jar (org.apache.httpcomponents:httpcore:4.4.16) with ExternalDependencyInstrumentingArtifactTransform
+Transforming commons-compress-1.21.jar (org.apache.commons:commons-compress:1.21) with ExternalDependencyInstrumentingArtifactTransform
+Transforming javax.activation-1.2.0.jar (com.sun.activation:javax.activation:1.2.0) with MergeInstrumentationAnalysisTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with InstrumentationAnalysisTransform
+Transforming httpclient-4.5.14.jar (org.apache.httpcomponents:httpclient:4.5.14) with ExternalDependencyInstrumentingArtifactTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with MergeInstrumentationAnalysisTransform
+Transforming javax.activation-1.2.0.jar (com.sun.activation:javax.activation:1.2.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming signflinger-8.5.2.jar (com.android:signflinger:8.5.2) with InstrumentationAnalysisTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming signflinger-8.5.2.jar (com.android:signflinger:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming zipflinger-8.5.2.jar (com.android:zipflinger:8.5.2) with InstrumentationAnalysisTransform
+Transforming zipflinger-8.5.2.jar (com.android:zipflinger:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming signflinger-8.5.2.jar (com.android:signflinger:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming annotations-31.5.2.jar (com.android.tools:annotations:31.5.2) with InstrumentationAnalysisTransform
+Transforming zipflinger-8.5.2.jar (com.android:zipflinger:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming annotations-31.5.2.jar (com.android.tools:annotations:31.5.2) with MergeInstrumentationAnalysisTransform
+Transforming jna-platform-5.6.0.jar (net.java.dev.jna:jna-platform:5.6.0) with InstrumentationAnalysisTransform
+Transforming annotations-31.5.2.jar (com.android.tools:annotations:31.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jna-platform-5.6.0.jar (net.java.dev.jna:jna-platform:5.6.0) with MergeInstrumentationAnalysisTransform
+Transforming juniversalchardet-1.0.3.jar (com.googlecode.juniversalchardet:juniversalchardet:1.0.3) with InstrumentationAnalysisTransform
+Transforming jna-platform-5.6.0.jar (net.java.dev.jna:jna-platform:5.6.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming juniversalchardet-1.0.3.jar (com.googlecode.juniversalchardet:juniversalchardet:1.0.3) with MergeInstrumentationAnalysisTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with InstrumentationAnalysisTransform
+Transforming juniversalchardet-1.0.3.jar (com.googlecode.juniversalchardet:juniversalchardet:1.0.3) with ExternalDependencyInstrumentingArtifactTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with MergeInstrumentationAnalysisTransform
+Transforming stax-ex-1.8.1.jar (org.jvnet.staxex:stax-ex:1.8.1) with InstrumentationAnalysisTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming stax-ex-1.8.1.jar (org.jvnet.staxex:stax-ex:1.8.1) with MergeInstrumentationAnalysisTransform
+Transforming jakarta.xml.bind-api-2.3.2.jar (jakarta.xml.bind:jakarta.xml.bind-api:2.3.2) with InstrumentationAnalysisTransform
+Transforming jakarta.xml.bind-api-2.3.2.jar (jakarta.xml.bind:jakarta.xml.bind-api:2.3.2) with MergeInstrumentationAnalysisTransform
+Transforming txw2-2.3.2.jar (org.glassfish.jaxb:txw2:2.3.2) with InstrumentationAnalysisTransform
+Transforming jakarta.xml.bind-api-2.3.2.jar (jakarta.xml.bind:jakarta.xml.bind-api:2.3.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming stax-ex-1.8.1.jar (org.jvnet.staxex:stax-ex:1.8.1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming txw2-2.3.2.jar (org.glassfish.jaxb:txw2:2.3.2) with MergeInstrumentationAnalysisTransform
+Transforming istack-commons-runtime-3.0.8.jar (com.sun.istack:istack-commons-runtime:3.0.8) with InstrumentationAnalysisTransform
+Transforming istack-commons-runtime-3.0.8.jar (com.sun.istack:istack-commons-runtime:3.0.8) with MergeInstrumentationAnalysisTransform
+Transforming txw2-2.3.2.jar (org.glassfish.jaxb:txw2:2.3.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming FastInfoset-1.2.16.jar (com.sun.xml.fastinfoset:FastInfoset:1.2.16) with InstrumentationAnalysisTransform
+Transforming istack-commons-runtime-3.0.8.jar (com.sun.istack:istack-commons-runtime:3.0.8) with ExternalDependencyInstrumentingArtifactTransform
+Transforming FastInfoset-1.2.16.jar (com.sun.xml.fastinfoset:FastInfoset:1.2.16) with MergeInstrumentationAnalysisTransform
+Transforming jakarta.activation-api-1.2.1.jar (jakarta.activation:jakarta.activation-api:1.2.1) with InstrumentationAnalysisTransform
+Transforming jakarta.activation-api-1.2.1.jar (jakarta.activation:jakarta.activation-api:1.2.1) with MergeInstrumentationAnalysisTransform
+Transforming auto-value-annotations-1.6.2.jar (com.google.auto.value:auto-value-annotations:1.6.2) with InstrumentationAnalysisTransform
+Transforming FastInfoset-1.2.16.jar (com.sun.xml.fastinfoset:FastInfoset:1.2.16) with ExternalDependencyInstrumentingArtifactTransform
+Transforming auto-value-annotations-1.6.2.jar (com.google.auto.value:auto-value-annotations:1.6.2) with MergeInstrumentationAnalysisTransform
+Transforming jakarta.activation-api-1.2.1.jar (jakarta.activation:jakarta.activation-api:1.2.1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming error_prone_annotations-2.18.0.jar (com.google.errorprone:error_prone_annotations:2.18.0) with InstrumentationAnalysisTransform
+Transforming auto-value-annotations-1.6.2.jar (com.google.auto.value:auto-value-annotations:1.6.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming error_prone_annotations-2.18.0.jar (com.google.errorprone:error_prone_annotations:2.18.0) with MergeInstrumentationAnalysisTransform
+Transforming jose4j-0.9.5.jar (org.bitbucket.b_c:jose4j:0.9.5) with InstrumentationAnalysisTransform
+Transforming jose4j-0.9.5.jar (org.bitbucket.b_c:jose4j:0.9.5) with MergeInstrumentationAnalysisTransform
+Transforming slf4j-api-1.7.30.jar (org.slf4j:slf4j-api:1.7.30) with InstrumentationAnalysisTransform
+Transforming error_prone_annotations-2.18.0.jar (com.google.errorprone:error_prone_annotations:2.18.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming slf4j-api-1.7.30.jar (org.slf4j:slf4j-api:1.7.30) with MergeInstrumentationAnalysisTransform
+Transforming jose4j-0.9.5.jar (org.bitbucket.b_c:jose4j:0.9.5) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jdom2-2.0.6.jar (org.jdom:jdom2:2.0.6) with InstrumentationAnalysisTransform
+Transforming slf4j-api-1.7.30.jar (org.slf4j:slf4j-api:1.7.30) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jdom2-2.0.6.jar (org.jdom:jdom2:2.0.6) with MergeInstrumentationAnalysisTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with InstrumentationAnalysisTransform
+Transforming jdom2-2.0.6.jar (org.jdom:jdom2:2.0.6) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with MergeInstrumentationAnalysisTransform
+Transforming j2objc-annotations-2.8.jar (com.google.j2objc:j2objc-annotations:2.8) with InstrumentationAnalysisTransform
+Transforming j2objc-annotations-2.8.jar (com.google.j2objc:j2objc-annotations:2.8) with MergeInstrumentationAnalysisTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming annotations-4.1.1.4.jar (com.google.android:annotations:4.1.1.4) with InstrumentationAnalysisTransform
+Transforming j2objc-annotations-2.8.jar (com.google.j2objc:j2objc-annotations:2.8) with ExternalDependencyInstrumentingArtifactTransform
+Transforming annotations-4.1.1.4.jar (com.google.android:annotations:4.1.1.4) with MergeInstrumentationAnalysisTransform
+Transforming animal-sniffer-annotations-1.23.jar (org.codehaus.mojo:animal-sniffer-annotations:1.23) with InstrumentationAnalysisTransform
+Transforming annotations-4.1.1.4.jar (com.google.android:annotations:4.1.1.4) with ExternalDependencyInstrumentingArtifactTransform
+Transforming animal-sniffer-annotations-1.23.jar (org.codehaus.mojo:animal-sniffer-annotations:1.23) with MergeInstrumentationAnalysisTransform
+Transforming perfmark-api-0.26.0.jar (io.perfmark:perfmark-api:0.26.0) with InstrumentationAnalysisTransform
+Transforming perfmark-api-0.26.0.jar (io.perfmark:perfmark-api:0.26.0) with MergeInstrumentationAnalysisTransform
+Transforming animal-sniffer-annotations-1.23.jar (org.codehaus.mojo:animal-sniffer-annotations:1.23) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-codec-http2-4.1.93.Final.jar (io.netty:netty-codec-http2:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming perfmark-api-0.26.0.jar (io.perfmark:perfmark-api:0.26.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-codec-http2-4.1.93.Final.jar (io.netty:netty-codec-http2:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-handler-proxy-4.1.93.Final.jar (io.netty:netty-handler-proxy:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-handler-proxy-4.1.93.Final.jar (io.netty:netty-handler-proxy:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-codec-http2-4.1.93.Final.jar (io.netty:netty-codec-http2:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-handler-proxy-4.1.93.Final.jar (io.netty:netty-handler-proxy:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-codec-http-4.1.93.Final.jar (io.netty:netty-codec-http:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-codec-http-4.1.93.Final.jar (io.netty:netty-codec-http:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-handler-4.1.93.Final.jar (io.netty:netty-handler:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-handler-4.1.93.Final.jar (io.netty:netty-handler:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-codec-http-4.1.93.Final.jar (io.netty:netty-codec-http:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-transport-native-unix-common-4.1.93.Final.jar (io.netty:netty-transport-native-unix-common:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-handler-4.1.93.Final.jar (io.netty:netty-handler:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-transport-native-unix-common-4.1.93.Final.jar (io.netty:netty-transport-native-unix-common:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming checker-qual-3.33.0.jar (org.checkerframework:checker-qual:3.33.0) with InstrumentationAnalysisTransform
+Transforming checker-qual-3.33.0.jar (org.checkerframework:checker-qual:3.33.0) with MergeInstrumentationAnalysisTransform
+Transforming netty-transport-native-unix-common-4.1.93.Final.jar (io.netty:netty-transport-native-unix-common:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming checker-qual-3.33.0.jar (org.checkerframework:checker-qual:3.33.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming commons-codec-1.11.jar (commons-codec:commons-codec:1.11) with InstrumentationAnalysisTransform
+Transforming commons-codec-1.11.jar (commons-codec:commons-codec:1.11) with MergeInstrumentationAnalysisTransform
+Transforming apksig-8.5.2.jar (com.android.tools.build:apksig:8.5.2) with InstrumentationAnalysisTransform
+Transforming apksig-8.5.2.jar (com.android.tools.build:apksig:8.5.2) with MergeInstrumentationAnalysisTransform
+Transforming commons-codec-1.11.jar (commons-codec:commons-codec:1.11) with ExternalDependencyInstrumentingArtifactTransform
+Transforming apksig-8.5.2.jar (com.android.tools.build:apksig:8.5.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming javawriter-2.5.0.jar (com.squareup:javawriter:2.5.0) with InstrumentationAnalysisTransform
+Transforming javawriter-2.5.0.jar (com.squareup:javawriter:2.5.0) with MergeInstrumentationAnalysisTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with InstrumentationAnalysisTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with MergeInstrumentationAnalysisTransform
+Transforming javawriter-2.5.0.jar (com.squareup:javawriter:2.5.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with ExternalDependencyInstrumentingArtifactTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with InstrumentationAnalysisTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with MergeInstrumentationAnalysisTransform
+Transforming commons-logging-1.2.jar (commons-logging:commons-logging:1.2) with InstrumentationAnalysisTransform
+Transforming commons-logging-1.2.jar (commons-logging:commons-logging:1.2) with MergeInstrumentationAnalysisTransform
+Transforming jna-5.6.0.jar (net.java.dev.jna:jna:5.6.0) with InstrumentationAnalysisTransform
+Transforming commons-logging-1.2.jar (commons-logging:commons-logging:1.2) with ExternalDependencyInstrumentingArtifactTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with ExternalDependencyInstrumentingArtifactTransform
+Transforming jna-5.6.0.jar (net.java.dev.jna:jna:5.6.0) with MergeInstrumentationAnalysisTransform
+Transforming netty-codec-socks-4.1.93.Final.jar (io.netty:netty-codec-socks:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-codec-socks-4.1.93.Final.jar (io.netty:netty-codec-socks:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming jna-5.6.0.jar (net.java.dev.jna:jna:5.6.0) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-codec-4.1.93.Final.jar (io.netty:netty-codec:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-codec-socks-4.1.93.Final.jar (io.netty:netty-codec-socks:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-codec-4.1.93.Final.jar (io.netty:netty-codec:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-transport-4.1.93.Final.jar (io.netty:netty-transport:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-transport-4.1.93.Final.jar (io.netty:netty-transport:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-codec-4.1.93.Final.jar (io.netty:netty-codec:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-transport-4.1.93.Final.jar (io.netty:netty-transport:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-buffer-4.1.93.Final.jar (io.netty:netty-buffer:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-buffer-4.1.93.Final.jar (io.netty:netty-buffer:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-resolver-4.1.93.Final.jar (io.netty:netty-resolver:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-resolver-4.1.93.Final.jar (io.netty:netty-resolver:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-common-4.1.93.Final.jar (io.netty:netty-common:4.1.93.Final) with InstrumentationAnalysisTransform
+Transforming netty-buffer-4.1.93.Final.jar (io.netty:netty-buffer:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-resolver-4.1.93.Final.jar (io.netty:netty-resolver:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Transforming netty-common-4.1.93.Final.jar (io.netty:netty-common:4.1.93.Final) with MergeInstrumentationAnalysisTransform
+Transforming netty-common-4.1.93.Final.jar (io.netty:netty-common:4.1.93.Final) with ExternalDependencyInstrumentingArtifactTransform
+Invalidating in-memory cache of /Users/ivoliondov/.gradle/caches/8.8/fileHashes/fileHashes.bin
+Invalidating in-memory cache of /Users/ivoliondov/.gradle/caches/8.8/fileHashes/resourceHashesCache.bin
+Using default execution profile
+optional rn-fetch-blob dependency not found
+
+> Configure project :approov-sdk
+Evaluating project ':approov-sdk' using build file '/Users/ivoliondov/Github/approov-service-react-native/core-service-layers-testing/mini-sdk/android/approov-sdk/build.gradle'.
+
+> Configure project :test-support
+Evaluating project ':test-support' using build file '/Users/ivoliondov/Github/approov-service-react-native/core-service-layers-testing/mini-sdk/android/test-support/build.gradle'.
+All projects evaluated.
+Task name matched 'compileDebugUnitTestJavaWithJavac'
+Selected primary task 'compileDebugUnitTestJavaWithJavac' from project :
+Tasks to be executed: [task ':preBuild', task ':preDebugBuild', task ':generateDebugResValues', task ':generateDebugResources', task ':packageDebugResources', task ':parseDebugLocalResources', task ':generateDebugRFile', task ':javaPreCompileDebug', task ':compileDebugJavaWithJavac', task ':bundleLibCompileToJarDebug', task ':preDebugUnitTestBuild', task ':generateDebugUnitTestStubRFile', task ':javaPreCompileDebugUnitTest', task ':prepareMiniSdkTestJars', task ':compileDebugUnitTestJavaWithJavac']
+Tasks that were excluded: []
+Resolve mutations for :preBuild (Thread[#822,Execution worker,5,main]) started.
+:preBuild (Thread[#822,Execution worker,5,main]) started.
+
+> Task :preBuild UP-TO-DATE
+Skipping task ':preBuild' as it has no actions.
+Resolve mutations for :preDebugBuild (Thread[#822,Execution worker,5,main]) started.
+:preDebugBuild (Thread[#822,Execution worker,5,main]) started.
+
+> Task :preDebugBuild UP-TO-DATE
+Skipping task ':preDebugBuild' as it has no actions.
+Resolve mutations for :generateDebugResValues (Thread[#822,Execution worker,5,main]) started.
+:generateDebugResValues (Thread[#822,Execution worker,5,main]) started.
+
+> Task :generateDebugResValues UP-TO-DATE
+Caching disabled for task ':generateDebugResValues' because:
+  Build cache is disabled
+Skipping task ':generateDebugResValues' as it is up-to-date.
+Resolve mutations for :generateDebugResources (Thread[#822,Execution worker,5,main]) started.
+:generateDebugResources (Thread[#822,Execution worker,5,main]) started.
+
+> Task :generateDebugResources UP-TO-DATE
+Caching disabled for task ':generateDebugResources' because:
+  Build cache is disabled
+Skipping task ':generateDebugResources' as it is up-to-date.
+Resolve mutations for :packageDebugResources (Thread[#822,Execution worker,5,main]) started.
+:packageDebugResources (Thread[#822,Execution worker,5,main]) started.
+
+> Task :packageDebugResources UP-TO-DATE
+Caching disabled for task ':packageDebugResources' because:
+  Build cache is disabled
+Skipping task ':packageDebugResources' as it is up-to-date.
+Resolve mutations for :parseDebugLocalResources (Thread[#822,Execution worker,5,main]) started.
+:parseDebugLocalResources (Thread[#822,Execution worker,5,main]) started.
+
+> Task :parseDebugLocalResources UP-TO-DATE
+Transforming android.jar with PlatformAttrTransform
+Transforming android.jar with PlatformAttrTransform
+Caching disabled for task ':parseDebugLocalResources' because:
+  Build cache is disabled
+Skipping task ':parseDebugLocalResources' as it is up-to-date.
+Resolve mutations for :generateDebugRFile (Thread[#822,Execution worker,5,main]) started.
+:generateDebugRFile (Thread[#822,Execution worker,5,main]) started.
+
+> Task :generateDebugRFile UP-TO-DATE
+Transforming android.jar with PlatformAttrTransform
+Caching disabled for task ':generateDebugRFile' because:
+  Build cache is disabled
+Skipping task ':generateDebugRFile' as it is up-to-date.
+work action resolve package-aware-r.txt (project :) (Thread[#822,Execution worker,5,main]) started.
+Resolve mutations for :javaPreCompileDebug (Thread[#822,Execution worker,5,main]) started.
+:javaPreCompileDebug (Thread[#822,Execution worker,5,main]) started.
+
+> Task :javaPreCompileDebug UP-TO-DATE
+Caching disabled for task ':javaPreCompileDebug' because:
+  Build cache is disabled
+Skipping task ':javaPreCompileDebug' as it is up-to-date.
+Resolve mutations for :compileDebugJavaWithJavac (Thread[#822,Execution worker,5,main]) started.
+:compileDebugJavaWithJavac (Thread[#822,Execution worker,5,main]) started.
+
+> Task :compileDebugJavaWithJavac UP-TO-DATE
+Transforming react-android-0.85.0-debug.aar (com.facebook.react:react-android:0.85.0) with JetifyTransform
+Transforming approov-android-sdk-3.5.3.aar (io.approov:approov-android-sdk:3.5.3) with JetifyTransform
+Transforming react-android-0.85.0-debug.aar (com.facebook.react:react-android:0.85.0) with AarToClassTransform
+Transforming approov-android-sdk-3.5.3.aar (io.approov:approov-android-sdk:3.5.3) with AarToClassTransform
+Transforming appcompat-resources-1.7.0.aar (androidx.appcompat:appcompat-resources:1.7.0) with JetifyTransform
+Transforming activity-1.7.0.aar (androidx.activity:activity:1.7.0) with JetifyTransform
+Transforming drawerlayout-1.0.0.aar (androidx.drawerlayout:drawerlayout:1.0.0) with JetifyTransform
+Transforming vectordrawable-animated-1.1.0.aar (androidx.vectordrawable:vectordrawable-animated:1.1.0) with JetifyTransform
+Transforming drawerlayout-1.0.0.aar (androidx.drawerlayout:drawerlayout:1.0.0) with AarToClassTransform
+Transforming viewpager-1.0.0.aar (androidx.viewpager:viewpager:1.0.0) with JetifyTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with JetifyTransform
+Transforming bcprov-jdk15to18-1.77.jar (org.bouncycastle:bcprov-jdk15to18:1.77) with JetifyTransform
+Transforming appcompat-resources-1.7.0.aar (androidx.appcompat:appcompat-resources:1.7.0) with AarToClassTransform
+Transforming bcprov-jdk15to18-1.77.jar (org.bouncycastle:bcprov-jdk15to18:1.77) with IdentityTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with AarToClassTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with JetifyTransform
+Transforming viewpager-1.0.0.aar (androidx.viewpager:viewpager:1.0.0) with AarToClassTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with JetifyTransform
+Transforming lifecycle-common-2.6.2.jar (androidx.lifecycle:lifecycle-common:2.6.2) with JetifyTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with JetifyTransform
+Transforming vectordrawable-animated-1.1.0.aar (androidx.vectordrawable:vectordrawable-animated:1.1.0) with AarToClassTransform
+Transforming fragment-1.5.4.aar (androidx.fragment:fragment:1.5.4) with JetifyTransform
+Transforming lifecycle-livedata-core-2.6.2.aar (androidx.lifecycle:lifecycle-livedata-core:2.6.2) with JetifyTransform
+Transforming swiperefreshlayout-1.1.0.aar (androidx.swiperefreshlayout:swiperefreshlayout:1.1.0) with JetifyTransform
+Transforming appcompat-1.7.0.aar (androidx.appcompat:appcompat:1.7.0) with JetifyTransform
+Transforming activity-1.7.0.aar (androidx.activity:activity:1.7.0) with AarToClassTransform
+Transforming appcompat-1.7.0.aar (androidx.appcompat:appcompat:1.7.0) with AarToClassTransform
+Transforming swiperefreshlayout-1.1.0.aar (androidx.swiperefreshlayout:swiperefreshlayout:1.1.0) with AarToClassTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with JetifyTransform
+Transforming lifecycle-livedata-core-2.6.2.aar (androidx.lifecycle:lifecycle-livedata-core:2.6.2) with AarToClassTransform
+Transforming fragment-1.5.4.aar (androidx.fragment:fragment:1.5.4) with AarToClassTransform
+Transforming jsr305-3.0.2.jar (com.google.code.findbugs:jsr305:3.0.2) with IdentityTransform
+Transforming lifecycle-common-2.6.2.jar (androidx.lifecycle:lifecycle-common:2.6.2) with IdentityTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with AarToClassTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with AarToClassTransform
+Transforming lifecycle-livedata-2.6.2.aar (androidx.lifecycle:lifecycle-livedata:2.6.2) with JetifyTransform
+Transforming loader-1.0.0.aar (androidx.loader:loader:1.0.0) with JetifyTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with JetifyTransform
+Transforming loader-1.0.0.aar (androidx.loader:loader:1.0.0) with AarToClassTransform
+Transforming lifecycle-livedata-2.6.2.aar (androidx.lifecycle:lifecycle-livedata:2.6.2) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with JetifyTransform
+Transforming core-ktx-1.13.1.aar (androidx.core:core-ktx:1.13.1) with JetifyTransform
+Transforming lifecycle-viewmodel-savedstate-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2) with JetifyTransform
+Transforming lifecycle-runtime-2.6.2.aar (androidx.lifecycle:lifecycle-runtime:2.6.2) with JetifyTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with AarToClassTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming lifecycle-runtime-2.6.2.aar (androidx.lifecycle:lifecycle-runtime:2.6.2) with AarToClassTransform
+Transforming lifecycle-viewmodel-savedstate-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2) with AarToClassTransform
+Transforming core-ktx-1.13.1.aar (androidx.core:core-ktx:1.13.1) with AarToClassTransform
+Transforming javax.inject-1.jar (javax.inject:javax.inject:1) with IdentityTransform
+Transforming savedstate-1.2.1.aar (androidx.savedstate:savedstate:1.2.1) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming core-common-2.2.0.jar (androidx.arch.core:core-common:2.2.0) with JetifyTransform
+Transforming annotation-jvm-1.6.0.jar (androidx.annotation:annotation-jvm:1.6.0) with JetifyTransform
+Transforming collection-1.1.0.jar (androidx.collection:collection:1.1.0) with JetifyTransform
+Transforming versionedparcelable-1.1.1.aar (androidx.versionedparcelable:versionedparcelable:1.1.1) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with AarToClassTransform
+Transforming savedstate-1.2.1.aar (androidx.savedstate:savedstate:1.2.1) with AarToClassTransform
+Transforming cursoradapter-1.0.0.aar (androidx.cursoradapter:cursoradapter:1.0.0) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with AarToClassTransform
+Transforming middleware-3.6.0.aar (com.facebook.fresco:middleware:3.6.0) with JetifyTransform
+Transforming ui-common-3.6.0.aar (com.facebook.fresco:ui-common:3.6.0) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with AarToClassTransform
+Transforming cursoradapter-1.0.0.aar (androidx.cursoradapter:cursoradapter:1.0.0) with AarToClassTransform
+Transforming okhttp-urlconnection-4.9.2.jar (com.squareup.okhttp3:okhttp-urlconnection:4.9.2) with JetifyTransform
+Transforming imagepipeline-okhttp3-3.6.0.aar (com.facebook.fresco:imagepipeline-okhttp3:3.6.0) with JetifyTransform
+Transforming fresco-3.6.0.aar (com.facebook.fresco:fresco:3.6.0) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with AarToClassTransform
+Transforming versionedparcelable-1.1.1.aar (androidx.versionedparcelable:versionedparcelable:1.1.1) with AarToClassTransform
+Transforming collection-1.1.0.jar (androidx.collection:collection:1.1.0) with IdentityTransform
+Transforming fbcore-3.6.0.aar (com.facebook.fresco:fbcore:3.6.0) with JetifyTransform
+Transforming fbcore-3.6.0.aar (com.facebook.fresco:fbcore:3.6.0) with AarToClassTransform
+Transforming annotation-jvm-1.6.0.jar (androidx.annotation:annotation-jvm:1.6.0) with IdentityTransform
+Transforming core-common-2.2.0.jar (androidx.arch.core:core-common:2.2.0) with IdentityTransform
+Transforming kotlinx-coroutines-android-1.6.4.jar (org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4) with JetifyTransform
+Transforming kotlin-stdlib-jdk8-1.8.0.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.0) with JetifyTransform
+Transforming core-runtime-2.2.0.aar (androidx.arch.core:core-runtime:2.2.0) with JetifyTransform
+Transforming kotlin-stdlib-jdk8-1.8.0.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.0) with IdentityTransform
+Transforming kotlinx-coroutines-android-1.6.4.jar (org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4) with IdentityTransform
+Transforming annotation-experimental-1.4.0.aar (androidx.annotation:annotation-experimental:1.4.0) with JetifyTransform
+Transforming kotlinx-coroutines-core-jvm-1.6.4.jar (org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.6.4) with JetifyTransform
+Transforming drawee-3.6.0.aar (com.facebook.fresco:drawee:3.6.0) with JetifyTransform
+Transforming okio-jvm-2.9.0.jar (com.squareup.okio:okio:2.9.0) with JetifyTransform
+Transforming fresco-3.6.0.aar (com.facebook.fresco:fresco:3.6.0) with AarToClassTransform
+Transforming imagepipeline-okhttp3-3.6.0.aar (com.facebook.fresco:imagepipeline-okhttp3:3.6.0) with AarToClassTransform
+Transforming okhttp-urlconnection-4.9.2.jar (com.squareup.okhttp3:okhttp-urlconnection:4.9.2) with IdentityTransform
+Transforming imagepipeline-base-3.6.0.aar (com.facebook.fresco:imagepipeline-base:3.6.0) with JetifyTransform
+Transforming imagepipeline-base-3.6.0.aar (com.facebook.fresco:imagepipeline-base:3.6.0) with AarToClassTransform
+Transforming okhttp-4.9.2.jar (com.squareup.okhttp3:okhttp:4.9.2) with JetifyTransform
+Transforming kotlin-stdlib-2.1.20.jar (org.jetbrains.kotlin:kotlin-stdlib:2.1.20) with JetifyTransform
+Transforming ui-common-3.6.0.aar (com.facebook.fresco:ui-common:3.6.0) with AarToClassTransform
+Transforming middleware-3.6.0.aar (com.facebook.fresco:middleware:3.6.0) with AarToClassTransform
+Transforming kotlin-stdlib-2.1.20.jar (org.jetbrains.kotlin:kotlin-stdlib:2.1.20) with IdentityTransform
+Transforming tracing-1.1.0.aar (androidx.tracing:tracing:1.1.0) with JetifyTransform
+Transforming autofill-1.1.0.aar (androidx.autofill:autofill:1.1.0) with JetifyTransform
+Transforming autofill-1.1.0.aar (androidx.autofill:autofill:1.1.0) with AarToClassTransform
+Transforming okhttp-4.9.2.jar (com.squareup.okhttp3:okhttp:4.9.2) with IdentityTransform
+Transforming fbjni-0.7.0.aar (com.facebook.fbjni:fbjni:0.7.0) with JetifyTransform
+Transforming fbjni-0.7.0.aar (com.facebook.fbjni:fbjni:0.7.0) with AarToClassTransform
+Transforming kotlin-stdlib-jdk7-1.8.0.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0) with JetifyTransform
+Transforming kotlin-stdlib-jdk7-1.8.0.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0) with IdentityTransform
+Transforming imagepipeline-3.6.0.aar (com.facebook.fresco:imagepipeline:3.6.0) with JetifyTransform
+Transforming annotation-0.12.1.jar (com.facebook.soloader:annotation:0.12.1) with JetifyTransform
+Transforming annotation-0.12.1.jar (com.facebook.soloader:annotation:0.12.1) with IdentityTransform
+Transforming okio-jvm-2.9.0.jar (com.squareup.okio:okio:2.9.0) with IdentityTransform
+Transforming infer-annotation-0.18.0.jar (com.facebook.infer.annotation:infer-annotation:0.18.0) with JetifyTransform
+Transforming drawee-3.6.0.aar (com.facebook.fresco:drawee:3.6.0) with AarToClassTransform
+Transforming kotlinx-coroutines-core-jvm-1.6.4.jar (org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.6.4) with IdentityTransform
+Transforming ui-core-3.6.0.aar (com.facebook.fresco:ui-core:3.6.0) with JetifyTransform
+Transforming annotation-experimental-1.4.0.aar (androidx.annotation:annotation-experimental:1.4.0) with AarToClassTransform
+Transforming core-runtime-2.2.0.aar (androidx.arch.core:core-runtime:2.2.0) with AarToClassTransform
+Transforming memory-type-native-3.6.0.aar (com.facebook.fresco:memory-type-native:3.6.0) with JetifyTransform
+Transforming ui-core-3.6.0.aar (com.facebook.fresco:ui-core:3.6.0) with AarToClassTransform
+Transforming memory-type-ashmem-3.6.0.aar (com.facebook.fresco:memory-type-ashmem:3.6.0) with JetifyTransform
+Transforming imagepipeline-native-3.6.0.aar (com.facebook.fresco:imagepipeline-native:3.6.0) with JetifyTransform
+Transforming kotlin-annotations-jvm-1.3.72.jar (org.jetbrains.kotlin:kotlin-annotations-jvm:1.3.72) with JetifyTransform
+Transforming infer-annotation-0.18.0.jar (com.facebook.infer.annotation:infer-annotation:0.18.0) with IdentityTransform
+Transforming imagepipeline-3.6.0.aar (com.facebook.fresco:imagepipeline:3.6.0) with AarToClassTransform
+Transforming nativeimagetranscoder-3.6.0.aar (com.facebook.fresco:nativeimagetranscoder:3.6.0) with JetifyTransform
+Transforming nativeloader-0.12.1.jar (com.facebook.soloader:nativeloader:0.12.1) with JetifyTransform
+Transforming soloader-0.12.1.aar (com.facebook.soloader:soloader:0.12.1) with JetifyTransform
+Transforming tracing-1.1.0.aar (androidx.tracing:tracing:1.1.0) with AarToClassTransform
+Transforming annotations-13.0.jar (org.jetbrains:annotations:13.0) with JetifyTransform
+Transforming soloader-0.12.1.aar (com.facebook.soloader:soloader:0.12.1) with AarToClassTransform
+Transforming nativeloader-0.12.1.jar (com.facebook.soloader:nativeloader:0.12.1) with IdentityTransform
+Transforming nativeimagetranscoder-3.6.0.aar (com.facebook.fresco:nativeimagetranscoder:3.6.0) with AarToClassTransform
+Transforming proguard-annotations-1.19.0.jar (com.facebook.yoga:proguard-annotations:1.19.0) with JetifyTransform
+Transforming kotlin-annotations-jvm-1.3.72.jar (org.jetbrains.kotlin:kotlin-annotations-jvm:1.3.72) with IdentityTransform
+Transforming imagepipeline-native-3.6.0.aar (com.facebook.fresco:imagepipeline-native:3.6.0) with AarToClassTransform
+Transforming nativeimagefilters-3.6.0.aar (com.facebook.fresco:nativeimagefilters:3.6.0) with JetifyTransform
+Transforming memory-type-ashmem-3.6.0.aar (com.facebook.fresco:memory-type-ashmem:3.6.0) with AarToClassTransform
+Transforming memory-type-native-3.6.0.aar (com.facebook.fresco:memory-type-native:3.6.0) with AarToClassTransform
+Transforming memory-type-java-3.6.0.aar (com.facebook.fresco:memory-type-java:3.6.0) with JetifyTransform
+Transforming nativeimagefilters-3.6.0.aar (com.facebook.fresco:nativeimagefilters:3.6.0) with AarToClassTransform
+Transforming proguard-annotations-1.19.0.jar (com.facebook.yoga:proguard-annotations:1.19.0) with IdentityTransform
+Transforming annotations-13.0.jar (org.jetbrains:annotations:13.0) with IdentityTransform
+Transforming memory-type-java-3.6.0.aar (com.facebook.fresco:memory-type-java:3.6.0) with AarToClassTransform
+Custom actions are attached to task ':compileDebugJavaWithJavac'.
+Caching disabled for task ':compileDebugJavaWithJavac' because:
+  Build cache is disabled
+Skipping task ':compileDebugJavaWithJavac' as it is up-to-date.
+Resolve mutations for :bundleLibCompileToJarDebug (Thread[#822,Execution worker,5,main]) started.
+:bundleLibCompileToJarDebug (Thread[#822,Execution worker,5,main]) started.
+
+> Task :bundleLibCompileToJarDebug UP-TO-DATE
+Caching disabled for task ':bundleLibCompileToJarDebug' because:
+  Build cache is disabled
+  Simple merging task
+Skipping task ':bundleLibCompileToJarDebug' as it is up-to-date.
+work action resolve classes.jar (project :) (Thread[#822,Execution worker,5,main]) started.
+Resolve mutations for :preDebugUnitTestBuild (Thread[#822,Execution worker,5,main]) started.
+:preDebugUnitTestBuild (Thread[#822,Execution worker,5,main]) started.
+
+> Task :preDebugUnitTestBuild UP-TO-DATE
+Skipping task ':preDebugUnitTestBuild' as it has no actions.
+Resolve mutations for :generateDebugUnitTestStubRFile (Thread[#822,Execution worker,5,main]) started.
+:generateDebugUnitTestStubRFile (Thread[#822,Execution worker,5,main]) started.
+
+> Task :generateDebugUnitTestStubRFile UP-TO-DATE
+Transforming react-android-0.85.0-debug.aar (com.facebook.react:react-android:0.85.0) with JetifyTransform
+Transforming react-android-0.85.0-debug.aar (com.facebook.react:react-android:0.85.0) with ExtractAarTransform
+Transforming core-1.6.1.aar (androidx.test:core:1.6.1) with JetifyTransform
+Transforming react-android-0.85.0-debug.aar (com.facebook.react:react-android:0.85.0) with LibrarySymbolTableTransform
+Transforming core-1.6.1.aar (androidx.test:core:1.6.1) with ExtractAarTransform
+Transforming approov-android-sdk-3.5.3.aar (io.approov:approov-android-sdk:3.5.3) with JetifyTransform
+Transforming core-1.6.1.aar (androidx.test:core:1.6.1) with LibrarySymbolTableTransform
+Transforming approov-android-sdk-3.5.3.aar (io.approov:approov-android-sdk:3.5.3) with ExtractAarTransform
+Transforming approov-android-sdk-3.5.3.aar (io.approov:approov-android-sdk:3.5.3) with LibrarySymbolTableTransform
+Transforming appcompat-resources-1.7.0.aar (androidx.appcompat:appcompat-resources:1.7.0) with JetifyTransform
+Transforming appcompat-resources-1.7.0.aar (androidx.appcompat:appcompat-resources:1.7.0) with ExtractAarTransform
+Transforming appcompat-resources-1.7.0.aar (androidx.appcompat:appcompat-resources:1.7.0) with LibrarySymbolTableTransform
+Transforming appcompat-1.7.0.aar (androidx.appcompat:appcompat:1.7.0) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with ExtractAarTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with ExtractAarTransform
+Transforming appcompat-1.7.0.aar (androidx.appcompat:appcompat:1.7.0) with ExtractAarTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with LibrarySymbolTableTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with LibrarySymbolTableTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with ExtractAarTransform
+Transforming appcompat-1.7.0.aar (androidx.appcompat:appcompat:1.7.0) with LibrarySymbolTableTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with LibrarySymbolTableTransform
+Transforming fragment-1.5.4.aar (androidx.fragment:fragment:1.5.4) with JetifyTransform
+Transforming fragment-1.5.4.aar (androidx.fragment:fragment:1.5.4) with ExtractAarTransform
+Transforming fragment-1.5.4.aar (androidx.fragment:fragment:1.5.4) with LibrarySymbolTableTransform
+Transforming activity-1.7.0.aar (androidx.activity:activity:1.7.0) with JetifyTransform
+Transforming activity-1.7.0.aar (androidx.activity:activity:1.7.0) with ExtractAarTransform
+Transforming activity-1.7.0.aar (androidx.activity:activity:1.7.0) with LibrarySymbolTableTransform
+Transforming autofill-1.1.0.aar (androidx.autofill:autofill:1.1.0) with JetifyTransform
+Transforming autofill-1.1.0.aar (androidx.autofill:autofill:1.1.0) with ExtractAarTransform
+Transforming emoji2-1.3.0.aar (androidx.emoji2:emoji2:1.3.0) with JetifyTransform
+Transforming emoji2-views-helper-1.3.0.aar (androidx.emoji2:emoji2-views-helper:1.3.0) with JetifyTransform
+Transforming emoji2-1.3.0.aar (androidx.emoji2:emoji2:1.3.0) with ExtractAarTransform
+Transforming autofill-1.1.0.aar (androidx.autofill:autofill:1.1.0) with LibrarySymbolTableTransform
+Transforming emoji2-1.3.0.aar (androidx.emoji2:emoji2:1.3.0) with LibrarySymbolTableTransform
+Transforming emoji2-views-helper-1.3.0.aar (androidx.emoji2:emoji2-views-helper:1.3.0) with ExtractAarTransform
+Transforming swiperefreshlayout-1.1.0.aar (androidx.swiperefreshlayout:swiperefreshlayout:1.1.0) with JetifyTransform
+Transforming emoji2-views-helper-1.3.0.aar (androidx.emoji2:emoji2-views-helper:1.3.0) with LibrarySymbolTableTransform
+Transforming swiperefreshlayout-1.1.0.aar (androidx.swiperefreshlayout:swiperefreshlayout:1.1.0) with ExtractAarTransform
+Transforming swiperefreshlayout-1.1.0.aar (androidx.swiperefreshlayout:swiperefreshlayout:1.1.0) with LibrarySymbolTableTransform
+Transforming drawerlayout-1.0.0.aar (androidx.drawerlayout:drawerlayout:1.0.0) with JetifyTransform
+Transforming drawerlayout-1.0.0.aar (androidx.drawerlayout:drawerlayout:1.0.0) with ExtractAarTransform
+Transforming drawerlayout-1.0.0.aar (androidx.drawerlayout:drawerlayout:1.0.0) with LibrarySymbolTableTransform
+Transforming vectordrawable-animated-1.1.0.aar (androidx.vectordrawable:vectordrawable-animated:1.1.0) with JetifyTransform
+Transforming vectordrawable-animated-1.1.0.aar (androidx.vectordrawable:vectordrawable-animated:1.1.0) with ExtractAarTransform
+Transforming vectordrawable-animated-1.1.0.aar (androidx.vectordrawable:vectordrawable-animated:1.1.0) with LibrarySymbolTableTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with JetifyTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with ExtractAarTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with LibrarySymbolTableTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with JetifyTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with ExtractAarTransform
+Transforming vectordrawable-1.1.0.aar (androidx.vectordrawable:vectordrawable:1.1.0) with LibrarySymbolTableTransform
+Transforming fresco-3.6.0.aar (com.facebook.fresco:fresco:3.6.0) with JetifyTransform
+Transforming fresco-3.6.0.aar (com.facebook.fresco:fresco:3.6.0) with ExtractAarTransform
+Transforming fresco-3.6.0.aar (com.facebook.fresco:fresco:3.6.0) with LibrarySymbolTableTransform
+Transforming imagepipeline-okhttp3-3.6.0.aar (com.facebook.fresco:imagepipeline-okhttp3:3.6.0) with JetifyTransform
+Transforming imagepipeline-okhttp3-3.6.0.aar (com.facebook.fresco:imagepipeline-okhttp3:3.6.0) with ExtractAarTransform
+Transforming imagepipeline-okhttp3-3.6.0.aar (com.facebook.fresco:imagepipeline-okhttp3:3.6.0) with LibrarySymbolTableTransform
+Transforming drawee-3.6.0.aar (com.facebook.fresco:drawee:3.6.0) with JetifyTransform
+Transforming drawee-3.6.0.aar (com.facebook.fresco:drawee:3.6.0) with ExtractAarTransform
+Transforming drawee-3.6.0.aar (com.facebook.fresco:drawee:3.6.0) with LibrarySymbolTableTransform
+Transforming nativeimagefilters-3.6.0.aar (com.facebook.fresco:nativeimagefilters:3.6.0) with JetifyTransform
+Transforming nativeimagefilters-3.6.0.aar (com.facebook.fresco:nativeimagefilters:3.6.0) with ExtractAarTransform
+Transforming nativeimagefilters-3.6.0.aar (com.facebook.fresco:nativeimagefilters:3.6.0) with LibrarySymbolTableTransform
+Transforming memory-type-native-3.6.0.aar (com.facebook.fresco:memory-type-native:3.6.0) with JetifyTransform
+Transforming memory-type-native-3.6.0.aar (com.facebook.fresco:memory-type-native:3.6.0) with ExtractAarTransform
+Transforming memory-type-native-3.6.0.aar (com.facebook.fresco:memory-type-native:3.6.0) with LibrarySymbolTableTransform
+Transforming memory-type-java-3.6.0.aar (com.facebook.fresco:memory-type-java:3.6.0) with JetifyTransform
+Transforming memory-type-java-3.6.0.aar (com.facebook.fresco:memory-type-java:3.6.0) with ExtractAarTransform
+Transforming memory-type-java-3.6.0.aar (com.facebook.fresco:memory-type-java:3.6.0) with LibrarySymbolTableTransform
+Transforming imagepipeline-native-3.6.0.aar (com.facebook.fresco:imagepipeline-native:3.6.0) with JetifyTransform
+Transforming imagepipeline-native-3.6.0.aar (com.facebook.fresco:imagepipeline-native:3.6.0) with ExtractAarTransform
+Transforming imagepipeline-native-3.6.0.aar (com.facebook.fresco:imagepipeline-native:3.6.0) with LibrarySymbolTableTransform
+Transforming memory-type-ashmem-3.6.0.aar (com.facebook.fresco:memory-type-ashmem:3.6.0) with JetifyTransform
+Transforming memory-type-ashmem-3.6.0.aar (com.facebook.fresco:memory-type-ashmem:3.6.0) with ExtractAarTransform
+Transforming memory-type-ashmem-3.6.0.aar (com.facebook.fresco:memory-type-ashmem:3.6.0) with LibrarySymbolTableTransform
+Transforming imagepipeline-3.6.0.aar (com.facebook.fresco:imagepipeline:3.6.0) with JetifyTransform
+Transforming imagepipeline-3.6.0.aar (com.facebook.fresco:imagepipeline:3.6.0) with ExtractAarTransform
+Transforming imagepipeline-3.6.0.aar (com.facebook.fresco:imagepipeline:3.6.0) with LibrarySymbolTableTransform
+Transforming nativeimagetranscoder-3.6.0.aar (com.facebook.fresco:nativeimagetranscoder:3.6.0) with JetifyTransform
+Transforming nativeimagetranscoder-3.6.0.aar (com.facebook.fresco:nativeimagetranscoder:3.6.0) with ExtractAarTransform
+Transforming nativeimagetranscoder-3.6.0.aar (com.facebook.fresco:nativeimagetranscoder:3.6.0) with LibrarySymbolTableTransform
+Transforming imagepipeline-base-3.6.0.aar (com.facebook.fresco:imagepipeline-base:3.6.0) with JetifyTransform
+Transforming imagepipeline-base-3.6.0.aar (com.facebook.fresco:imagepipeline-base:3.6.0) with ExtractAarTransform
+Transforming imagepipeline-base-3.6.0.aar (com.facebook.fresco:imagepipeline-base:3.6.0) with LibrarySymbolTableTransform
+Transforming middleware-3.6.0.aar (com.facebook.fresco:middleware:3.6.0) with JetifyTransform
+Transforming middleware-3.6.0.aar (com.facebook.fresco:middleware:3.6.0) with ExtractAarTransform
+Transforming urimod-3.6.0.aar (com.facebook.fresco:urimod:3.6.0) with JetifyTransform
+Transforming vito-source-3.6.0.aar (com.facebook.fresco:vito-source:3.6.0) with JetifyTransform
+Transforming middleware-3.6.0.aar (com.facebook.fresco:middleware:3.6.0) with LibrarySymbolTableTransform
+Transforming vito-source-3.6.0.aar (com.facebook.fresco:vito-source:3.6.0) with ExtractAarTransform
+Transforming urimod-3.6.0.aar (com.facebook.fresco:urimod:3.6.0) with ExtractAarTransform
+Transforming vito-source-3.6.0.aar (com.facebook.fresco:vito-source:3.6.0) with LibrarySymbolTableTransform
+Transforming ui-common-3.6.0.aar (com.facebook.fresco:ui-common:3.6.0) with JetifyTransform
+Transforming urimod-3.6.0.aar (com.facebook.fresco:urimod:3.6.0) with LibrarySymbolTableTransform
+Transforming ui-common-3.6.0.aar (com.facebook.fresco:ui-common:3.6.0) with ExtractAarTransform
+Transforming ui-common-3.6.0.aar (com.facebook.fresco:ui-common:3.6.0) with LibrarySymbolTableTransform
+Transforming fbcore-3.6.0.aar (com.facebook.fresco:fbcore:3.6.0) with JetifyTransform
+Transforming soloader-3.6.0.aar (com.facebook.fresco:soloader:3.6.0) with JetifyTransform
+Transforming fbcore-3.6.0.aar (com.facebook.fresco:fbcore:3.6.0) with ExtractAarTransform
+Transforming soloader-3.6.0.aar (com.facebook.fresco:soloader:3.6.0) with ExtractAarTransform
+Transforming fbcore-3.6.0.aar (com.facebook.fresco:fbcore:3.6.0) with LibrarySymbolTableTransform
+Transforming soloader-3.6.0.aar (com.facebook.fresco:soloader:3.6.0) with LibrarySymbolTableTransform
+Transforming viewpager-1.0.0.aar (androidx.viewpager:viewpager:1.0.0) with JetifyTransform
+Transforming viewpager-1.0.0.aar (androidx.viewpager:viewpager:1.0.0) with ExtractAarTransform
+Transforming viewpager-1.0.0.aar (androidx.viewpager:viewpager:1.0.0) with LibrarySymbolTableTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with JetifyTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with ExtractAarTransform
+Transforming customview-1.0.0.aar (androidx.customview:customview:1.0.0) with LibrarySymbolTableTransform
+Transforming loader-1.0.0.aar (androidx.loader:loader:1.0.0) with JetifyTransform
+Transforming loader-1.0.0.aar (androidx.loader:loader:1.0.0) with ExtractAarTransform
+Transforming loader-1.0.0.aar (androidx.loader:loader:1.0.0) with LibrarySymbolTableTransform
+Transforming savedstate-1.2.1.aar (androidx.savedstate:savedstate:1.2.1) with JetifyTransform
+Transforming savedstate-1.2.1.aar (androidx.savedstate:savedstate:1.2.1) with ExtractAarTransform
+Transforming savedstate-1.2.1.aar (androidx.savedstate:savedstate:1.2.1) with LibrarySymbolTableTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with JetifyTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with ExtractAarTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with LibrarySymbolTableTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with JetifyTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with ExtractAarTransform
+Transforming lifecycle-viewmodel-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel:2.6.2) with LibrarySymbolTableTransform
+Transforming lifecycle-livedata-core-2.6.2.aar (androidx.lifecycle:lifecycle-livedata-core:2.6.2) with JetifyTransform
+Transforming lifecycle-livedata-core-2.6.2.aar (androidx.lifecycle:lifecycle-livedata-core:2.6.2) with ExtractAarTransform
+Transforming lifecycle-livedata-core-2.6.2.aar (androidx.lifecycle:lifecycle-livedata-core:2.6.2) with LibrarySymbolTableTransform
+Transforming lifecycle-process-2.6.2.aar (androidx.lifecycle:lifecycle-process:2.6.2) with JetifyTransform
+Transforming lifecycle-livedata-2.6.2.aar (androidx.lifecycle:lifecycle-livedata:2.6.2) with JetifyTransform
+Transforming lifecycle-process-2.6.2.aar (androidx.lifecycle:lifecycle-process:2.6.2) with ExtractAarTransform
+Transforming lifecycle-livedata-2.6.2.aar (androidx.lifecycle:lifecycle-livedata:2.6.2) with ExtractAarTransform
+Transforming lifecycle-process-2.6.2.aar (androidx.lifecycle:lifecycle-process:2.6.2) with LibrarySymbolTableTransform
+Transforming lifecycle-livedata-2.6.2.aar (androidx.lifecycle:lifecycle-livedata:2.6.2) with LibrarySymbolTableTransform
+Transforming lifecycle-viewmodel-savedstate-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2) with JetifyTransform
+Transforming lifecycle-viewmodel-savedstate-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2) with ExtractAarTransform
+Transforming lifecycle-viewmodel-savedstate-2.6.2.aar (androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2) with LibrarySymbolTableTransform
+Transforming core-ktx-1.13.1.aar (androidx.core:core-ktx:1.13.1) with JetifyTransform
+Transforming core-ktx-1.13.1.aar (androidx.core:core-ktx:1.13.1) with ExtractAarTransform
+Transforming core-ktx-1.13.1.aar (androidx.core:core-ktx:1.13.1) with LibrarySymbolTableTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with ExtractAarTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with LibrarySymbolTableTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with JetifyTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with ExtractAarTransform
+Transforming core-1.13.1.aar (androidx.core:core:1.13.1) with LibrarySymbolTableTransform
+Transforming lifecycle-runtime-2.6.2.aar (androidx.lifecycle:lifecycle-runtime:2.6.2) with JetifyTransform
+Transforming lifecycle-runtime-2.6.2.aar (androidx.lifecycle:lifecycle-runtime:2.6.2) with ExtractAarTransform
+Transforming lifecycle-runtime-2.6.2.aar (androidx.lifecycle:lifecycle-runtime:2.6.2) with LibrarySymbolTableTransform
+Transforming tracing-1.1.0.aar (androidx.tracing:tracing:1.1.0) with JetifyTransform
+Transforming tracing-1.1.0.aar (androidx.tracing:tracing:1.1.0) with ExtractAarTransform
+Transforming tracing-1.1.0.aar (androidx.tracing:tracing:1.1.0) with LibrarySymbolTableTransform
+Transforming profileinstaller-1.3.1.aar (androidx.profileinstaller:profileinstaller:1.3.1) with JetifyTransform
+Transforming startup-runtime-1.1.1.aar (androidx.startup:startup-runtime:1.1.1) with JetifyTransform
+Transforming cursoradapter-1.0.0.aar (androidx.cursoradapter:cursoradapter:1.0.0) with JetifyTransform
+Transforming startup-runtime-1.1.1.aar (androidx.startup:startup-runtime:1.1.1) with ExtractAarTransform
+Transforming profileinstaller-1.3.1.aar (androidx.profileinstaller:profileinstaller:1.3.1) with ExtractAarTransform
+Transforming startup-runtime-1.1.1.aar (androidx.startup:startup-runtime:1.1.1) with LibrarySymbolTableTransform
+Transforming cursoradapter-1.0.0.aar (androidx.cursoradapter:cursoradapter:1.0.0) with ExtractAarTransform
+Transforming cursoradapter-1.0.0.aar (androidx.cursoradapter:cursoradapter:1.0.0) with LibrarySymbolTableTransform
+Transforming profileinstaller-1.3.1.aar (androidx.profileinstaller:profileinstaller:1.3.1) with LibrarySymbolTableTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with ExtractAarTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with LibrarySymbolTableTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with JetifyTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with ExtractAarTransform
+Transforming interpolator-1.0.0.aar (androidx.interpolator:interpolator:1.0.0) with LibrarySymbolTableTransform
+Transforming versionedparcelable-1.1.1.aar (androidx.versionedparcelable:versionedparcelable:1.1.1) with JetifyTransform
+Transforming versionedparcelable-1.1.1.aar (androidx.versionedparcelable:versionedparcelable:1.1.1) with ExtractAarTransform
+Transforming versionedparcelable-1.1.1.aar (androidx.versionedparcelable:versionedparcelable:1.1.1) with LibrarySymbolTableTransform
+Transforming core-runtime-2.2.0.aar (androidx.arch.core:core-runtime:2.2.0) with JetifyTransform
+Transforming core-runtime-2.2.0.aar (androidx.arch.core:core-runtime:2.2.0) with ExtractAarTransform
+Transforming core-runtime-2.2.0.aar (androidx.arch.core:core-runtime:2.2.0) with LibrarySymbolTableTransform
+Transforming ui-core-3.6.0.aar (com.facebook.fresco:ui-core:3.6.0) with JetifyTransform
+Transforming ui-core-3.6.0.aar (com.facebook.fresco:ui-core:3.6.0) with ExtractAarTransform
+Transforming ui-core-3.6.0.aar (com.facebook.fresco:ui-core:3.6.0) with LibrarySymbolTableTransform
+Transforming annotation-experimental-1.4.0.aar (androidx.annotation:annotation-experimental:1.4.0) with JetifyTransform
+Transforming annotation-experimental-1.4.0.aar (androidx.annotation:annotation-experimental:1.4.0) with ExtractAarTransform
+Transforming annotation-experimental-1.4.0.aar (androidx.annotation:annotation-experimental:1.4.0) with LibrarySymbolTableTransform
+Transforming fbjni-0.7.0.aar (com.facebook.fbjni:fbjni:0.7.0) with JetifyTransform
+Transforming fbjni-0.7.0.aar (com.facebook.fbjni:fbjni:0.7.0) with ExtractAarTransform
+Transforming espresso-idling-resource-3.5.1.aar (androidx.test.espresso:espresso-idling-resource:3.5.1) with JetifyTransform
+Transforming fbjni-0.7.0.aar (com.facebook.fbjni:fbjni:0.7.0) with LibrarySymbolTableTransform
+Transforming espresso-idling-resource-3.5.1.aar (androidx.test.espresso:espresso-idling-resource:3.5.1) with ExtractAarTransform
+Transforming soloader-0.12.1.aar (com.facebook.soloader:soloader:0.12.1) with JetifyTransform
+Transforming espresso-idling-resource-3.5.1.aar (androidx.test.espresso:espresso-idling-resource:3.5.1) with LibrarySymbolTableTransform
+Transforming soloader-0.12.1.aar (com.facebook.soloader:soloader:0.12.1) with ExtractAarTransform
+Transforming soloader-0.12.1.aar (com.facebook.soloader:soloader:0.12.1) with LibrarySymbolTableTransform
+Transforming android.jar with PlatformAttrTransform
+Caching disabled for task ':generateDebugUnitTestStubRFile' because:
+  Build cache is disabled
+Skipping task ':generateDebugUnitTestStubRFile' as it is up-to-date.
+Resolve mutations for :javaPreCompileDebugUnitTest (Thread[#822,Execution worker,5,main]) started.
+:javaPreCompileDebugUnitTest (Thread[#822,Execution worker,5,main]) started.
+
+> Task :javaPreCompileDebugUnitTest UP-TO-DATE
+Caching disabled for task ':javaPreCompileDebugUnitTest' because:
+  Build cache is disabled
+Skipping task ':javaPreCompileDebugUnitTest' as it is up-to-date.
+Resolve mutations for :prepareMiniSdkTestJars (Thread[#822,Execution worker,5,main]) started.
+:prepareMiniSdkTestJars (Thread[#822,Execution worker,5,main]) started.
+
+> Task :prepareMiniSdkTestJars
+Caching disabled for task ':prepareMiniSdkTestJars' because:
+  Build cache is disabled
+Task ':prepareMiniSdkTestJars' is not up-to-date because:
+  Task has not declared any outputs despite executing actions.
+Starting process 'command './gradlew''. Working directory: /Users/ivoliondov/Github/approov-service-react-native/android Command: ./gradlew -I /Users/ivoliondov/Github/approov-service-react-native/android/mini-sdk-init.gradle -p /Users/ivoliondov/Github/approov-service-react-native/android/../../core-service-layers-testing/mini-sdk/android :approov-sdk:bundleLibRuntimeToJarDebug
+Successfully started process 'command './gradlew''
+> Task :approov-sdk:preBuild UP-TO-DATE
+> Task :approov-sdk:preDebugBuild UP-TO-DATE
+> Task :approov-sdk:generateDebugResValues UP-TO-DATE
+> Task :approov-sdk:generateDebugResources UP-TO-DATE
+> Task :approov-sdk:packageDebugResources UP-TO-DATE
+> Task :approov-sdk:parseDebugLocalResources UP-TO-DATE
+> Task :approov-sdk:generateDebugRFile UP-TO-DATE
+> Task :approov-sdk:javaPreCompileDebug UP-TO-DATE
+> Task :approov-sdk:compileDebugJavaWithJavac UP-TO-DATE
+> Task :approov-sdk:bundleLibRuntimeToJarDebug UP-TO-DATE
+
+BUILD SUCCESSFUL in 425ms
+8 actionable tasks: 8 up-to-date
+Resolve mutations for :compileDebugUnitTestJavaWithJavac (Thread[#822,Execution worker,5,main]) started.
+:compileDebugUnitTestJavaWithJavac (Thread[#822,Execution worker,5,main]) started.
+
+> Task :compileDebugUnitTestJavaWithJavac FAILED
+Transforming classes.jar with JetifyTransform
+Transforming classes.jar with IdentityTransform
+Transforming core-1.6.1.aar (androidx.test:core:1.6.1) with JetifyTransform
+Transforming core-1.6.1.aar (androidx.test:core:1.6.1) with AarToClassTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with AarToClassTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with JetifyTransform
+Transforming monitor-1.7.1.aar (androidx.test:monitor:1.7.1) with AarToClassTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with JetifyTransform
+Transforming annotations-23.0.0.jar (org.jetbrains:annotations:23.0.0) with IdentityTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with JetifyTransform
+Transforming listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar (com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava) with IdentityTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with JetifyTransform
+Transforming failureaccess-1.0.1.jar (com.google.guava:failureaccess:1.0.1) with IdentityTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with JetifyTransform
+Transforming javax.annotation-api-1.3.2.jar (javax.annotation:javax.annotation-api:1.3.2) with IdentityTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with JetifyTransform
+Transforming asm-commons-9.6.jar (org.ow2.asm:asm-commons:9.6) with IdentityTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with JetifyTransform
+Transforming asm-util-9.6.jar (org.ow2.asm:asm-util:9.6) with IdentityTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with JetifyTransform
+Transforming asm-analysis-9.6.jar (org.ow2.asm:asm-analysis:9.6) with IdentityTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with JetifyTransform
+Transforming asm-tree-9.6.jar (org.ow2.asm:asm-tree:9.6) with IdentityTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with JetifyTransform
+Transforming asm-9.6.jar (org.ow2.asm:asm:9.6) with IdentityTransform
+Invalidating in-memory cache of /Users/ivoliondov/.gradle/caches/journal-1/file-access.bin
+Transforming junit-4.13.2.jar (junit:junit:4.13.2) with JetifyTransform
+Transforming byte-buddy-agent-1.12.19.jar (net.bytebuddy:byte-buddy-agent:1.12.19) with JetifyTransform
+Transforming robolectric-4.11.1.jar (org.robolectric:robolectric:4.11.1) with JetifyTransform
+Transforming json-20231013.jar (org.json:json:20231013) with JetifyTransform
+Transforming mockito-inline-4.11.0.jar (org.mockito:mockito-inline:4.11.0) with JetifyTransform
+Transforming json-20231013.jar (org.json:json:20231013) with IdentityTransform
+Transforming mockito-inline-4.11.0.jar (org.mockito:mockito-inline:4.11.0) with IdentityTransform
+Transforming shadows-framework-4.11.1.jar (org.robolectric:shadows-framework:4.11.1) with JetifyTransform
+Transforming annotation-jvm-1.7.0-beta01.jar (androidx.annotation:annotation-jvm:1.7.0-beta01) with JetifyTransform
+Transforming concurrent-futures-ktx-1.1.0.jar (androidx.concurrent:concurrent-futures-ktx:1.1.0) with JetifyTransform
+Transforming kotlinx-coroutines-android-1.7.1.jar (org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1) with JetifyTransform
+Transforming byte-buddy-1.12.19.jar (net.bytebuddy:byte-buddy:1.12.19) with JetifyTransform
+Transforming concurrent-futures-1.1.0.jar (androidx.concurrent:concurrent-futures:1.1.0) with JetifyTransform
+Transforming byte-buddy-agent-1.12.19.jar (net.bytebuddy:byte-buddy-agent:1.12.19) with IdentityTransform
+Transforming robolectric-4.11.1.jar (org.robolectric:robolectric:4.11.1) with IdentityTransform
+Transforming hamcrest-core-1.3.jar (org.hamcrest:hamcrest-core:1.3) with JetifyTransform
+Transforming junit-4.13.2.jar (junit:junit:4.13.2) with IdentityTransform
+Transforming mockito-core-4.11.0.jar (org.mockito:mockito-core:4.11.0) with JetifyTransform
+Transforming hamcrest-core-1.3.jar (org.hamcrest:hamcrest-core:1.3) with IdentityTransform
+Transforming kotlin-stdlib-jdk7-1.8.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.20) with JetifyTransform
+Transforming kotlin-stdlib-jdk8-1.8.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.20) with JetifyTransform
+Transforming concurrent-futures-1.1.0.jar (androidx.concurrent:concurrent-futures:1.1.0) with IdentityTransform
+Transforming byte-buddy-1.12.19.jar (net.bytebuddy:byte-buddy:1.12.19) with IdentityTransform
+Transforming kotlinx-coroutines-android-1.7.1.jar (org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1) with IdentityTransform
+Transforming nativeruntime-4.11.1.jar (org.robolectric:nativeruntime:4.11.1) with JetifyTransform
+Transforming kotlinx-coroutines-core-jvm-1.7.1.jar (org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1) with JetifyTransform
+Transforming concurrent-futures-ktx-1.1.0.jar (androidx.concurrent:concurrent-futures-ktx:1.1.0) with IdentityTransform
+Transforming annotation-jvm-1.7.0-beta01.jar (androidx.annotation:annotation-jvm:1.7.0-beta01) with IdentityTransform
+Transforming shadows-framework-4.11.1.jar (org.robolectric:shadows-framework:4.11.1) with IdentityTransform
+Transforming plugins-maven-dependency-resolver-4.11.1.jar (org.robolectric:plugins-maven-dependency-resolver:4.11.1) with JetifyTransform
+Transforming kotlinx-coroutines-core-jvm-1.7.1.jar (org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1) with IdentityTransform
+Transforming nativeruntime-4.11.1.jar (org.robolectric:nativeruntime:4.11.1) with IdentityTransform
+Transforming utils-reflector-4.11.1.jar (org.robolectric:utils-reflector:4.11.1) with JetifyTransform
+Transforming pluginapi-4.11.1.jar (org.robolectric:pluginapi:4.11.1) with JetifyTransform
+Transforming sandbox-4.11.1.jar (org.robolectric:sandbox:4.11.1) with JetifyTransform
+Transforming kotlin-stdlib-jdk8-1.8.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.20) with IdentityTransform
+Transforming resources-4.11.1.jar (org.robolectric:resources:4.11.1) with JetifyTransform
+Transforming kotlin-stdlib-jdk7-1.8.20.jar (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.20) with IdentityTransform
+Transforming junit-4.11.1.jar (org.robolectric:junit:4.11.1) with JetifyTransform
+Transforming junit-4.11.1.jar (org.robolectric:junit:4.11.1) with IdentityTransform
+Transforming mockito-core-4.11.0.jar (org.mockito:mockito-core:4.11.0) with IdentityTransform
+Transforming annotations-4.11.1.jar (org.robolectric:annotations:4.11.1) with JetifyTransform
+Transforming checker-qual-3.12.0.jar (org.checkerframework:checker-qual:3.12.0) with JetifyTransform
+Transforming resources-4.11.1.jar (org.robolectric:resources:4.11.1) with IdentityTransform
+Transforming guava-31.1-jre.jar (com.google.guava:guava:31.1-jre) with JetifyTransform
+Transforming j2objc-annotations-1.3.jar (com.google.j2objc:j2objc-annotations:1.3) with JetifyTransform
+Transforming sandbox-4.11.1.jar (org.robolectric:sandbox:4.11.1) with IdentityTransform
+Transforming pluginapi-4.11.1.jar (org.robolectric:pluginapi:4.11.1) with IdentityTransform
+Transforming auto-value-annotations-1.10.4.jar (com.google.auto.value:auto-value-annotations:1.10.4) with JetifyTransform
+Transforming utils-reflector-4.11.1.jar (org.robolectric:utils-reflector:4.11.1) with IdentityTransform
+Transforming utils-4.11.1.jar (org.robolectric:utils:4.11.1) with JetifyTransform
+Transforming shadowapi-4.11.1.jar (org.robolectric:shadowapi:4.11.1) with JetifyTransform
+Transforming plugins-maven-dependency-resolver-4.11.1.jar (org.robolectric:plugins-maven-dependency-resolver:4.11.1) with IdentityTransform
+Transforming shadows-versioning-4.11.1.jar (org.robolectric:shadows-versioning:4.11.1) with JetifyTransform
+Transforming shadowapi-4.11.1.jar (org.robolectric:shadowapi:4.11.1) with IdentityTransform
+Transforming utils-4.11.1.jar (org.robolectric:utils:4.11.1) with IdentityTransform
+Transforming auto-value-annotations-1.10.4.jar (com.google.auto.value:auto-value-annotations:1.10.4) with IdentityTransform
+Transforming icu4j-73.2.jar (com.ibm.icu:icu4j:73.2) with JetifyTransform
+Transforming bcprov-jdk18on-1.76.jar (org.bouncycastle:bcprov-jdk18on:1.76) with JetifyTransform
+Transforming icu4j-73.2.jar (com.ibm.icu:icu4j:73.2) with IdentityTransform
+Transforming j2objc-annotations-1.3.jar (com.google.j2objc:j2objc-annotations:1.3) with IdentityTransform
+Transforming guava-31.1-jre.jar (com.google.guava:guava:31.1-jre) with IdentityTransform
+Transforming checker-qual-3.12.0.jar (org.checkerframework:checker-qual:3.12.0) with IdentityTransform
+Transforming error_prone_annotations-2.11.0.jar (com.google.errorprone:error_prone_annotations:2.11.0) with JetifyTransform
+Transforming annotations-4.11.1.jar (org.robolectric:annotations:4.11.1) with IdentityTransform
+Transforming error_prone_annotations-2.11.0.jar (com.google.errorprone:error_prone_annotations:2.11.0) with IdentityTransform
+Transforming bcprov-jdk18on-1.76.jar (org.bouncycastle:bcprov-jdk18on:1.76) with IdentityTransform
+Transforming sqlite4java-1.0.392.jar (com.almworks.sqlite4java:sqlite4java:1.0.392) with JetifyTransform
+Transforming shadows-versioning-4.11.1.jar (org.robolectric:shadows-versioning:4.11.1) with IdentityTransform
+Transforming sqlite4java-1.0.392.jar (com.almworks.sqlite4java:sqlite4java:1.0.392) with IdentityTransform
+Transforming classes.jar with JetifyTransform
+Transforming classes.jar with IdentityTransform
+Custom actions are attached to task ':compileDebugUnitTestJavaWithJavac'.
+Caching disabled for task ':compileDebugUnitTestJavaWithJavac' because:
+  Build cache is disabled
+Task ':compileDebugUnitTestJavaWithJavac' is not up-to-date because:
+  Input property 'stableSources' file /Users/ivoliondov/Github/approov-service-react-native/android/src/test/java/io/approov/reactnative/ApproovServiceMiniSdkTest.java has changed.
+Java compiler version 21 has deprecated support for compiling with source/target version 8.
+Try one of the following options:
+    1. [Recommended] Use Java toolchain with a lower language version
+    2. Set a higher source/target version
+    3. Use a lower version of the JDK running the build (if you're not using Java toolchain)
+For more details on how to configure these settings, see https://developer.android.com/build/jdks.
+To suppress this warning, set android.javaCompile.suppressSourceTargetDeprecationWarning=true in gradle.properties.
+Transforming classes.jar with JetifyTransform
+Transforming classes.jar with IdentityTransform
+Created classpath snapshot for incremental compilation in 0.006 secs.
+file or directory '/Users/ivoliondov/Github/approov-service-react-native/android/src/testDebug/java', not found
+Compiling with toolchain '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home'.
+file or directory '/Users/ivoliondov/Github/approov-service-react-native/android/src/testDebug/java', not found
+Compiling with JDK Java compiler API.
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+/Users/ivoliondov/Github/approov-service-react-native/android/src/test/java/io/approov/reactnative/ApproovServiceMiniSdkTest.java:161: error: cannot find symbol
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        ^
+  symbol:   class CompletableFuture
+  location: class ApproovServiceMiniSdkTest
+/Users/ivoliondov/Github/approov-service-react-native/android/src/test/java/io/approov/reactnative/ApproovServiceMiniSdkTest.java:161: error: cannot find symbol
+        CompletableFuture<Void> future = new CompletableFuture<>();
+                                             ^
+  symbol:   class CompletableFuture
+  location: class ApproovServiceMiniSdkTest
+/Users/ivoliondov/Github/approov-service-react-native/android/src/test/java/io/approov/reactnative/ApproovServiceMiniSdkTest.java:162: error: <anonymous io.approov.reactnative.ApproovServiceMiniSdkTest$1> is not abstract and does not override abstract method reject(Throwable,WritableMap) in Promise
+        Promise promise = new Promise() {
+                                        ^
+Note: /Users/ivoliondov/Github/approov-service-react-native/android/src/test/java/io/approov/reactnative/ApproovServiceMiniSdkTest.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+3 errors
+3 warnings
+Incremental compilation of 4 classes completed in 0.171 secs.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileDebugUnitTestJavaWithJavac'.
+> Compilation failed; see the compiler error output for details.
+
+* Try:
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.8/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1s
+12 actionable tasks: 2 executed, 10 up-to-date
+Watched directory hierarchies: [/Users/ivoliondov/Github/approov-service-react-native/android]

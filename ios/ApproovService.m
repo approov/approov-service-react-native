@@ -807,6 +807,14 @@ RCT_EXPORT_METHOD(prefetch) {
  */
 RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
   [Approov
       fetchSecureString:^(ApproovTokenFetchResult *result) {
         if (result.status == ApproovTokenFetchStatusUnknownKey)
@@ -893,6 +901,14 @@ RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
  */
 RCT_EXPORT_METHOD(setDataHashInToken : (NSString *)data resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
   ApproovLogI(@"setDataHashInToken");
   [Approov setDataHashInToken:data];
   resolve(nil);
@@ -912,6 +928,14 @@ RCT_EXPORT_METHOD(setDataHashInToken : (NSString *)data resolver : (
  */
 RCT_EXPORT_METHOD(fetchToken : (NSString *)url resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
   [Approov
       fetchApproovToken:^(ApproovTokenFetchResult *result) {
         ApproovLogI(@"fetchToken %@: %@", url,
@@ -992,6 +1016,15 @@ RCT_EXPORT_METHOD(getMessageSignature : (NSString *)message resolver : (
 RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
                       newDef resolver : (RCTPromiseResolveBlock)
                           resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+
   // determine the type of operation as the values themselves cannot be logged
   NSString *type = @"lookup";
   if (newDef != nil)
@@ -1059,6 +1092,14 @@ RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
  */
 RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
   [Approov
       fetchCustomJWT:^(ApproovTokenFetchResult *result) {
         ApproovLogI(@"fetchCustomJWT: %@",

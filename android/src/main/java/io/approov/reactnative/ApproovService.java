@@ -1322,6 +1322,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
             return;
         }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.fetchSecureString(new PrecheckHandler(promise), "precheck-dummy-key", null);
         } catch (IllegalStateException e) {
@@ -1413,6 +1417,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
             return;
         }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDataHashInToken(data);
             log(LOG_DEBUG, TAG, "setDataHashInToken");
@@ -1443,6 +1451,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void fetchToken(String url, Promise promise) {
         if (!isInitialized) {
             promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
             return;
         }
         try {
@@ -1548,6 +1560,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
             return;
         }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
@@ -1648,6 +1664,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void fetchCustomJWT(String payload, Promise promise) {
         if (!isInitialized) {
             promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
             return;
         }
         try {

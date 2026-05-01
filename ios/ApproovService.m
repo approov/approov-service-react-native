@@ -815,6 +815,14 @@ RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
     reject(@"approov_error", @"Approov is not initialized", error);
     return;
   }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
   [Approov
       fetchSecureString:^(ApproovTokenFetchResult *result) {
         if (result.status == ApproovTokenFetchStatusUnknownKey)
@@ -909,6 +917,14 @@ RCT_EXPORT_METHOD(setDataHashInToken : (NSString *)data resolver : (
     reject(@"approov_error", @"Approov is not initialized", error);
     return;
   }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
   ApproovLogI(@"setDataHashInToken");
   [Approov setDataHashInToken:data];
   resolve(nil);
@@ -934,6 +950,14 @@ RCT_EXPORT_METHOD(fetchToken : (NSString *)url resolver : (
                                    code:0
                                userInfo:[self errorUserInfo:NO]];
     reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
     return;
   }
   [Approov
@@ -1024,6 +1048,14 @@ RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
     reject(@"approov_error", @"Approov is not initialized", error);
     return;
   }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
 
   // determine the type of operation as the values themselves cannot be logged
   NSString *type = @"lookup";
@@ -1098,6 +1130,14 @@ RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
                                    code:0
                                userInfo:[self errorUserInfo:NO]];
     reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
     return;
   }
 

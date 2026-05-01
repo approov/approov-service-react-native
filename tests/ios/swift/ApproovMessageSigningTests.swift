@@ -174,7 +174,11 @@ private func bouncedReply(for request: URLRequest) throws -> [String: Any] {
         reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }.resume()
 
-    _ = semaphore.wait(timeout: .now() + 10)
+    if semaphore.wait(timeout: .now() + 10) == .timedOut {
+        throw NSError(domain: "ApproovMessageSigningTests",
+                      code: 2,
+                      userInfo: [NSLocalizedDescriptionKey: "Request timed out after 10 seconds"])
+    }
 
     if let responseError {
         throw responseError

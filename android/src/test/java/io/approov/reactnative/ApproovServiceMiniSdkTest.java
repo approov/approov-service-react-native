@@ -1030,23 +1030,13 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
-    public void fetchCustomJwtWithMalformedPayloadDoesNotCallback() throws Exception {
+    public void fetchCustomJwtWithMalformedPayloadRejects() throws Exception {
         awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
-        CountDownLatch latch = new CountDownLatch(1);
-        Promise promise = mock(Promise.class);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            latch.countDown();
-            return null;
-        }).when(promise).resolve(org.mockito.ArgumentMatchers.nullable(Object.class));
-        org.mockito.Mockito.doAnswer(invocation -> {
-            latch.countDown();
-            return null;
-        }).when(promise).reject(any(String.class), any(String.class), any(WritableMap.class));
+        
+        PromiseResult rejected = awaitPromise(promise -> service.fetchCustomJWT("{\"role\":", promise));
 
-        service.fetchCustomJWT("{\"role\":", promise);
-
-        assertFalse("Malformed custom JWT payloads currently should not resolve or reject on Android mini-sdk",
-            latch.await(250, TimeUnit.MILLISECONDS));
+        assertEquals("fetchCustomJWT", rejected.code);
+        assertTrue(rejected.message.contains("IllegalArgument"));
     }
 
     @Test

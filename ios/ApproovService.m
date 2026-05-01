@@ -1100,6 +1100,19 @@ RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
     reject(@"approov_error", @"Approov is not initialized", error);
     return;
   }
+
+  NSData *data = [payload dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *jsonError = nil;
+  id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+  if (!jsonObject || ![jsonObject isKindOfClass:[NSDictionary class]]) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"fetchCustomJWT", @"IllegalArgument: Malformed JSON payload", error);
+    return;
+  }
+
   [Approov
       fetchCustomJWT:^(ApproovTokenFetchResult *result) {
         ApproovLogI(@"fetchCustomJWT: %@",

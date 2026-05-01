@@ -1631,6 +1631,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void fetchCustomJWT(String payload, Promise promise) {
         try {
+            new org.json.JSONObject(payload);
+        } catch (org.json.JSONException e) {
+            promise.reject("fetchCustomJWT", "IllegalArgument: Malformed JSON payload", getErrorUserInfo(false));
+            return;
+        }
+
+        try {
             Approov.fetchCustomJWT(new FetchCustomJWTHandler(promise), payload);
         } catch (IllegalStateException e) {
             promise.reject("fetchCustomJWT", "IllegalState: " + e.getMessage(), getErrorUserInfo(false));

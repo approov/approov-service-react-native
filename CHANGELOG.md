@@ -20,6 +20,8 @@
 - **Token Binding Header Parity**: Fixed Android and iOS `setDataHashInToken` behavior so the token binding hash is only set if the binding header is actually present on the request. This restores parity with the sibling service layers and prevents hashing of empty strings when the header is absent.
 - **iOS Precheck Bridge Blocking**: Reverted an experimental change that made the iOS `precheck` method synchronous, which was unnecessarily blocking the React Native bridge. It is now safely asynchronous again, matching Android.
 - **iOS Production Path Logging**: Cleaned up the iOS interceptor to remove a bare `NSLog` that was bypassing the configured Approov log level and leaking operational state even at `NONE` level.
+- **Initialization Gating**: Ensured all native `ApproovService` bridge methods validate `isInitialized` status and explicitly reject promises with an `"approov_error"` if the SDK is not ready, preventing raw calls from reaching the uninitialized native SDK on iOS and maintaining exact behavior parity across platforms.
+- **fetchCustomJWT Payload Validation**: Now parses and validates JSON payloads directly on the bridge before calling the native SDK. This ensures malformed JSON payloads synchronously reject the promise with an `IllegalArgument` error, resolving a cross-platform bug where invalid inputs could leave the JS callback permanently pending.
 
 ## [3.5.12] - 2026-03-26
 - **iOS Mock Response Recursion Fix**: Prevented internal `mockhttps` retry and error responses from being re-intercepted by the swizzled `NSURLSession` task APIs. This fixes an iOS crash regression in offline and other non-proceed paths where synthetic mock tasks could recurse until stack overflow.

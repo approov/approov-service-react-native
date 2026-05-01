@@ -1261,8 +1261,8 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   @synchronized(bindingHeader) {
     if (![bindingHeader isEqualToString:@""]) {
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
-      [Approov setDataHashInToken:headerValue];
       if (headerValue != nil) {
+        [Approov setDataHashInToken:headerValue];
         ApproovLogI(@"setting data hash for binding header %@", bindingHeader);
       }
     }

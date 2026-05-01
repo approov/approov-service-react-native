@@ -203,17 +203,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // The mutator instance used to control ApproovService behavior
     private static ApproovServiceMutator serviceMutator;
 
-    // Cached failure result from the last Approov token fetch that returned a
-    // failure status.
-    // Protected by failureCacheLock for thread-safe access. This avoids redundant
-    // ~1s SDK calls
-    // when the platform is in a sustained failure state (e.g. no network, MITM
-    // detected).
-    private static final Object failureCacheLock = new Object();
-    private static Approov.TokenFetchResult cachedFailureResult = null;
-    private static long cachedFailureTimeMs = 0;
-    private static final long FAILURE_CACHE_TTL_MS = 500; // 0.5 seconds
-
     static {
         ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
         signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
@@ -245,65 +234,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Returns a cached failure result if one exists and hasn't expired.
-     * Returns null if no cache exists or it has expired (caller should fetch from
-     * SDK).
-     */
-    private static Approov.TokenFetchResult getCachedFailure() {
-        synchronized (failureCacheLock) {
-            if (cachedFailureResult != null
-                    && (System.currentTimeMillis() - cachedFailureTimeMs) < FAILURE_CACHE_TTL_MS) {
-                return cachedFailureResult;
-            }
-            // Cache miss or expired — clear and allow a fresh SDK call
-            cachedFailureResult = null;
-            cachedFailureTimeMs = 0;
-            return null;
-        }
-    }
-
-    /**
-     * Caches a failure result. Only failure statuses are cached; success is never
-     * cached.
-     */
-    private static void cacheFailureIfNeeded(Approov.TokenFetchResult result) {
-        switch (result.getStatus()) {
-            case NO_NETWORK:
-            case POOR_NETWORK:
-            case MITM_DETECTED:
-            case NO_APPROOV_SERVICE:
-                synchronized (failureCacheLock) {
-                    cachedFailureResult = result;
-                    cachedFailureTimeMs = System.currentTimeMillis();
-                }
-                break;
-            default:
-                // Success and other statuses are never cached
-                break;
-        }
-    }
-
-    /**
-     * Performs a cached Approov token fetch. If a failure result is cached and
-     * within
-     * the TTL window, the cached failure is returned instantly. Otherwise a fresh
-     * SDK
-     * call is made and the result is cached if it is a failure.
+     * Fetches an Approov token for the given URL.
      *
      * @param url is the URL giving the domain for the token fetch
      * @return the token fetch result
      */
-    public Approov.TokenFetchResult fetchApproovTokenCached(String url) {
-        Approov.TokenFetchResult cached = getCachedFailure();
-        if (cached != null) {
-            log(LOG_DEBUG, TAG, "Using cached failure: " + cached.getStatus().toString());
-            return cached;
-        }
-
-        // Normal execution
-        Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(url);
-        cacheFailureIfNeeded(result);
-        return result;
+    public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
+        return Approov.fetchApproovTokenAndWait(url);
     }
 
     /**
@@ -757,10 +694,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 initialConfig = config;
                 isInitialized = true;
                 clearEarliestNetworkRequestTime();
-                synchronized (failureCacheLock) {
-                    cachedFailureResult = null;
-                    cachedFailureTimeMs = 0;
-                }
                 if (isApproovEnabled()) {
                     log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
                     notifyPinChangeListeners();

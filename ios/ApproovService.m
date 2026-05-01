@@ -141,14 +141,6 @@ NSString *approovTokenHeader = @"Approov-Token";
 // the SDK
 NSString *approovTraceIDHeader = @"Approov-TraceID";
 
-// Cached failure result from the last Approov token fetch that returned a failure status.
-// Protected by failureCacheLock for thread-safe access. This avoids redundant ~1s SDK calls
-// when the platform is in a sustained failure state (e.g. no network, MITM detected).
-static ApproovTokenFetchResult *cachedFailureResult = nil;
-static NSTimeInterval cachedFailureTime = 0.0;
-static const NSTimeInterval FAILURE_CACHE_TTL = 0.5; // 0.5 seconds
-static NSLock *failureCacheLock = nil;
-
 // any prefix to be added before the Approov token, such as "Bearer "
 NSString *approovTokenPrefix = @"";
 
@@ -210,7 +202,6 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
     earliestNetworkRequestTimeLock = [NSObject new];
-    failureCacheLock = [[NSLock alloc] init];
   }
 }
 
@@ -383,10 +374,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
         @synchronized(earliestNetworkRequestTimeLock) {
           earliestNetworkRequestTime = 0.0;
         }
-        [failureCacheLock lock];
-        cachedFailureResult = nil;
-        cachedFailureTime = 0.0;
-        [failureCacheLock unlock];
         if (ApproovIsEnabled()) {
           [Approov setUserProperty:@"approov-react-native"];
           ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
@@ -415,10 +402,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
         @synchronized(earliestNetworkRequestTimeLock) {
           earliestNetworkRequestTime = 0.0;
         }
-        [failureCacheLock lock];
-        cachedFailureResult = nil;
-        cachedFailureTime = 0.0;
-        [failureCacheLock unlock];
         if (ApproovIsEnabled()) {
           [Approov setUserProperty:@"approov-react-native"];
           ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
@@ -1144,40 +1127,6 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 }
 
 /**
- * Performs a cached Approov token fetch. If a failure result is cached and within
- * the TTL window, the cached failure is returned instantly. Otherwise a fresh SDK
- * call is made and the result is cached if it is a failure.
- *
- * @param url is the URL giving the domain for the token fetch
- * @return the token fetch result
- */
-- (ApproovTokenFetchResult *)fetchApproovTokenCached:(NSString *)url {
-  [failureCacheLock lock];
-  if (cachedFailureResult != nil && ([[NSDate date] timeIntervalSince1970] - cachedFailureTime) < FAILURE_CACHE_TTL) {
-    ApproovTokenFetchResult *cached = cachedFailureResult;
-    [failureCacheLock unlock];
-    ApproovLogD(@"Using cached failure: %ld", (long)cached.status);
-    return cached;
-  }
-  cachedFailureResult = nil;
-  cachedFailureTime = 0.0;
-  [failureCacheLock unlock];
-
-  ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
-  ApproovTokenFetchStatus status = result.status;
-  if (status == ApproovTokenFetchStatusNoNetwork ||
-      status == ApproovTokenFetchStatusPoorNetwork ||
-      status == ApproovTokenFetchStatusMITMDetected ||
-      status == ApproovTokenFetchStatusNoApproovService) {
-    [failureCacheLock lock];
-    cachedFailureResult = result;
-    cachedFailureTime = [[NSDate date] timeIntervalSince1970];
-    [failureCacheLock unlock];
-  }
-  return result;
-}
-
-/**
  * Adds Approov to the given request. This involves fetching an Approov token
  * for the domain being accessed and adding an Approov token to the outgoing
  * header. This may also update the token if token binding is being used. Header
@@ -1320,7 +1269,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   // fetch the Approov token and log the result
-  ApproovTokenFetchResult *result = [self fetchApproovTokenCached:url];
+  ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
   if (!suppressLoggingUnknownURL ||
       ([result status] != ApproovTokenFetchStatusUnknownURL))
     ApproovLogI(@"token for %@: %@", url, [result loggableToken]);

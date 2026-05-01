@@ -736,9 +736,9 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
  * without a path to update the pins until a URL is used that is not excluded.
  * Thus you are responsible for ensuring that there is always a possibility of
  * calling a non-excluded URL, or you should make an explicit call to fetchToken
- * if there are persistent pinning failures. Conversely, use of those option may
+ * if there are persistent pinning failures. Conversely, use of this option may
  * allow a connection to be established before any dynamic pins have been
- * received via Approov. thus potentially opening the channel to a MitM.
+ * received via Approov. Thus potentially opening the channel to a MitM.
  *
  * @param urlRegex is the regular expression that will be compared against URLs
  * to exclude them

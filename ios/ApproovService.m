@@ -239,13 +239,16 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
                                          comment:nil
                                            error:&initializationError];
     }
-    if (!initializationResult && initializationError == nil) {
+    BOOL alreadyInitialized = (!initializationResult && initializationError == nil);
+    if (alreadyInitialized) {
       ApproovLogI(@"native SDK reported already initialized during launch "
                   @"initialization");
     } else if (initializationError) {
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
-    } else {
+    }
+    
+    if (initializationResult || alreadyInitialized) {
       // complete the initialization
       initialConfigString = config;
       isInitialized = YES;

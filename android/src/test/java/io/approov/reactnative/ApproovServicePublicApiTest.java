@@ -203,24 +203,27 @@ public class ApproovServicePublicApiTest {
 
     @Test
     public void logMessageDoesNotCrashAtAnyLevel() {
-        ApproovService service = newService();
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
 
-        // All defined levels: EXTREME(0), DEBUG(1), INFO(2), WARN(3), ERROR(4)
-        service.logMessage("test extreme", 0);
-        service.logMessage("test debug", 1);
-        service.logMessage("test info", 2);
-        service.logMessage("test warn", 3);
-        service.logMessage("test error", 4);
+            // All defined levels: EXTREME(0), DEBUG(1), INFO(2), WARN(3), ERROR(4)
+            service.logMessage("test extreme", 0);
+            service.logMessage("test debug", 1);
+            service.logMessage("test info", 2);
+            service.logMessage("test warn", 3);
+            service.logMessage("test error", 4);
 
-        // Edge cases: null message, null level, unknown level
-        service.logMessage(null, 2);
-        service.logMessage("test null-level", null);
-        service.logMessage("test unknown-level", 99);
+            // Edge cases: null message, null level, unknown level
+            service.logMessage(null, 2);
+            service.logMessage("test null-level", null);
+            service.logMessage("test unknown-level", 99);
+        }
     }
 
     @Test
     public void isInterceptorActiveReturnsTrueWhenApproovInterceptorIsPresent() {
-        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
+             MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
             ApproovService service = newService();
             Promise promise = mock(Promise.class);
 
@@ -237,7 +240,8 @@ public class ApproovServicePublicApiTest {
 
     @Test
     public void isInterceptorActiveReturnsFalseWhenNoApproovInterceptorIsPresent() {
-        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
+             MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
             ApproovService service = newService();
             Promise promise = mock(Promise.class);
 

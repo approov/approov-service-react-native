@@ -164,9 +164,9 @@ It is possible to sign HTTP requests using Approov to ensure message integrity a
 *   **Integrity:** Ensures that the request parameters (headers, body, URL) have not been tampered with during transit.
 *   **Authenticity:** Proves that the request originated from a genuine, attested application instance.
 
-Message signing is opt-in. It must be configured natively on both iOS and Android before initialization if you wish to use it.
+Message signing is enabled automatically by the default `ApproovService` configuration. If your Approov account has message signing enabled, the SDK will automatically add the message signature headers to your outbound requests.
 
-For more details on how to enable or configure message signing, see the [Approov Service Mutator](#approov-service-mutator) section below.
+For more details on how to configure or override message signing behavior, see the [Approov Service Mutator](#approov-service-mutator) section below.
 
 ## Token Binding
 
@@ -242,13 +242,13 @@ Because the React Native bridge does not support passing complex executable code
 
 ## Default Behavior: HTTP Message Signing
 
-By default, the Approov Service is configured with a default mutator (`ApproovServiceMutator.DEFAULT` / `ApproovServiceMutatorDefault`) that **does not perform HTTP Message Signing**. It simply fetches the Approov token and adds the `Approov-Token` header to requests.
+By default, the Approov Service is configured with a default mutator (`ApproovDefaultMessageSigning`) that **automatically performs HTTP Message Signing**. It fetches the Approov token, adds the `Approov-Token` header to requests, and generates the required message signature headers.
 
-If you need HTTP Message Signing, or you need to change other networking behaviors, you must do so natively by setting a custom `ApproovServiceMutator`.
+If you need to change other networking behaviors, you can do so natively by setting a custom `ApproovServiceMutator`.
 
 ## Customizing Request Handling with Native Mutators
 
-You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or enabling HTTP Message Signing.
+You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or proceeding on failures while preserving HTTP Message Signing.
 
 ### Proceed On Selected Failure Statuses And Sign The Request
 
@@ -379,11 +379,11 @@ await ApproovService.initialize('<your-config-string>');
 ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
-### Enabling Message Signing
+### Customizing Mutators with Message Signing
 
-To enable HTTP Message Signing, you must register the `ApproovDefaultMessageSigning` mutator. If you also want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.
+Since `ApproovDefaultMessageSigning` is the default mutator, you must ensure that your custom mutator continues to invoke the message signer. If you want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.
 
-Below are examples of how to implement and register a custom mutator that enforces tokens and simultaneously enables message signing.
+Below are examples of how to implement and register a custom mutator that enforces tokens and simultaneously preserves message signing.
 
 ### Android Implementation (Java)
 

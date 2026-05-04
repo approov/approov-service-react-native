@@ -67,6 +67,7 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
 - (void)addSubstitutionHeader:(NSString *)header requiredPrefix:(NSString *)requiredPrefix;
 - (void)addSubstitutionQueryParam:(NSString *)key;
 - (void)addExclusionURLRegex:(NSString *)urlRegex;
+- (void)logMessage:(NSString *)message level:(NSInteger)level;
 @end
 
 static NSUInteger gFailureCount = 0;
@@ -1404,6 +1405,101 @@ static void TestInterceptRequestHonorsCustomNoApproovServiceBlocks(void) {
   ApproovMutatorBridgeReset();
 }
 
+static void TestInitializeAcceptsOptionsComment(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig
+                comment:@"options:prefetch"
+               resolver:resolve
+               rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"options: comment should allow initialization");
+  NSDictionary *enabled = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabled[@"value"], @"options: comment should enable Approov");
+}
+
+static void TestInitializeIgnoresSameConfigWithOptionsComment(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig
+                comment:@"options:prefetch"
+               resolver:resolve
+               rejecter:reject];
+  });
+  NSDictionary *second = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig
+                comment:@"options:prefetch"
+               resolver:resolve
+               rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Same-config with options: should keep the layer initialized");
+  AssertEqualObjects([NSNull null], second[@"value"],
+                     @"Same-config with options: should resolve without error");
+}
+
+static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Initial config should mark the layer initialized");
+  NSDictionary *enabledBefore = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledBefore[@"value"], @"Approov should be enabled after valid init");
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"#different-config" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"initialize", rejected[@"code"],
+                     @"Different-config reinitialization should reject");
+  // Crucially: the original config's state is fully preserved
+  AssertTrue(isInitialized,
+             @"Different-config rejection should preserve the initialized state");
+  NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledAfter[@"value"],
+                     @"Different-config rejection should preserve the enabled state");
+
+  // Verify the original configuration still works
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"),
+               @"Original config should remain functional after a different-config rejection");
+}
+
+static void TestLogMessageDoesNotCrashAtAnyLevel(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, nil);
+
+  // All defined levels: EXTREME(0), DEBUG(1), INFO(2), WARN(3), ERROR(4)
+  [service logMessage:@"test extreme" level:0];
+  [service logMessage:@"test debug" level:1];
+  [service logMessage:@"test info" level:2];
+  [service logMessage:@"test warn" level:3];
+  [service logMessage:@"test error" level:4];
+
+  // Edge cases: nil message, unknown level
+  [service logMessage:nil level:2];
+  [service logMessage:@"test unknown-level" level:99];
+
+  // If we get here without crashing, the test passes
+  AssertTrue(YES, @"logMessage should handle all levels without crashing");
+}
+
 
 int main(void) {
   @autoreleasepool {
@@ -1413,6 +1509,9 @@ int main(void) {
       ^{ TestInitializeIgnoresSameConfig(); },
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },
+      ^{ TestInitializeAcceptsOptionsComment(); },
+      ^{ TestInitializeIgnoresSameConfigWithOptionsComment(); },
+      ^{ TestInitializeWithDifferentConfigPreservesExistingState(); },
       ^{ TestStatusMethodsDifferentiateInitializedAndEnabled(); },
       ^{ TestUninitializedServiceCallsRejectProperly(); },
       ^{ TestGetDeviceIDReturnsMiniSDKDeviceID(); },
@@ -1472,6 +1571,7 @@ int main(void) {
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
       ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
+      ^{ TestLogMessageDoesNotCrashAtAnyLevel(); },
 
     ];
 

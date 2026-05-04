@@ -247,6 +247,52 @@ static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
              @"Different-configuration native SDK error should leave the layer uninitialized");
 }
 
+// Verifies the transition: empty-config bootstrap → SDK failure.
+// After bootstrapping with an empty config the layer is initialized but Approov
+// is disabled. A subsequent attempt with a real config that fails at the SDK
+// level should reject the promise while preserving the initialized (but disabled)
+// bootstrap state.
+static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(void) {
+  ApproovService *service = FreshService();
+
+  // Bootstrap with empty config
+  [service initialize:@""
+              comment:nil
+             resolver:^(__unused id value) {}
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               Fail(@"Empty-config bootstrap should not reject");
+             }];
+  AssertTrue(isInitialized, @"Empty-config bootstrap should mark the layer initialized");
+
+  // Simulate SDK failure on the real config attempt
+  NSError *sdkError = [NSError errorWithDomain:@"io.approov.tests"
+                                          code:1
+                                      userInfo:@{NSLocalizedDescriptionKey : @"server unreachable"}];
+  ApproovTestSetInitializationError(sdkError);
+
+  __block BOOL didResolve = NO;
+  __block NSString *rejectionCode = nil;
+  [service initialize:@"real-config"
+              comment:nil
+             resolver:^(__unused id value) {
+               didResolve = YES;
+             }
+             rejecter:^(NSString *code, __unused NSString *message,
+                        __unused NSError *error) {
+               rejectionCode = code;
+             }];
+  ApproovTestClearInitializationError();
+
+  AssertTrue(!didResolve,
+             @"SDK failure after empty bootstrap should reject");
+  AssertEqualObjects(@"initialize", rejectionCode,
+                     @"SDK failure after empty bootstrap should reject with initialize");
+  // The layer stays initialized from the empty bootstrap
+  AssertTrue(isInitialized,
+             @"SDK failure after empty bootstrap should preserve the initialized state");
+}
+
 
 static NSURLSession *MockSession(void) {
   NSURLSessionConfiguration *configuration =
@@ -568,6 +614,7 @@ int main(void) {
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
+      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },

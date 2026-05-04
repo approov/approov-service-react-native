@@ -222,6 +222,70 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void initializeAcceptsOptionsComment() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, "options:prefetch", promise));
+
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+    }
+
+    @Test
+    public void initializeIgnoresSameConfigWithOptionsComment() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, "options:prefetch", promise));
+
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, "options:prefetch", promise));
+
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+    }
+
+    @Test
+    public void initializeWithEmptyConfigThenSdkFailureRejectsAndKeepsLayerInitializedButDisabled() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize("", null, promise));
+        assertTrue(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+
+        try (org.mockito.MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            approov.when(() -> Approov.initialize(any(Context.class), any(String.class), any(String.class), any(String.class)))
+                .thenThrow(new IllegalArgumentException("server unreachable"));
+
+            PromiseResult rejected = awaitPromise(promise -> service.initialize(validInitialConfig, null, promise));
+
+            assertEquals("initialize", rejected.code);
+            assertTrue(rejected.message.contains("IllegalArgument"));
+            // The layer stays initialized (from the empty bootstrap) but Approov
+            // remains disabled because the SDK init failed.
+            assertTrue(service.isInitialized());
+            assertFalse(service.isApproovEnabled());
+        }
+    }
+
+    @Test
+    public void initializeWithDifferentConfigPreservesExistingState() throws Exception {
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+
+        PromiseResult rejected = awaitPromise(promise -> service.initialize(
+            "#stg1006#aprv2stg-attest.api.approov.io#https://dev.approoval.com/token#dpcv6jv45r6LGC4E6ZXSMLhBVLrrhAoDcjizU/t9/Eg=",
+            null,
+            promise
+        ));
+
+        assertEquals("initialize", rejected.code);
+        assertTrue(rejected.message.contains("different config"));
+        // Crucially: the original config's state is fully preserved
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+
+        // Verify the original configuration still works — a protected request
+        // should still produce tokens
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(reply, "Approov-Token"));
+    }
+
+    @Test
     public void initializeWithEmptyConfigKeepsLayerInitializedButDisablesApproov() throws Exception {
         AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
         awaitResolvedPromise(promise -> service.initialize("", null, promise));

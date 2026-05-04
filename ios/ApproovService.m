@@ -1152,6 +1152,13 @@ RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
     return;
   }
 
+  // Defensive JSON pre-validation for a cleaner, immediate error path.
+  // Unlike Android (which throws IllegalArgumentException synchronously),
+  // the iOS SDK handles malformed payloads safely by returning
+  // ApproovTokenFetchStatusBadPayload via the async callback. This
+  // pre-check is therefore optional but provides a more descriptive
+  // rejection message without waiting for the SDK round-trip. No size
+  // restriction is imposed here — the SDK docs specify none.
   NSData *data = [payload dataUsingEncoding:NSUTF8StringEncoding];
   NSError *jsonError = nil;
   id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];

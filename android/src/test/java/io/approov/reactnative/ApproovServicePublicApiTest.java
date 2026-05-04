@@ -201,6 +201,57 @@ public class ApproovServicePublicApiTest {
         }
     }
 
+    @Test
+    public void logMessageDoesNotCrashAtAnyLevel() {
+        ApproovService service = newService();
+
+        // All defined levels: EXTREME(0), DEBUG(1), INFO(2), WARN(3), ERROR(4)
+        service.logMessage("test extreme", 0);
+        service.logMessage("test debug", 1);
+        service.logMessage("test info", 2);
+        service.logMessage("test warn", 3);
+        service.logMessage("test error", 4);
+
+        // Edge cases: null message, null level, unknown level
+        service.logMessage(null, 2);
+        service.logMessage("test null-level", null);
+        service.logMessage("test unknown-level", 99);
+    }
+
+    @Test
+    public void isInterceptorActiveReturnsTrueWhenApproovInterceptorIsPresent() {
+        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+            ApproovService service = newService();
+            Promise promise = mock(Promise.class);
+
+            OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(new ApproovInterceptor(service))
+                .build();
+            okProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
+
+            service.isInterceptorActive(promise);
+
+            org.mockito.Mockito.verify(promise).resolve(true);
+        }
+    }
+
+    @Test
+    public void isInterceptorActiveReturnsFalseWhenNoApproovInterceptorIsPresent() {
+        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+            ApproovService service = newService();
+            Promise promise = mock(Promise.class);
+
+            OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(chain -> chain.proceed(chain.request()))
+                .build();
+            okProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
+
+            service.isInterceptorActive(promise);
+
+            org.mockito.Mockito.verify(promise).resolve(false);
+        }
+    }
+
     private boolean hasPinHash(CertificatePinner pinner, String expectedHashBase64) throws Exception {
         for (Object pin : pinner.getPins()) {
             Object hash = pin.getClass().getMethod("getHash").invoke(pin);

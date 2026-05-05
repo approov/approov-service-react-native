@@ -26,8 +26,8 @@ describe('ApproovProvider', () => {
   test('initializes Approov after onInit and exposes the ready state', async () => {
     const order = [];
     const nativeService = {
-      initialize: jest.fn().mockImplementation(async (config) => {
-        order.push(`initialize:${config}`);
+      initialize: jest.fn().mockImplementation(async (config, comment) => {
+        order.push(`initialize:${config}:${comment}`);
       }),
       logMessage: jest.fn(),
     };
@@ -46,19 +46,35 @@ describe('ApproovProvider', () => {
       TestRenderer.create(
         React.createElement(
           ApproovProvider,
-          { config: 'cfg', onInit },
+          { config: 'cfg', comment: 'reinit:test', onInit },
           React.createElement(CaptureState)
         )
       );
     });
 
-    expect(order).toEqual(['onInit', 'initialize:cfg']);
-    expect(nativeService.initialize).toHaveBeenCalledWith('cfg');
+    expect(order).toEqual(['onInit', 'initialize:cfg:reinit:test']);
+    expect(nativeService.initialize).toHaveBeenCalledWith('cfg', 'reinit:test');
     expect(latestState).toEqual({ approovReady: true, approovError: null });
     expect(nativeService.logMessage).toHaveBeenCalledWith(
       expect.stringContaining('promise resolved successfully'),
       2
     );
+  });
+
+  test('passes a null initialization comment by default', async () => {
+    const nativeService = {
+      initialize: jest.fn().mockResolvedValue(undefined),
+      logMessage: jest.fn(),
+    };
+    setNativeService(nativeService);
+
+    await act(async () => {
+      TestRenderer.create(
+        React.createElement(ApproovProvider, { config: 'cfg' }, null)
+      );
+    });
+
+    expect(nativeService.initialize).toHaveBeenCalledWith('cfg', null);
   });
 
   test('captures initialization failures in context and logs them', async () => {

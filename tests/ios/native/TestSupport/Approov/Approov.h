@@ -4,15 +4,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, ApproovTokenFetchStatus) {
   ApproovTokenFetchStatusSuccess = 0,
-  ApproovTokenFetchStatusUnknownURL,
-  ApproovTokenFetchStatusUnprotectedURL,
   ApproovTokenFetchStatusNoNetwork,
-  ApproovTokenFetchStatusPoorNetwork,
   ApproovTokenFetchStatusMITMDetected,
+  ApproovTokenFetchStatusPoorNetwork,
   ApproovTokenFetchStatusNoApproovService,
   ApproovTokenFetchStatusBadURL,
+  ApproovTokenFetchStatusUnknownURL,
+  ApproovTokenFetchStatusUnprotectedURL,
+  ApproovTokenFetchStatusNotInitialized,
   ApproovTokenFetchStatusRejected,
+  ApproovTokenFetchStatusDisabled,
   ApproovTokenFetchStatusUnknownKey,
+  ApproovTokenFetchStatusBadKey,
+  ApproovTokenFetchStatusBadPayload,
+  ApproovTokenFetchStatusInternalError
 };
 
 @interface ApproovTokenFetchResult : NSObject
@@ -41,7 +46,7 @@ typedef void (^ApproovTokenFetchCallback)(ApproovTokenFetchResult *result);
 
 @interface Approov : NSObject
 
-+ (void)initialize:(NSString *)config
++ (BOOL)initialize:(NSString *)config
       updateConfig:(NSString *)updateConfig
            comment:(nullable NSString *)comment
              error:(NSError *_Nullable *_Nullable)error;
@@ -78,5 +83,8 @@ FOUNDATION_EXPORT NSUInteger ApproovTestFetchApproovTokenCallCount(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastDataHash(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastDevKey(void);
 FOUNDATION_EXPORT NSString *_Nullable ApproovTestLastInstallAttrs(void);
+FOUNDATION_EXPORT void ApproovTestSetInitializationError(NSError *_Nullable error);
+FOUNDATION_EXPORT void ApproovTestClearInitializationError(void);
+FOUNDATION_EXPORT void ApproovTestSetInitializationResult(BOOL result);
 
 NS_ASSUME_NONNULL_END

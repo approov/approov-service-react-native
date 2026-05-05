@@ -18,10 +18,57 @@ You will not generally need to call this function directly, since this is called
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the Approov CLI. This will generate an error if a second attempt is made at initialization with a different `config` but will succeed if called multiple times with the same `config`.
 
 ```Javascript
-ApproovService.initialize(config: string);
+ApproovService.initialize(config: string, comment?: string | null);
 ```
 
 This function returns a `Promise` that is resolved when the operation is completed. You should always make this call soon after your app is started. Other network requests may be delayed for a short period until this call is made.
+
+Passing an empty config string leaves the React Native service layer initialized while disabling Approov SDK processing. In that mode requests are forwarded as standard network traffic without Approov token injection, secure string substitution, message signing, or dynamic pinning.
+
+This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a non-empty valid config string is allowed and will then enable the native Approov SDK. By contrast, reinitializing from one non-empty config string to a different non-empty config string still rejects unless you are intentionally using a supported `reinit...` comment flow with the same config.
+
+The optional `comment` parameter is an advanced native SDK feature and most applications should omit it. It is primarily intended for specialist initialization flows supported by the underlying Approov SDK, such as:
+
+* comments starting with `reinit` to explicitly allow supported same-config runtime reinitialization
+* comments starting with `options:` to pass supported initialization options on the initial non-empty initialization call
+
+Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
+
+## isInitialized
+Returns whether the React Native Approov service layer has been initialized.
+
+```Javascript
+ApproovService.isInitialized();
+```
+
+This function returns a `Promise<boolean>`.
+
+This reflects service-layer readiness, not whether the native Approov SDK is actively protecting requests. For example, if you initialize with an empty config string, `isInitialized()` resolves to `true` while `isApproovEnabled()` resolves to `false`.
+
+## isApproovEnabled
+Returns whether the native Approov SDK is active and request protection is enabled.
+
+```Javascript
+ApproovService.isApproovEnabled();
+```
+
+This function returns a `Promise<boolean>`.
+
+This only resolves to `true` after a successful initialization with a non-empty configuration string. If initialization has not happened yet, failed, or completed with an empty configuration string, it resolves to `false`.
+
+## isInterceptorActive
+Returns whether the native networking interception is currently active for the platform's HTTP library.
+
+```Javascript
+ApproovService.isInterceptorActive();
+```
+
+This function returns a `Promise<boolean>`.
+
+- **Android:** Returns `true` if the `ApproovInterceptor` is correctly configured in the active `OkHttpClient`.
+- **iOS:** Returns `true` if swizzling is active and Approov is successfully monitoring `NSURLSession` creations.
+
+If this returns `false`, Approov is not currently intercepting or protecting network requests. On Android, you can use `updateClientFactory(true)` to attempt recovery.
 
 ## fetchWithApproov
 Provides a secure `fetch()`-compatible API, executed entirely on an isolated, natively protected HTTP client. Use this if standard `fetch()` interception via swizzling is failing due to conflicts with other observability SDKs.
@@ -150,7 +197,7 @@ ApproovService.getTraceIDHeader();
 This function returns a `Promise` providing the result.
 
 ## setBindingHeader
-Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then a hash of the header value is included in the issued Approov tokens to bind them to the value. This may then be verified by the backend API integration.
+Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the header is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to that value. This may then be verified by the backend API integration.
 
 ```Javascript
 ApproovService.setBindingHeader(header: string);
@@ -192,7 +239,8 @@ ApproovService.removeSubstitutionQueryParam(key: string);
 
 ## addExclusionURLRegex
 Adds an exclusion URL regular expression. If a URL for a request matches this regular expression
-then it will not be subject to any Approov protection. Note that this facility must be used with
+then it will not be subject to Approov request mutation such as token injection, trace headers,
+message signing, or secure string substitution. Note that this facility must be used with
 *EXTREME CAUTION* due to the impact of dynamic pinning. Pinning may be applied to all domains added
 using Approov, and updates to the pins are received when an Approov fetch is performed. If you
 exclude some URLs on domains that are protected with Approov, then these will be protected with
@@ -236,7 +284,7 @@ additional detail.
 ApproovService.precheck();
 ```
 
-This function returns a `Promise` that is resolved when the operation is completed. It is rejected if the `precheck` failed.
+This function returns a `Promise` that is resolved when the operation is completed. It is rejected if the `precheck` failed. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## getDeviceID
 Gets the [device ID](https://approov.io/docs/latest/approov-usage-documentation/#extracting-the-device-id)  used by Approov to identify the particular device that the SDK is running on. Note
@@ -250,18 +298,17 @@ ApproovService.getDeviceID();
 This function returns a `Promise` providing the result.
 
 ## setDataHashInToken
-Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash from the given `data` to be included in subsequently fetched Approov tokens. If the hash is
+Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash from the given `data` for subsequently fetched Approov tokens. If the hash is
 different from any previously set value then this will cause the next token fetch operation to
-fetch a new token with the correct payload data hash. The hash appears in the
-'pay' claim of the Approov token as a base64 encoded string of the SHA256 hash of the
-data. Note that the data is hashed locally and never sent to the Approov cloud service.
+fetch a new token with the correct payload data hash. The resulting token is expected to carry the
+`pay` claim as a base64 encoded string of the SHA256 hash of the data. Note that the data is hashed locally and never sent to the Approov cloud service.
 This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
 
 ```Javascript
 ApproovService.setDataHashInToken(data: string);
 ```
 
-This function returns a `Promise` that is resolved when the operation is completed.
+This function returns a `Promise` that is resolved when the operation is completed. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## setDevKey
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
@@ -279,7 +326,7 @@ Performs an Approov token fetch for the given `url`. This should be used in situ
 ApproovService.fetchToken(url: string);
 ```
 
-This function returns a `Promise` providing the result.
+This function returns a `Promise` providing the result. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 ## getMessageSignature
 Gets the [message signature](https://ext.approov.io/docs/latest/approov-usage-documentation/#account-message-signing) for the given `message`. This uses an account specific message signing key that is transmitted to the SDK after a successful fetch if the facility is enabled for the account. Note that if the attestation failed then the signing key provided is actually random so that the signature will be incorrect. An Approov token should always be included in the message being signed and sent alongside this signature to prevent replay attacks.
@@ -297,7 +344,7 @@ Fetches a [secure string](https://approov.io/docs/latest/approov-usage-documenta
 ApproovService.fetchSecureString(key: string, newDef: string);
 ```
 
-This function returns a `Promise` providing the result, which may be `null` if the `key` is not defined.
+This function returns a `Promise` providing the result, which may be `null` if the `key` is not defined. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code.
 
 Most often, secure strings are placed in headers using `addSubstitutionHeader` for convenience. If you need to use a secure string in the body or another part of the request, call `fetchSecureString` directly and add the value where appropriate.
 
@@ -308,7 +355,7 @@ Fetches a [custom JWT](https://approov.io/docs/latest/approov-usage-documentatio
 ApproovService.fetchCustomJWT(payload: string);
 ```
 
-This function returns a `Promise` providing the result.
+This function returns a `Promise` providing the result. Note: The React Native service layer must be initialized before calling this method; otherwise, the promise will immediately reject with an `approov_error` code. The promise will also immediately reject with an `IllegalArgument` error if the payload is malformed JSON.
 
 ## getLastARC
 Gets the last [Attestation Response Code](https://ext.approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) code.

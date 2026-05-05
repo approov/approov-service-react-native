@@ -1,0 +1,26 @@
+def localProperties = new Properties()
+def localPropertiesFile = new File(rootDir, 'local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { inputStream ->
+        localProperties.load(inputStream)
+    }
+}
+
+def miniSdkRoot = localProperties.getProperty('miniSdkAndroidRoot', '../../core-service-layers-testing/mini-sdk/android')
+def approovSdkDir = new File(miniSdkRoot, 'approov-sdk')
+def testSupportDir = new File(miniSdkRoot, 'test-support')
+
+if (rootProject.name != 'approov-service') {
+    include ':approov-service'
+}
+
+if (approovSdkDir.exists() && testSupportDir.exists()) {
+    include ':approov-sdk'
+    project(':approov-sdk').projectDir = approovSdkDir
+    
+    include ':test-support'
+    project(':test-support').projectDir = testSupportDir
+} else {
+    println "WARNING: core-service-layers-testing not found at ${miniSdkRoot}."
+    println "Integration tests requiring the test-support or mini-sdk will not compile."
+}

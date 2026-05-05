@@ -28,8 +28,9 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.JavaOnlyArray;
+import com.facebook.react.bridge.JavaOnlyMap;
 import com.facebook.react.bridge.WritableMap;
-import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableType;
@@ -233,6 +234,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Fetches an Approov token for the given URL.
+     *
+     * @param url is the URL giving the domain for the token fetch
+     * @return the token fetch result
+     */
+    public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
+        return Approov.fetchApproovTokenAndWait(url);
+    }
+
+    /**
      * Sets the log level for Approov logging.
      *
      * @param level is the log level to set
@@ -401,11 +412,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
         if (config != null) {
             // initialize the Approov SDK
             try {
-                Approov.initialize(applicationContext, config, "auto", "init-fetch");
-                Approov.setUserProperty("approov-react-native");
+                if (!config.isEmpty()) {
+                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.setUserProperty("approov-react-native");
+                }
                 initialConfig = config;
                 isInitialized = true;
-                log(LOG_INFO, TAG, "initialized on launch on deviceID " + Approov.getDeviceID());
+                if (isApproovEnabled()) {
+                    log(LOG_INFO, TAG, "initialized on launch on deviceID " + Approov.getDeviceID());
+                } else {
+                    log(LOG_INFO, TAG, "initialized on launch without Approov SDK");
+                }
             } catch (IllegalArgumentException e) {
                 log(LOG_ERROR, TAG, "initialization failed with IllegalArgument: " + e.getMessage());
             } catch (IllegalStateException e) {
@@ -437,23 +454,57 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } else
             log(LOG_INFO, TAG, "started");
 
-        // set the custom Approov OkHttp client builder in the React Native networking
-        // stack. We need to use reflection to see if a custom builder is already
-        // set, because if so we need to wrap it to ensure that the other SDK (e.g. New
-        // Relic)
-        // still works.
-        NetworkingModule.CustomClientBuilder previousBuilder = null;
+        // Register Approov protection in the React Native networking stack.
+        // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
+        // (RN < 0.73) versions.
+        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, null);
+
+        // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
+        // 0.73+) ---
+        // Capture any existing factory set by another SDK so we can chain through it.
+        OkHttpClientFactory existingFactory = null;
         try {
-            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
-            field.setAccessible(true);
-            previousBuilder = (NetworkingModule.CustomClientBuilder) field.get(null);
-            if (previousBuilder != null)
-                Log.d(TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
+            Field factoryField = OkHttpClientProvider.class.getDeclaredField("sFactory");
+            factoryField.setAccessible(true);
+            existingFactory = (OkHttpClientFactory) factoryField.get(null);
+            if (existingFactory != null)
+                log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
         } catch (Exception e) {
-            Log.d(TAG, "failed to check for existing custom client builder: " + e.getMessage());
+            log(LOG_DEBUG, TAG, "could not check for existing OkHttpClientFactory: " + e.getMessage());
         }
-        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, previousBuilder);
-        NetworkingModule.setCustomClientBuilder(clientBuilder);
+        final OkHttpClientFactory wrappedFactory = existingFactory;
+        OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
+            @Override
+            public OkHttpClient createNewNetworkModuleClient() {
+                OkHttpClient.Builder builder;
+                if (wrappedFactory != null) {
+                    // Chain: let the existing factory build its client, then layer Approov on top
+                    builder = wrappedFactory.createNewNetworkModuleClient().newBuilder();
+                } else {
+                    // No prior factory — start from the RN default builder
+                    builder = OkHttpClientProvider.createClientBuilder();
+                }
+                clientBuilder.apply(builder);
+                return builder.build();
+            }
+        });
+        log(LOG_INFO, TAG, "registered Approov via OkHttpClientFactory");
+
+        // --- LEGACY FALLBACK: setCustomClientBuilder (RN < 0.73 only) ---
+        // On RN 0.73+ this method was removed so we call it via reflection and
+        // silently skip if it does not exist. On older RN where both paths fire,
+        // ApproovClientBuilder.apply() has a deduplication guard that prevents
+        // the interceptor from being added twice.
+        try {
+            Method setBuilder = NetworkingModule.class.getMethod(
+                    "setCustomClientBuilder", NetworkingModule.CustomClientBuilder.class);
+            setBuilder.invoke(null, clientBuilder);
+            log(LOG_DEBUG, TAG, "registered Approov via legacy setCustomClientBuilder");
+        } catch (NoSuchMethodException e) {
+            log(LOG_DEBUG, TAG, "setCustomClientBuilder not available (expected on RN 0.73+)");
+        } catch (Exception e) {
+            log(LOG_DEBUG, TAG, "setCustomClientBuilder failed: " + e.getMessage());
+        }
 
         // add the Approov client builder to any rn-fetch-blob instances
         configureRNFetchBlobIfFound(clientBuilder);
@@ -461,21 +512,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Checks if the Approov interceptor is currently active in the React Native
-     * networking stack.
+     * networking stack by inspecting the actual OkHttpClient interceptor chain.
      *
      * @param promise to be fulfilled with the boolean result
      */
     @ReactMethod
     public void isInterceptorActive(Promise promise) {
         try {
-            Field field = NetworkingModule.class.getDeclaredField("mCustomClientBuilder");
-            field.setAccessible(true);
-            NetworkingModule.CustomClientBuilder currentBuilder = (NetworkingModule.CustomClientBuilder) field
-                    .get(null);
-            if ((currentBuilder != null) && (currentBuilder instanceof ApproovClientBuilder))
-                promise.resolve(true);
-            else
-                promise.resolve(false);
+            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
+            boolean found = false;
+            for (Interceptor interceptor : client.interceptors()) {
+                if (interceptor instanceof ApproovInterceptor) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                for (Interceptor interceptor : client.networkInterceptors()) {
+                    if (interceptor instanceof ApproovInterceptor) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            promise.resolve(found);
         } catch (Exception e) {
             promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
         }
@@ -511,13 +571,37 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Helper to create a WritableMap, tolerating test environments where native
+     * libraries aren't loaded.
+     */
+    private WritableMap safeCreateMap() {
+        try {
+            return Arguments.createMap();
+        } catch (Throwable t) {
+            return new com.facebook.react.bridge.JavaOnlyMap();
+        }
+    }
+
+    /**
+     * Helper to create a WritableArray, tolerating test environments where native
+     * libraries aren't loaded.
+     */
+    private WritableArray safeCreateArray() {
+        try {
+            return Arguments.createArray();
+        } catch (Throwable t) {
+            return new com.facebook.react.bridge.JavaOnlyArray();
+        }
+    }
+
+    /**
      * Construct a user info map for an error result.
      *
      * @param isNetworkError is true for a network, as opposed to general, error
      *                       type
      */
     private WritableMap getErrorUserInfo(boolean isNetworkError) {
-        WritableMap userInfo = new WritableNativeMap();
+        WritableMap userInfo = safeCreateMap();
         if (isNetworkError)
             userInfo.putString("type", "network");
         else
@@ -532,7 +616,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param rejectionReasons the rejection reasons or empty string if not enabled
      */
     private WritableMap getRejectionUserInfo(String rejectionARC, String rejectionReasons) {
-        WritableMap userInfo = new WritableNativeMap();
+        WritableMap userInfo = safeCreateMap();
         userInfo.putString("type", "rejection");
         userInfo.putString("rejectionARC", rejectionARC);
         userInfo.putString("rejectionReasons", rejectionReasons);
@@ -583,28 +667,42 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param promise to be fulfilled once the initialization is completed
      */
     @ReactMethod
-    public void initialize(String config, Promise promise) {
-        if (isInitialized) {
+    public void initialize(String config, String comment, Promise promise) {
+        String effectiveComment = comment == null ? "" : comment;
+        boolean allowReinitialize = effectiveComment.startsWith("reinit");
+        boolean allowEnableAfterEmptyInitialization = isInitialized && (initialConfig != null)
+                && initialConfig.isEmpty() && !config.isEmpty();
+
+        if (isInitialized && !allowEnableAfterEmptyInitialization) {
             // if the SDK is previously initialized then the config should be the same
             if (!config.equals(initialConfig)) {
                 log(LOG_ERROR, TAG, "attempt to reinitialize with a different config");
                 promise.reject("initialize", "attempt to reinitialize with a different config",
                         getErrorUserInfo(false));
-            } else {
-                promise.resolve(null);
+                return;
             }
-        } else {
-            // initialize the Approov SDK and notify any pin change listeners since pins may
-            // now
-            // be available
+            if (!allowReinitialize) {
+                promise.resolve(null);
+                return;
+            }
+        }
+
+        // initialize the Approov SDK and notify any pin change listeners since pins may
+        // now be available
             try {
-                Approov.initialize(applicationContext, config, "auto", "init-fetch");
-                Approov.setUserProperty("approov-react-native");
+                if (!config.isEmpty()) {
+                    Approov.initialize(applicationContext, config, "auto", effectiveComment);
+                    Approov.setUserProperty("approov-react-native");
+                }
                 initialConfig = config;
                 isInitialized = true;
                 clearEarliestNetworkRequestTime();
-                log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                notifyPinChangeListeners();
+                if (isApproovEnabled()) {
+                    log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
+                    notifyPinChangeListeners();
+                } else {
+                    log(LOG_INFO, TAG, "initialized without Approov SDK");
+                }
                 if (pendingPrefetch) {
                     prefetch();
                     pendingPrefetch = false;
@@ -617,7 +715,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 log(LOG_ERROR, TAG, "initialization failed with IllegalState: " + e.getMessage());
                 promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
             }
-        }
     }
 
     /**
@@ -627,6 +724,39 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public synchronized boolean isInitialized() {
         return isInitialized;
+    }
+
+    /**
+     * Returns the Approov service-layer initialization status to the React Native
+     * bridge.
+     *
+     * @param promise React Native promise resolved with true if the service layer
+     *                is
+     *                initialized
+     */
+    @ReactMethod
+    public void isInitialized(Promise promise) {
+        promise.resolve(isInitialized());
+    }
+
+    /**
+     * Returns true when the service layer is initialized and Approov-backed
+     * request protection is active.
+     */
+    public synchronized boolean isApproovEnabled() {
+        return isInitialized && initialConfig != null && !initialConfig.isEmpty();
+    }
+
+    /**
+     * Returns true when the service layer is initialized and the native Approov SDK
+     * is active.
+     *
+     * @param promise React Native promise resolved with true if Approov-backed
+     *                protection is enabled
+     */
+    @ReactMethod
+    public void isApproovEnabled(Promise promise) {
+        promise.resolve(isApproovEnabled());
     }
 
     /**
@@ -640,6 +770,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getLastARC(Promise promise) {
         log(LOG_INFO, TAG, "ApproovService: getLastARC");
+        if (!isInitialized || !isApproovEnabled()) {
+            promise.resolve("");
+            return;
+        }
+
         // Get the dynamic pins from Approov
         Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
         if (approovPins == null || approovPins.isEmpty()) {
@@ -658,6 +793,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         if (hostname != null) {
             try {
+                final String fetchURL = hostname.contains("://") ? hostname : "https://" + hostname;
                 Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
                     @Override
                     public void approovCallback(Approov.TokenFetchResult result) {
@@ -671,7 +807,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         log(LOG_INFO, TAG, "ApproovService: ARC code unavailable");
                         promise.resolve("");
                     }
-                }, hostname);
+                }, fetchURL);
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "ApproovService: error fetching ARC", e);
                 promise.resolve("");
@@ -817,6 +953,21 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public synchronized void getSessionMetadataCollectionEnabled(Promise promise) {
         promise.resolve(sessionMetadataCollectionEnabled);
+    }
+
+    /**
+     * Retrieves session diagnostics functionality for React Native cross-platform
+     * parity.
+     * Note: Android does not retain an equivalent granular session ledger today.
+     *
+     * @param promise resolves to the session diagnostics
+     */
+    @ReactMethod
+    public void getSessionDiagnostics(Promise promise) {
+        WritableMap diagnostics = safeCreateMap();
+        diagnostics.putBoolean("enabled", sessionMetadataCollectionEnabled);
+        diagnostics.putString("message", "Android does not retain an extended session ledger.");
+        promise.resolve(diagnostics);
     }
 
     /**
@@ -1012,9 +1163,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Adds an exclusion URL regular expression. If a URL for a request matches this
-     * regular expression
-     * then it will not be subject to any Approov protection. Note that this
-     * facility must be used with
+     * regular expression then it will bypass Approov request mutation, such as
+     * token injection, trace headers, message signing and secure string
+     * substitution. If the URL belongs to a host that is protected by Approov then
+     * the connection is still subject to Approov pinning. Note that this facility
+     * must be used with
      * EXTREME CAUTION due to the impact of dynamic pinning. Pinning may be applied
      * to all domains added
      * using Approov, and updates to the pins are received when an Approov fetch is
@@ -1083,9 +1236,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public synchronized void prefetch() {
-        if (isInitialized) {
+        if (isApproovEnabled()) {
             log(LOG_INFO, TAG, "prefetch initiated");
             Approov.fetchApproovToken(new PrefetchHandler(), "approov.io");
+        } else if (isInitialized) {
+            log(LOG_INFO, TAG, "prefetch bypassed because Approov is disabled");
         } else {
             log(LOG_INFO, TAG, "prefetch pending");
             pendingPrefetch = true;
@@ -1170,6 +1325,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void precheck(Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.fetchSecureString(new PrecheckHandler(promise), "precheck-dummy-key", null);
         } catch (IllegalStateException e) {
@@ -1257,6 +1420,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setDataHashInToken(String data, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDataHashInToken(data);
             log(LOG_DEBUG, TAG, "setDataHashInToken");
@@ -1285,6 +1456,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchToken(String url, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.fetchApproovToken(new FetchTokenHandler(promise), url);
         } catch (IllegalStateException e) {
@@ -1384,10 +1563,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchSecureString(String key, String newDef, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
             type = "definition";
+
+        // The Android SDK treats null/empty/overlong keys as local argument
+        // failures rather than attester-driven BAD_KEY / UNKNOWN_KEY results.
+        if (key == null) {
+            promise.reject("fetchSecureString", "IllegalArgument: secure string key is null", getErrorUserInfo(false));
+            return;
+        }
+        if (key.isEmpty() || key.length() > 64) {
+            promise.reject("fetchSecureString", "IllegalArgument: secure string key is empty or too long",
+                    getErrorUserInfo(false));
+            return;
+        }
 
         // fetch any secure string keyed by the value, catching any exceptions the SDK
         // might throw
@@ -1470,6 +1669,21 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void fetchCustomJWT(String payload, Promise promise) {
+        if (!isInitialized) {
+            promise.reject("approov_error", "Approov is not initialized", getErrorUserInfo(false));
+            return;
+        }
+        if (!isApproovEnabled()) {
+            promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
+        try {
+            new org.json.JSONObject(payload);
+        } catch (org.json.JSONException e) {
+            promise.reject("fetchCustomJWT", "IllegalArgument: Malformed JSON payload", getErrorUserInfo(false));
+            return;
+        }
+
         try {
             Approov.fetchCustomJWT(new FetchCustomJWTHandler(promise), payload);
         } catch (IllegalStateException e) {
@@ -1530,9 +1744,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public void getPinningDiagnostics(Promise promise) {
         try {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            WritableMap diagnostics = Arguments.createMap();
+            WritableMap diagnostics = safeCreateMap();
             boolean isInterceptorPresent = false;
-            WritableArray interceptors = Arguments.createArray();
+            WritableArray interceptors = safeCreateArray();
 
             for (Interceptor interceptor : client.interceptors()) {
                 String name = interceptor.getClass().getName();
@@ -1614,14 +1828,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
             });
 
             // we also need to use reflection to set the client on the NetworkingModule
-            // since it has
-            // already grasped a reference to the previous client
+            // since it has already grasped a reference to the previous client
             try {
-                Field clientField = NetworkingModule.class.getDeclaredField("mClient");
-                clientField.setAccessible(true);
-                clientField.set(networkingModule, newClient);
+                Field clientField = null;
+                try {
+                    // React Native 0.73+ (Kotlin NetworkingModule)
+                    clientField = NetworkingModule.class.getDeclaredField("client");
+                } catch (NoSuchFieldException e) {
+                    // React Native < 0.73 (Java NetworkingModule)
+                    clientField = NetworkingModule.class.getDeclaredField("mClient");
+                }
+                if (clientField != null) {
+                    clientField.setAccessible(true);
+                    clientField.set(networkingModule, newClient);
+                }
             } catch (Exception e) {
-                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client: " + e.getMessage());
+                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
                 // we determine this is not a fatal error as the provider update should work for
                 // future requests
             }
@@ -1649,7 +1871,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             try {
                 // 1. Build the explicit OkHttp request
                 Request.Builder requestBuilder = new Request.Builder().url(url);
-                
+
                 String method = "GET";
                 if (options != null && options.hasKey("method")) {
                     ReadableType methodType = options.getType("method");
@@ -1664,7 +1886,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         }
                     }
                 }
-                
+
                 okhttp3.RequestBody requestBody = null;
                 if (options != null && options.hasKey("body")) {
                     ReadableType bodyType = options.getType("body");
@@ -1677,36 +1899,47 @@ public class ApproovService extends ReactContextBaseJavaModule {
                         requestBody = okhttp3.RequestBody.create(null, bodyString);
                     }
                 }
-                
-                // If the user has omitted a body, but the method is one that OkHttp requires 
+
+                // If the user has omitted a body, but the method is one that OkHttp requires
                 // a body for (like POST/PUT/etc), we must provide an empty body instead of null
                 // to avoid an IllegalArgumentException. This does NOT clear existing content
                 // because it only runs if requestBody is still null.
-                if (requestBody == null && (method.equalsIgnoreCase("POST") || 
-                                           method.equalsIgnoreCase("PUT") || 
-                                           method.equalsIgnoreCase("PATCH") || 
-                                           method.equalsIgnoreCase("PROPPATCH"))) {
+                if (requestBody == null && (method.equalsIgnoreCase("POST") ||
+                        method.equalsIgnoreCase("PUT") ||
+                        method.equalsIgnoreCase("PATCH") ||
+                        method.equalsIgnoreCase("PROPPATCH"))) {
                     requestBody = okhttp3.RequestBody.create(null, new byte[0]);
                 }
-                
+
                 // Add headers if provided
                 if (options != null && options.hasKey("headers")) {
-                    ReadableMap headersMap = options.getMap("headers");
-                    if (headersMap != null) {
+                    ReadableType headersType = options.getType("headers");
+                    if (headersType != ReadableType.Null && headersType != ReadableType.Map) {
+                        promise.reject("bad_request", "fetchWithApproov headers must be an object when provided");
+                        return;
+                    }
+                    if (headersType == ReadableType.Map) {
+                        ReadableMap headersMap = options.getMap("headers");
                         for (Map.Entry<String, Object> entry : headersMap.toHashMap().entrySet()) {
-                            if (entry.getValue() instanceof String) {
-                                requestBuilder.addHeader(entry.getKey(), (String) entry.getValue());
+                            Object value = entry.getValue();
+                            if (value != null) {
+                                if (!(value instanceof String)) {
+                                    promise.reject("bad_request", "fetchWithApproov header values must be strings");
+                                    return;
+                                }
+                                requestBuilder.addHeader(entry.getKey(), (String) value);
                             }
                         }
                     }
                 }
-                
+
                 requestBuilder.method(method, requestBody);
                 Request request = requestBuilder.build();
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on every fetch
+                // ephemeral builder: skip PinChangeListener to avoid leaking references on
+                // every fetch
                 ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
@@ -1715,24 +1948,24 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 // the underlying connection.
                 try (Response response = secureClient.newCall(request).execute()) {
                     // 4. Format the response for React Native
-                    WritableMap responseMap = com.facebook.react.bridge.Arguments.createMap();
+                    WritableMap responseMap = safeCreateMap();
                     responseMap.putInt("status", response.code());
-                    
-                    WritableMap responseHeaders = com.facebook.react.bridge.Arguments.createMap();
+
+                    WritableMap responseHeaders = safeCreateMap();
                     for (String headerName : response.headers().names()) {
                         responseHeaders.putString(headerName, response.header(headerName));
                     }
                     responseMap.putMap("headers", responseHeaders);
-                    
+
                     if (response.body() != null) {
                         responseMap.putString("body", response.body().string());
                     } else {
                         responseMap.putString("body", "");
                     }
-                    
+
                     promise.resolve(responseMap);
                 }
-                
+
             } catch (Exception e) {
                 log(LOG_ERROR, TAG, "fetchWithApproov failed: " + e.getMessage());
                 promise.reject("network_error", e.getMessage(), e);

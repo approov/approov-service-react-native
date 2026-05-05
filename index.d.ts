@@ -1,5 +1,25 @@
 export declare class ApproovService {
-  static initialize(config: string): Promise<void>;
+  /**
+   * Initializes Approov for the current app session.
+   *
+   * The optional `comment` parameter is an advanced SDK option. Most apps
+   * should omit it. It can be used to pass advanced native SDK comments,
+   * such as `reinit...` for supported runtime reinitialization flows or
+   * `options:...` for initialization-time options on the initial setup call.
+  */
+  static initialize(config: string, comment?: string | null): Promise<void>;
+  /**
+   * Returns true once the React Native Approov service layer has been initialized.
+   *
+   * This can be true even when Approov protection is disabled, such as when the
+   * service is initialized with an empty config string.
+   */
+  static isInitialized(): Promise<boolean>;
+  /**
+   * Returns true only when the native Approov SDK was successfully initialized
+   * with a non-empty config and active request protection is enabled.
+   */
+  static isApproovEnabled(): Promise<boolean>;
   /**
    * Secure fetch-compatible API for sensitive requests.
    *
@@ -138,6 +158,7 @@ export declare class ApproovService {
 }
 export interface ApproovProviderProps {
   config: string;
+  comment?: string | null;
   onInit?: () => void | Promise<void>;
   children?: React.ReactNode;
 }

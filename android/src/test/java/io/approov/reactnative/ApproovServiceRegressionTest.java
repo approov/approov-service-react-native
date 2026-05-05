@@ -1,6 +1,7 @@
 package io.approov.reactnative;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import android.content.res.AssetManager;
 
+import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableType;
@@ -37,33 +39,56 @@ import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
+import java.util.HashMap;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 public class ApproovServiceRegressionTest {
 
     private ReactApplicationContext reactContext;
     private MockedStatic<NetworkingModule> networkingModuleStatic;
+    private MockedStatic<Approov> approovStatic;
 
     @Before
     public void setUp() throws Exception {
+        resetServiceStaticState();
         reactContext = mock(ReactApplicationContext.class);
         AssetManager assetManager = mock(AssetManager.class);
         when(reactContext.getAssets()).thenReturn(assetManager);
         when(assetManager.open(anyString())).thenThrow(new IOException("missing"));
 
         networkingModuleStatic = mockStatic(NetworkingModule.class);
+        approovStatic = mockStatic(Approov.class);
+        approovStatic.when(() -> Approov.getPins("public-key-sha256")).thenReturn(java.util.Collections.emptyMap());
     }
 
     @After
     public void tearDown() {
+        resetServiceStaticState();
+        approovStatic.close();
         networkingModuleStatic.close();
     }
 
     private ApproovService newService() {
         return new ApproovService(reactContext);
+    }
+
+    private void resetServiceStaticState() {
+        try {
+            java.lang.reflect.Field initializedField = ApproovService.class.getDeclaredField("isInitialized");
+            initializedField.setAccessible(true);
+            initializedField.set(null, false);
+
+            java.lang.reflect.Field configField = ApproovService.class.getDeclaredField("initialConfig");
+            configField.setAccessible(true);
+            configField.set(null, null);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to reset ApproovService static state", e);
+        }
     }
 
     private static String readBody(InputStream inputStream) throws IOException {
@@ -111,6 +136,42 @@ public class ApproovServiceRegressionTest {
 
         verify(promise, timeout(2000))
             .reject("bad_request", "fetchWithApproov body must be a string when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonObjectHeaders() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Boolean);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov headers must be an object when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonStringHeaderValues() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+        ReadableMap headers = mock(ReadableMap.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Map);
+        when(options.getMap("headers")).thenReturn(headers);
+
+        HashMap<String, Object> headersMap = new HashMap<>();
+        headersMap.put("X-Bad-Header", true);
+        when(headers.toHashMap()).thenReturn(headersMap);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov header values must be strings");
     }
 
     @Test
@@ -188,6 +249,47 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
+    public void initializeWithEmptyConfigMarksLayerInitializedWithoutApproovSdkCalls() {
+        ApproovService service = newService();
+        Promise promise = mock(Promise.class);
+
+        approovStatic.reset();
+        approovStatic.when(() -> Approov.getPins("public-key-sha256")).thenReturn(java.util.Collections.emptyMap());
+
+        service.initialize("", null, promise);
+
+        verify(promise, timeout(2000)).resolve(null);
+        assertTrue(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+        approovStatic.verifyNoInteractions();
+    }
+
+    @Test
+    public void statusMethodsReflectServiceLayerAndApproovEnabledStates() {
+        ApproovService service = newService();
+        Promise initializedPromise = mock(Promise.class);
+        Promise enabledPromise = mock(Promise.class);
+
+        service.isInitialized(initializedPromise);
+        service.isApproovEnabled(enabledPromise);
+
+        verify(initializedPromise).resolve(false);
+        verify(enabledPromise).resolve(false);
+
+        Promise initializePromise = mock(Promise.class);
+        service.initialize("", null, initializePromise);
+        verify(initializePromise, timeout(2000)).resolve(null);
+
+        Promise initializedAfterEmptyConfig = mock(Promise.class);
+        Promise enabledAfterEmptyConfig = mock(Promise.class);
+        service.isInitialized(initializedAfterEmptyConfig);
+        service.isApproovEnabled(enabledAfterEmptyConfig);
+
+        verify(initializedAfterEmptyConfig).resolve(true);
+        verify(enabledAfterEmptyConfig).resolve(false);
+    }
+
+    @Test
     public void updateClientFactoryWrapExistingStripsDuplicateApproovInterceptors() {
         ApproovService service = newService();
         Promise promise = mock(Promise.class);
@@ -224,4 +326,5 @@ public class ApproovServiceRegressionTest {
             assertTrue(recoveredClient.interceptors().contains(extraInterceptor));
         }
     }
+
 }

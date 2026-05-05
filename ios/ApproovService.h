@@ -138,4 +138,5 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
                 resolver:(RCTPromiseResolveBlock)resolve
                 rejecter:(RCTPromiseRejectBlock)reject;
 
+
 @end

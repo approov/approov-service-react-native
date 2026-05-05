@@ -119,6 +119,11 @@ NSString *initialConfigString = nil;
 // initialization
 BOOL pendingPrefetch = NO;
 
+static BOOL ApproovIsEnabled(void) {
+  return isInitialized && initialConfigString != nil &&
+         [initialConfigString length] != 0;
+}
+
 // proceedOnNetworkFail has been removed; network failure handling is now
 // controlled entirely via ApproovServiceMutator
 
@@ -227,20 +232,33 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (config != nil) {
     // initialize the SDK
     NSError *initializationError = nil;
-    [Approov initialize:config
-           updateConfig:@"auto"
-                comment:nil
-                  error:&initializationError];
-    if (initializationError) {
+    BOOL initializationResult = YES;
+    if ([config length] != 0) {
+      initializationResult = [Approov initialize:config
+                                    updateConfig:@"auto"
+                                         comment:nil
+                                           error:&initializationError];
+    }
+    BOOL alreadyInitialized = (!initializationResult && initializationError == nil);
+    if (alreadyInitialized) {
+      ApproovLogI(@"native SDK reported already initialized during launch "
+                  @"initialization");
+    } else if (initializationError) {
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
-    } else {
+    }
+    
+    if (initializationResult || alreadyInitialized) {
       // complete the initialization
-      [Approov setUserProperty:@"approov-react-native"];
       initialConfigString = config;
       isInitialized = YES;
-      ApproovLogI(@"initialized on launch on deviceID %@",
-                  [Approov getDeviceID]);
+      if (ApproovIsEnabled()) {
+        [Approov setUserProperty:@"approov-react-native"];
+        ApproovLogI(@"initialized on launch on deviceID %@",
+                    [Approov getDeviceID]);
+      } else {
+        ApproovLogI(@"initialized on launch without Approov SDK");
+      }
 
       // get the Approov properties
       ApproovProps *props = [ApproovProps sharedProps];
@@ -317,12 +335,18 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * @param resolve is used if the operation resolved without error
  * @param reject is used if the operation failed with an error
  */
-RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
-    RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(initialize : (NSString *)config
+                  comment : (NSString *_Nullable)comment
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
   @synchronized(initializerLock) {
-    if (isInitialized) {
-      // if the SDK is previously initialized then check the config string is
-      // the same
+    BOOL allowReinitialize =
+        comment != nil && [comment hasPrefix:@"reinit"];
+    BOOL allowEnableAfterEmptyInitialization =
+        isInitialized && initialConfigString != nil &&
+        [initialConfigString length] == 0 && [config length] != 0;
+    if (isInitialized && !allowEnableAfterEmptyInitialization) {
+      // if the SDK is previously initialized then check the config string is the same
       if (![initialConfigString isEqualToString:config]) {
         NSError *error =
             [[NSError alloc] initWithDomain:@"io.approov.reactnative"
@@ -331,17 +355,44 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
         reject(@"initialize",
                @"attempt to reinitialize Approov SDK with a different config",
                error);
-      } else {
-        resolve(nil);
+        return;
       }
-    } else {
-      // initialize the Approov SDK
-      NSError *initializationError = nil;
-      [Approov initialize:config
-             updateConfig:@"auto"
-                  comment:nil
-                    error:&initializationError];
-      if (initializationError) {
+      
+      if (!allowReinitialize) {
+        resolve(nil);
+        return;
+      }
+    }
+
+    // initialize the Approov SDK
+    NSError *initializationError = nil;
+    BOOL initializationResult = YES;
+    if ([config length] != 0) {
+        initializationResult = [Approov initialize:config
+                                      updateConfig:@"auto"
+                                           comment:comment
+                                             error:&initializationError];
+      }
+      if (!initializationResult && initializationError == nil) {
+        ApproovLogI(@"native SDK reported already initialized during explicit "
+                    @"initialization");
+        initialConfigString = config;
+        isInitialized = YES;
+        @synchronized(earliestNetworkRequestTimeLock) {
+          earliestNetworkRequestTime = 0.0;
+        }
+        if (ApproovIsEnabled()) {
+          [Approov setUserProperty:@"approov-react-native"];
+          ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
+        } else {
+          ApproovLogI(@"initialized without Approov SDK");
+        }
+        if (pendingPrefetch) {
+          [self prefetch];
+          pendingPrefetch = NO;
+        }
+        resolve(nil);
+      } else if (initializationError) {
         ApproovLogE(@"initialization failed: %@",
                     [initializationError localizedDescription]);
         NSError *error =
@@ -353,21 +404,38 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
                              [initializationError localizedDescription]];
         reject(@"initialize", details, error);
       } else {
-        [Approov setUserProperty:@"approov-react-native"];
         initialConfigString = config;
         isInitialized = YES;
         @synchronized(earliestNetworkRequestTimeLock) {
           earliestNetworkRequestTime = 0.0;
         }
-        ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
+        if (ApproovIsEnabled()) {
+          [Approov setUserProperty:@"approov-react-native"];
+          ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
+        } else {
+          ApproovLogI(@"initialized without Approov SDK");
+        }
         if (pendingPrefetch) {
           [self prefetch];
           pendingPrefetch = NO;
         }
         resolve(nil);
       }
-    }
   }
+}
+
+RCT_EXPORT_METHOD(isInitialized : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@(isInitialized));
+}
+
+RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@(ApproovIsEnabled()));
+}
+
++ (id)networkRequestLock {
+  return earliestNetworkRequestTimeLock;
 }
 
 /**
@@ -379,6 +447,11 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config resolver : (
  */
 RCT_EXPORT_METHOD(getLastARC : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized || !ApproovIsEnabled()) {
+    resolve(@"");
+    return;
+  }
+
   // Get the dynamic pins from Approov
   NSDictionary<NSString *, NSArray<NSString *> *> *approovPins =
       [Approov getPins:@"public-key-sha256"];
@@ -397,8 +470,11 @@ RCT_EXPORT_METHOD(getLastARC : (RCTPromiseResolveBlock)
     }
   }
   if (hostname != nil) {
+    NSString *fetchURL =
+        [hostname containsString:@"://"] ? hostname
+                                          : [@"https://" stringByAppendingString:hostname];
     ApproovTokenFetchResult *result =
-        [Approov fetchApproovTokenAndWait:hostname];
+        [Approov fetchApproovTokenAndWait:fetchURL];
     // Check if a token was fetched successfully and return its arc code
     if (result.token != nil && result.token.length > 0) {
       if (result.ARC != nil) {
@@ -660,18 +736,20 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
 
 /**
  * Adds an exclusion URL regular expression. If a URL for a request matches this
- * regular expression then it will not be subject to any Approov protection.
- * Note that this facility must be used with EXTREME CAUTION due to the impact
- * of dynamic pinning. Pinning may be applied to all domains added using
- * Approov, and updates to the pins are received when an Approov fetch is
- * performed. If you exclude some URLs on domains that are protected with
- * Approov, then these will be protected with Approov pins but without a path to
- * update the pins until a URL is used that is not excluded. Thus you are
- * responsible for ensuring that there is always a possibility of calling a
- * non-excluded URL, or you should make an explicit call to fetchToken if there
- * are persistent pinning failures. Conversely, use of those option may allow a
- * connection to be established before any dynamic pins have been received via
- * Approov. thus potentially opening the channel to a MitM.
+ * regular expression then it will bypass Approov request mutation, such as token
+ * injection, trace headers, message signing and secure string substitution. If
+ * the URL belongs to a host that is protected by Approov then the connection is
+ * still subject to Approov pinning. Note that this facility must be used with
+ * EXTREME CAUTION due to the impact of dynamic pinning. Pinning may be applied
+ * to all domains added using Approov, and updates to the pins are received when
+ * an Approov fetch is performed. If you exclude some URLs on domains that are
+ * protected with Approov, then these will be protected with Approov pins but
+ * without a path to update the pins until a URL is used that is not excluded.
+ * Thus you are responsible for ensuring that there is always a possibility of
+ * calling a non-excluded URL, or you should make an explicit call to fetchToken
+ * if there are persistent pinning failures. Conversely, use of this option may
+ * allow a connection to be established before any dynamic pins have been
+ * received via Approov. Thus potentially opening the channel to a MitM.
  *
  * @param urlRegex is the regular expression that will be compared against URLs
  * to exclude them
@@ -703,7 +781,7 @@ RCT_EXPORT_METHOD(removeExclusionURLRegex : (NSString *)urlRegex) {
  * able to use cached data.
  */
 RCT_EXPORT_METHOD(prefetch) {
-  if (isInitialized) {
+  if (ApproovIsEnabled()) {
     ApproovLogI(@"prefetch initiated");
     [Approov
         fetchApproovToken:^(ApproovTokenFetchResult *result) {
@@ -716,6 +794,8 @@ RCT_EXPORT_METHOD(prefetch) {
                 @"prefetch: %@",
                 [Approov stringFromApproovTokenFetchStatus:result.status]);
         }:@"approov.io"];
+  } else if (isInitialized) {
+    ApproovLogI(@"prefetch bypassed because Approov is disabled");
   } else {
     ApproovLogI(@"prefetch pending");
     pendingPrefetch = YES;
@@ -738,6 +818,22 @@ RCT_EXPORT_METHOD(prefetch) {
  */
 RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
   [Approov
       fetchSecureString:^(ApproovTokenFetchResult *result) {
         if (result.status == ApproovTokenFetchStatusUnknownKey)
@@ -824,6 +920,22 @@ RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
  */
 RCT_EXPORT_METHOD(setDataHashInToken : (NSString *)data resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
   ApproovLogI(@"setDataHashInToken");
   [Approov setDataHashInToken:data];
   resolve(nil);
@@ -843,6 +955,22 @@ RCT_EXPORT_METHOD(setDataHashInToken : (NSString *)data resolver : (
  */
 RCT_EXPORT_METHOD(fetchToken : (NSString *)url resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
   [Approov
       fetchApproovToken:^(ApproovTokenFetchResult *result) {
         ApproovLogI(@"fetchToken %@: %@", url,
@@ -923,6 +1051,23 @@ RCT_EXPORT_METHOD(getMessageSignature : (NSString *)message resolver : (
 RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
                       newDef resolver : (RCTPromiseResolveBlock)
                           resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
+
   // determine the type of operation as the values themselves cannot be logged
   NSString *type = @"lookup";
   if (newDef != nil)
@@ -990,6 +1135,42 @@ RCT_EXPORT_METHOD(fetchSecureString : (NSString *)key newDef : (NSString *)
  */
 RCT_EXPORT_METHOD(fetchCustomJWT : (NSString *)payload resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!isInitialized) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is not initialized", error);
+    return;
+  }
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"approov_error", @"Approov is disabled", error);
+    return;
+  }
+
+  // Defensive JSON pre-validation for a cleaner, immediate error path.
+  // Unlike Android (which throws IllegalArgumentException synchronously),
+  // the iOS SDK handles malformed payloads safely by returning
+  // ApproovTokenFetchStatusBadPayload via the async callback. This
+  // pre-check is therefore optional but provides a more descriptive
+  // rejection message without waiting for the SDK round-trip. No size
+  // restriction is imposed here — the SDK docs specify none.
+  NSData *data = [payload dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *jsonError = nil;
+  id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+  if (!jsonObject || ![jsonObject isKindOfClass:[NSDictionary class]]) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"fetchCustomJWT", @"IllegalArgument: Malformed JSON payload", error);
+    return;
+  }
+
   [Approov
       fetchCustomJWT:^(ApproovTokenFetchResult *result) {
         ApproovLogI(@"fetchCustomJWT: %@",
@@ -1150,6 +1331,14 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
   }
 
+  if (!ApproovIsEnabled()) {
+    ApproovLogI(@"Approov disabled, forwarding: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"approov disabled forwarded"];
+  }
+
   // obtain a copy of the exclusion URL regular expressions in a thread safe way
   NSSet<NSString *> *exclusionURLs;
   @synchronized(exclusionURLRegexs) {
@@ -1192,10 +1381,10 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   // fetch the Approov token and log the result
-  ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:host];
+  ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
   if (!suppressLoggingUnknownURL ||
       ([result status] != ApproovTokenFetchStatusUnknownURL))
-    ApproovLogI(@"token for %@: %@", host, [result loggableToken]);
+    ApproovLogI(@"token for %@: %@", url, [result loggableToken]);
 
   // log if a configuration update is received and call fetchConfig to clear the
   // update state
@@ -1216,7 +1405,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSError *mutatorError = nil;
       BOOL shouldProceed = [[ApproovServiceMutatorBridge shared]
           handleInterceptorFetchTokenResult:result
-                                        url:host
+                                        url:url
                                errorPointer:&mutatorError];
 
       // If mutator returned false, block the request as appropriate
@@ -1249,11 +1438,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
         } else if (status == ApproovTokenFetchStatusNoApproovService) {
           // Default behavior for NO_APPROOV_SERVICE is to proceed without an
           // Approov token unless a custom mutator chooses otherwise.
-          return [ApproovInterceptorResult
-              createWithRequest:updatedRequest
-                     withAction:ApproovInterceptorActionProceed
-                    withMessage:[Approov
-                                    stringFromApproovTokenFetchStatus:status]];
+          // We fall through to allow status injection if enabled.
         } else {
           return [ApproovInterceptorResult
               createWithRequest:updatedRequest
@@ -1273,26 +1458,29 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   if (status == ApproovTokenFetchStatusSuccess) {
     // add the Approov token to the required header
-    NSString *tokenHeader;
-    @synchronized(approovTokenHeader) {
-      tokenHeader = approovTokenHeader;
+    if ((result.token != nil && result.token.length > 0) ||
+        useApproovStatusIfNoToken) {
+      NSString *tokenHeader;
+      @synchronized(approovTokenHeader) {
+        tokenHeader = approovTokenHeader;
+      }
+      NSString *tokenPrefix;
+      @synchronized(approovTokenPrefix) {
+        tokenPrefix = approovTokenPrefix;
+      }
+      NSString *value = @"";
+      if (useApproovStatusIfNoToken &&
+          (!result.token || result.token.length == 0)) {
+        value = [NSString
+            stringWithFormat:@"%@%@", tokenPrefix,
+                             [Approov
+                                 stringFromApproovTokenFetchStatus:result
+                                                                       .status]];
+      } else {
+        value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
+      }
+      [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
     }
-    NSString *tokenPrefix;
-    @synchronized(approovTokenPrefix) {
-      tokenPrefix = approovTokenPrefix;
-    }
-    NSString *value = @"";
-    if (useApproovStatusIfNoToken &&
-        (!result.token || result.token.length == 0)) {
-      value = [NSString
-          stringWithFormat:@"%@%@", tokenPrefix,
-                           [Approov
-                               stringFromApproovTokenFetchStatus:result
-                                                                     .status]];
-    } else {
-      value = [NSString stringWithFormat:@"%@%@", tokenPrefix, [result token]];
-    }
-    [updatedRequest setValue:value forHTTPHeaderField:tokenHeader];
 
     NSString *traceIDHeader;
     @synchronized(approovTraceIDHeader) {
@@ -1307,6 +1495,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     // We are proceeding (allowed by mutator) with a failure status.
     // Add the status string to the Approov token header if
     // useApproovStatusIfNoToken is set, so callers can observe it.
+    ApproovLogD(@"Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
     if (useApproovStatusIfNoToken) {
       NSString *tokenHeader;
       @synchronized(approovTokenHeader) {
@@ -1323,16 +1512,16 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
   }
 
-  // we just return early with anything other than a success or unprotected URL
+  // we just return early with anything other than a success
   // - this is to ensure we don't make further Approov fetches if there has been
   // a problem and also that we don't do header or query parameter substitutions
   // in domains not known to Approov (which therefore might not be pinned)
-  if ((status != ApproovTokenFetchStatusSuccess) &&
-      (status != ApproovTokenFetchStatusUnprotectedURL))
+  if (status != ApproovTokenFetchStatusSuccess) {
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
               withMessage:[Approov stringFromApproovTokenFetchStatus:status]];
+  }
 
   // obtain a copy of the substitution headers in a thread safe way
   NSDictionary<NSString *, NSString *> *subsHeaders;
@@ -1646,9 +1835,8 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
   }
 
   // if the Approov SDK is not initialized then there are no pins so we proceed
-  if (!isInitialized) {
-    ApproovLogE(@"verifyPins for %@ called when Approov SDK not initialized",
-                host);
+  if (!ApproovIsEnabled()) {
+    ApproovLogI(@"verifyPins for %@ called while Approov is disabled", host);
     return ApproovTrustDecisionNotPinned;
   }
 

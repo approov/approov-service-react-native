@@ -2,15 +2,26 @@
 
 This document describes the features and functionality of the Approov Service for React Native. It provides details on how to interact with the service layer and customize its behavior to suit your application's needs.
 
+## Empty Config Initialization
+You can initialize the `ApproovService` with an empty configuration string if you want the React Native environment to behave as a standard set of networking APIs (like `fetch` or `XMLHttpRequest`) without active Approov protection. This is useful for remote activation of Approov or when you need a bypass state (e.g., for specific deployment environments).
+
+> ```javascript
+> // Initialize with an empty string to operate as a standard network client
+> ApproovService.initialize("");
+> ```
+
+When initialized this way, all network requests made through the native React Native networking module will proceed without Approov token injection, message signing, secure string substitution, or dynamic pinning. You can enable full Approov protection later in the application lifecycle by calling `ApproovService.initialize(config)` with a valid configuration string.
+
 ## ⚠️ Critical: Initialization Timing & Network Requests
 
 The Approov SDK must fully complete its native initialization sequence and receive your configuration string before it can protect your network traffic.
 
 If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
 
-> [!WARNING]
 > You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
 > A request that leaves the device before initialization completes may be forwarded without an Approov token.
+> If you intentionally initialize with `""`, that request path is treated as an explicit no-Approov bootstrap mode: requests will proceed without Approov protection until you later call `ApproovService.initialize("<valid-config>")`.
+> This empty-first then valid-config-later flow is supported for advanced service-layer integrations, but switching directly between different non-empty config strings is still rejected.
 > The extended session metadata ledger exposed by `getSessionDiagnostics()` is intended only for development and troubleshooting startup/interception issues.
 > On iOS, **turn it off for production** with `ApproovService.setSessionMetadataCollectionEnabled(false)` as part of startup.
 > Android currently does not persist an equivalent session ledger; this toggle is retained there only for API parity.
@@ -101,7 +112,6 @@ If you are also using `ApproovService.getSessionDiagnostics()`, treat it as a te
 ApproovService.setSessionMetadataCollectionEnabled(false);
 ```
 
-> [!WARNING]
 > Do not leave `getSessionDiagnostics()` metadata collection enabled in production on iOS.
 > The ledger is capped internally to about 1 MB to prevent unbounded growth, but it still stores extra diagnostic state that should only exist during development, staging, or short-lived rollout debugging.
 > On Android this toggle is currently a no-op for ledger storage.
@@ -154,9 +164,9 @@ It is possible to sign HTTP requests using Approov to ensure message integrity a
 *   **Integrity:** Ensures that the request parameters (headers, body, URL) have not been tampered with during transit.
 *   **Authenticity:** Proves that the request originated from a genuine, attested application instance.
 
-Message signing is opt-in. It must be configured natively on both iOS and Android before initialization if you wish to use it.
+Message signing is enabled automatically by the default `ApproovService` configuration. If your Approov account has message signing enabled, the SDK will automatically add the message signature headers to your outbound requests.
 
-For more details on how to enable or configure message signing, see the [Approov Service Mutator](#approov-service-mutator) section below.
+For more details on how to configure or override message signing behavior, see the [Approov Service Mutator](#approov-service-mutator) section below.
 
 ## Token Binding
 
@@ -232,19 +242,148 @@ Because the React Native bridge does not support passing complex executable code
 
 ## Default Behavior: HTTP Message Signing
 
-By default, the Approov Service is configured with a default mutator (`ApproovServiceMutator.DEFAULT` / `ApproovServiceMutatorDefault`) that **does not perform HTTP Message Signing**. It simply fetches the Approov token and adds the `Approov-Token` header to requests.
+By default, the Approov Service is configured with a default mutator (`ApproovDefaultMessageSigning`) that **automatically performs HTTP Message Signing**. It fetches the Approov token, adds the `Approov-Token` header to requests, and generates the required message signature headers.
 
-If you need HTTP Message Signing, or you need to change other networking behaviors, you must do so natively by setting a custom `ApproovServiceMutator`.
+If you need to change other networking behaviors, you can do so natively by setting a custom `ApproovServiceMutator`.
 
 ## Customizing Request Handling with Native Mutators
 
-You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or enabling HTTP Message Signing.
+You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or proceeding on failures while preserving HTTP Message Signing.
 
-### Enabling Message Signing
+### Proceed On Selected Failure Statuses And Sign The Request
 
-To enable HTTP Message Signing, you must register the `ApproovDefaultMessageSigning` mutator. If you also want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.
+The example below shows a custom mutator that:
 
-Below are examples of how to implement and register a custom mutator that enforces tokens and simultaneously enables message signing.
+- uses the normal Approov token flow on `SUCCESS`
+- allows requests to continue on `MITM_DETECTED` and `NO_APPROOV_SERVICE`
+- signs the final outbound request with `ApproovDefaultMessageSigning`
+
+To send the failure reason in the token header when the request is allowed to continue without a real token, you must also enable:
+
+```javascript
+ApproovService.setUseApproovStatusIfNoToken(true);
+```
+
+With that setting enabled, the service layer places the failure status string into the configured token header, for example `Approov-Token: MITM_DETECTED` or `Approov-Token: NO_APPROOV_SERVICE`.
+
+
+### Android Implementation (Java)
+
+```java
+package com.yourcompany.yourapp;
+
+import com.criticalblue.approovsdk.Approov;
+
+import io.approov.reactnative.ApproovDefaultMessageSigning;
+import io.approov.reactnative.ApproovException;
+import io.approov.reactnative.ApproovService;
+import io.approov.reactnative.ApproovServiceMutator;
+
+public class ProceedOnSelectedStatusesMutator extends ApproovDefaultMessageSigning {
+
+    public ProceedOnSelectedStatusesMutator() {
+        setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+    }
+
+    @Override
+    public boolean handleInterceptorFetchTokenResult(ApproovService service,
+            Approov.TokenFetchResult approovResults,
+            String url) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+
+        if (status == Approov.TokenFetchStatus.SUCCESS ||
+            status == Approov.TokenFetchStatus.MITM_DETECTED ||
+            status == Approov.TokenFetchStatus.NO_APPROOV_SERVICE) {
+            return true;
+        }
+
+        return ApproovServiceMutator.super
+            .handleInterceptorFetchTokenResult(service, approovResults, url);
+    }
+}
+```
+
+Register it before React Native networking starts:
+
+```java
+import android.app.Application;
+
+import io.approov.reactnative.ApproovService;
+
+public class MainApplication extends Application {
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        ApproovService.setServiceMutator(new ProceedOnSelectedStatusesMutator());
+    }
+}
+```
+
+### iOS Implementation (Swift)
+
+```swift
+import Foundation
+import approov_service_react_native
+
+final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
+    private let signer: ApproovDefaultMessageSigning
+
+    init() {
+        let signer = ApproovDefaultMessageSigning()
+        _ = signer.setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+        )
+        self.signer = signer
+    }
+
+    func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                           url: String) throws -> Bool {
+        switch approovResults.status {
+        case .success, .mitmDetected, .noApproovService:
+            return true
+        default:
+            return try ApproovServiceMutatorDefault.shared
+                .handleInterceptorFetchTokenResult(approovResults, url: url)
+        }
+    }
+
+    func handleInterceptorProcessedRequest(_ request: URLRequest,
+                                           changes: ApproovRequestMutations) throws -> URLRequest {
+        return try signer.handleInterceptorProcessedRequest(request, changes: changes)
+    }
+}
+```
+
+Register it during app startup:
+
+```swift
+import approov_service_react_native
+
+@UIApplicationMain
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        ApproovServiceMutatorBridge.shared.serviceMutator = ProceedOnSelectedStatusesMutator()
+        return true
+    }
+}
+```
+
+In JavaScript, enable status-as-token before making protected requests:
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+await ApproovService.initialize('<your-config-string>');
+ApproovService.setUseApproovStatusIfNoToken(true);
+```
+
+### Customizing Mutators with Message Signing
+
+Since `ApproovDefaultMessageSigning` is the default mutator, you must ensure that your custom mutator continues to invoke the message signer. If you want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.
+
+Below are examples of how to implement and register a custom mutator that enforces tokens and simultaneously preserves message signing.
 
 ### Android Implementation (Java)
 
@@ -527,37 +666,43 @@ class PolicyDrivenMutator: ApproovServiceMutator {
 
 ### Log rejections with ARC + device ID to your telemetry
 
-An important part of your security strategy is to monitor and analyze rejections. Ideally, the server response would be customized to include the ARC and device ID in the response body or headers. However, if this is not possible, you can obtain these values from the `ApproovService` and log them to your telemetry directly from your application code.
+Monitoring and analyzing rejections is a key part of your security strategy. Ideally, your backend should be customized to include the **ARC (Approov Rejection Code)** and **Device ID** in its error responses (e.g., in a JSON body or a custom header) when it rejects a request due to a missing or invalid Approov token.
 
-This example shows how to log rejections with the ARC and device ID using the global JS `fetch` API. It assumes you are using a custom native `ApproovServiceMutator` that prevents requests from proceeding without an Approov token. If this is not the case, and a request is made in poor network conditions, there is a small chance that `getLastARC()` will be executed just as the network interface becomes available. This would provide an ARC even though the original request timed out without one. The following code is a simple example of how to implement this logging:
+#### Why Server-Side Logging is Preferred
+While you can obtain these values directly from the SDK using `ApproovService.getLastARC()`, it is generally safer and more reliable to log them from the server response for several reasons:
 
-```javascript
-import { ApproovService } from '@approov/approov-service-react-native';
+1.  **Avoid Misleading Network Events**: On poor network connections, a call to `getLastARC()` can inadvertently trigger a background network event that successfully completes a delayed attestation. This might provide an ARC associated with a *successful* attestation that occurred *after* your original request failed, creating confusing telemetry.
+2.  **Corporate Firewall & MITM Bypass**: If your custom native mutator allows a request to proceed on `MITM_DETECTED` (a common result of corporate firewalls), the request is sent without a token. In this state, `getLastARC()` will not yet have a rejection code available for that specific attempt.
+3.  **Accuracy and Correlation**: Logging the ARC that the server actually observed and used as the basis for rejection ensures perfect correlation in your monitoring dashboards.
 
-async function makeProtectedRequest(url, options) {
-    try {
-        const response = await fetch(url, options);
-        if (response.ok) {
-            // Process request
-            return response;
-        } else {
-            // Log rejection: ARC + device ID can be added for correlating a particular request to the failure reason
-            
-            // We are certain we have an ARC code because our custom native ApproovServiceMutator
-            // prevents requests without an Approov token to proceed. If this is not the case,
-            // we will not have an ARC code and should SKIP obtaining the ARC.
-            const arc = await ApproovService.getLastARC();
-            const deviceID = await ApproovService.getDeviceID();
-            
-            console.log(`Request rejected with ARC: ${arc} and device ID: ${deviceID}; response code: ${response.status}`);
-            return response;
-        }
-    } catch (error) {
-        console.error("Network request failed", error);
-        throw error;
-    }
-}
-```
+If you must log from the client, ensure you have a fallback strategy for when the server doesn't provide the code.
+
+> ```javascript
+> import { ApproovService } from '@approov/approov-service-react-native';
+> 
+> async function makeProtectedRequest(url, options) {
+>     try {
+>         const response = await fetch(url, options);
+>         if (response.ok) {
+>             return response;
+>         } else {
+>             // Preferred: Extract ARC and Device ID from your own server's response
+>             const serverArc = response.headers.get("X-Approov-Error-ARC");
+>             
+>             // ALTERNATIVE: (DISCOURAGED) Obtain from SDK ONLY if server-side retrieval is impossible.
+>             // Note: This may trigger background network events and return misleading results.
+>             const arc = serverArc || await ApproovService.getLastARC();
+>             const deviceID = await ApproovService.getDeviceID();
+>             
+>             console.log(`Request rejected. ARC: ${arc}, Device ID: ${deviceID}`);
+>             return response;
+>         }
+>     } catch (error) {
+>         console.error("Network request failed", error);
+>         throw error;
+>     }
+> }
+> ```
 
 ## Tips
 

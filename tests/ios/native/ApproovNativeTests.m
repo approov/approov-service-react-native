@@ -433,10 +433,10 @@ static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
       delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   AssertEqualIntegers(0, waitResult,
                       @"Synthetic dataTaskWithURL retry should complete in time");
-  AssertTrue(delegate.error == nil,
-             @"Synthetic dataTaskWithURL retry should not fail with NSError");
-  AssertEqualIntegers(503, delegate.response.statusCode,
-                      @"Synthetic dataTaskWithURL retry should surface a 503 status");
+  AssertTrue(delegate.error != nil,
+             @"Synthetic dataTaskWithURL retry should fail with an NSError");
+  AssertEqualIntegers(503, delegate.error.code,
+                      @"Synthetic dataTaskWithURL retry should surface a 503 error code");
   AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
                       @"Synthetic dataTaskWithURL retry should not include a body");
   AssertEqualIntegers(1, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
@@ -488,10 +488,10 @@ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
       delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   AssertEqualIntegers(0, waitResult,
                       @"Synthetic retry response should complete in time");
-  AssertTrue(delegate.error == nil,
-             @"Synthetic retry response should not complete with an NSError");
-  AssertEqualIntegers(503, delegate.response.statusCode,
-                      @"Synthetic retry response should surface a 503 status");
+  AssertTrue(delegate.error != nil,
+             @"Synthetic retry response should complete with an NSError");
+  AssertEqualIntegers(503, delegate.error.code,
+                      @"Synthetic retry response should surface a 503 error code");
   AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
                       @"Synthetic retry response should not include a body payload");
   AssertEqualIntegers(1, (NSInteger)ApproovTestFetchApproovTokenCallCount(),

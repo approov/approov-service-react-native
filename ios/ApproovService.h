@@ -82,15 +82,15 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 ///
 /// @param request the requesst
 /// @return the result including a modifieed request and status code and message
-- (ApproovInterceptorResult *)interceptRequest:(NSURLRequest *)request;
+- (ApproovInterceptorResult * _Nonnull)interceptRequest:(NSURLRequest * _Nonnull)request;
 
 /// Verifies the server presents valid pinned certificates.
 ///
 /// @param serverTrust the server's trust object
 /// @param host the requested server host name
 /// @return a trust decision - allow, block, or not pinned
-- (ApproovTrustDecision)verifyPins:(SecTrustRef)serverTrust
-                           forHost:(NSString *)host;
+- (ApproovTrustDecision)verifyPins:(SecTrustRef _Nonnull)serverTrust
+                           forHost:(NSString * _Nonnull)host;
 
 /// Returns the current state of proceed on network fail.
 ///
@@ -102,29 +102,29 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// Returns the current token header.
 ///
 /// @return the current token header
-+ (NSString *)sharedTokenHeader;
++ (NSString * _Nullable)sharedTokenHeader;
 
 /// Returns the current trace ID header.
 ///
 /// @return the current trace ID header
-+ (NSString *)sharedTraceIDHeader;
++ (NSString * _Nullable)sharedTraceIDHeader;
 
 /// Returns the current exclusion URL regexs.
 ///
 /// @return a set of exclusion URL regexs
-+ (NSMutableSet<NSString *> *)sharedExclusionURLRegexs;
++ (NSMutableSet<NSString *> * _Nonnull)sharedExclusionURLRegexs;
 
 /// Gets the signature for the given message using the install private key.
 ///
 /// @param message is the message to be signed
 /// @return the base64 encoded signature
-+ (NSString *)getInstallMessageSignature:(NSString *)message;
++ (NSString * _Nullable)getInstallMessageSignature:(NSString * _Nonnull)message;
 
 /// Gets the signature for the given message using the account signing key.
 ///
 /// @param message is the message to be signed
 /// @return the base64 encoded signature
-+ (NSString *)getAccountMessageSignature:(NSString *)message;
++ (NSString * _Nullable)getAccountMessageSignature:(NSString * _Nonnull)message;
 
 /// Performs a secure fetch bypassing any swizzling, applying Approov
 /// protections and pinning.
@@ -133,10 +133,10 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// @param options dictionary containing headers, body, method, etc.
 /// @param resolve promise resolver
 /// @param reject promise rejecter
-- (void)fetchWithApproov:(NSString *)url
-                 options:(NSDictionary *)options
-                resolver:(RCTPromiseResolveBlock)resolve
-                rejecter:(RCTPromiseRejectBlock)reject;
+- (void)fetchWithApproov:(NSString * _Nonnull)url
+                 options:(NSDictionary * _Nullable)options
+                resolver:(RCTPromiseResolveBlock _Nonnull)resolve
+                rejecter:(RCTPromiseRejectBlock _Nonnull)reject;
 
 
 @end

@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.5.14] - 2026-05-06
+- **Android Request Mutation Logging**: Added an INFO-level `request mutation` log line to the Android OkHttp interceptor that confirms the `Approov-Token` and trace ID headers were actually injected onto the outgoing request. The log uses the same `missing`/`empty`/`present(len=N)` format as the iOS `task mutation` log, closing an observability gap where token fetch was logged but header injection was silent.
+- **iOS Error Alignment**: Changed all iOS retry and failure paths from returning synthetic HTTP 503/499 status code responses to producing `NSError`-based failures. This aligns iOS behavior with Android, where SDK failures surface as thrown exceptions (`IOException` / `Network request failed`) rather than resolved HTTP responses. This prevents customer retry logic from inadvertently looping on synthetic 503 status codes and ensures both platforms present Approov failures identically to React Native's `fetch()` API.
+
 ## [3.5.13] - 2026-04-12
 - **Initialization Comment Bridging**: Extended the public React Native `ApproovService.initialize()` API and `ApproovProvider` to accept an optional nullable `comment` parameter and forward it to the native Approov SDK. This enables advanced SDK comments such as explicit `reinit...` runtime reinitialization and initial-call `options:...` configuration while remaining optional for normal app startup.
 - **Public Initialization Status Methods**: Added `ApproovService.isInitialized()` and `ApproovService.isApproovEnabled()` to the public React Native API so JavaScript can distinguish between service-layer initialization and active native Approov protection, matching the sibling URLSession and OkHttp service layers more closely.

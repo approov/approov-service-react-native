@@ -20,6 +20,13 @@ def safeExtGet(prop, fallback) {
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'com.github.johnrengelman.shadow'
+
+buildscript {
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:8.1.1'
+    }
+}
 
 def candidateMiniSdkRoots = [
     new File(projectDir, '../../core-service-layers-testing/mini-sdk/android'),
@@ -53,6 +60,7 @@ android {
         targetSdkVersion safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
         versionCode 1
         versionName "1.0"
+        consumerProguardFiles 'consumer-rules.pro'
     }
     testOptions {
         unitTests.returnDefaultValues = true
@@ -100,6 +108,17 @@ allprojects {
     }
 }
 
+configurations {
+    shadowed
+}
+
+tasks.register('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    archiveClassifier.set('shadow')
+    configurations = [project.configurations.shadowed]
+    relocate 'org.bouncycastle', 'io.approov.internal.bouncycastle'
+    exclude 'META-INF/**'
+}
+
 dependencies {
     //noinspection GradleDynamicVersion
     implementation fileTree(dir: "libs", include: ["*.aar"])
@@ -110,7 +129,9 @@ dependencies {
     } else {
         println 'optional rn-fetch-blob dependency not found'
     }
-    implementation 'org.bouncycastle:bcprov-jdk15to18:1.77'
+    shadowed 'org.bouncycastle:bcprov-jdk15to18:1.84'
+    compileOnly files(tasks.named('shadowJar'))
+    implementation files(tasks.named('shadowJar'))
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.mockito:mockito-core:4.11.0'
     testImplementation 'org.mockito:mockito-inline:4.11.0'
@@ -120,6 +141,10 @@ dependencies {
     if (miniSdkApproovJar != null) {
         testImplementation files(miniSdkApproovJar)
     }
+}
+
+tasks.withType(JavaCompile) {
+    dependsOn tasks.named('shadowJar')
 }
 
 if (miniSdkAndroidRoot != null) {

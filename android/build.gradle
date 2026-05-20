@@ -19,14 +19,17 @@ def safeExtGet(prop, fallback) {
     rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
 }
 
-apply plugin: 'com.android.library'
-apply plugin: 'com.github.johnrengelman.shadow'
-
 buildscript {
+    repositories {
+        gradlePluginPortal()
+    }
     dependencies {
         classpath 'com.github.jengelman.gradle.plugins:shadow:8.1.1'
     }
 }
+
+apply plugin: 'com.android.library'
+apply plugin: 'com.github.johnrengelman.shadow'
 
 def candidateMiniSdkRoots = [
     new File(projectDir, '../../core-service-layers-testing/mini-sdk/android'),

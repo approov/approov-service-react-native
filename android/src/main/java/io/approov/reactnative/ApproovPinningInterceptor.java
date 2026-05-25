@@ -25,6 +25,7 @@ import android.util.Log;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.security.MessageDigest;
 import java.security.cert.Certificate;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -33,7 +34,6 @@ import java.util.Map;
 
 import javax.net.ssl.SSLPeerUnverifiedException;
 
-import okhttp3.CertificatePinner;
 import okhttp3.Connection;
 import okhttp3.Handshake;
 import okhttp3.Interceptor;
@@ -136,39 +136,50 @@ public class ApproovPinningInterceptor implements Interceptor {
             throw new IOException("Approov pinning: no TLS connection information available");
 
         if (!isKnownValidHandshake(handshake)) {
-            // Build a pinner from the current Approov pins. At this point in the request
-            // lifecycle, the ApproovInterceptor (application layer) has already completed
-            // a token fetch, so Approov.getPins() returns immediately from the SDK cache —
-            // there is no blocking network call here.
-            CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
+            // Read the current Approov pins. At this point in the request lifecycle,
+            // ApproovInterceptor (application layer) has already completed a token fetch,
+            // so Approov.getPins() returns immediately from the SDK cache — no blocking.
             Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
-            for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {
-                String domain = entry.getKey();
-                if (!domain.equals("*")) {
-                    // "*" is for managed trust roots and must not be added directly
-                    List<String> pins = entry.getValue();
-                    // fall back to managed trust roots if no domain-specific pins
-                    if (pins.isEmpty() && allPins.get("*") != null)
-                        pins = allPins.get("*");
-                    for (String pin : pins) {
-                        pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
-                        Log.d(TAG, "pinning: applied pin to " + domain);
+            List<String> expectedPins = allPins.get(host);
+
+            if (expectedPins == null) {
+                // Host not in the pins map — not a protected domain, accept connection
+                Log.d(TAG, "pinning: " + host + " not in pin map, accepting");
+                addKnownValidHandshake(handshake);
+                return chain.proceed(chain.request());
+            }
+
+            if (expectedPins.isEmpty()) {
+                // Empty domain-specific list — fall back to managed trust roots
+                expectedPins = allPins.get("*");
+                if (expectedPins == null || expectedPins.isEmpty()) {
+                    // No managed trust roots either — accept any (system trust store applies)
+                    Log.d(TAG, "pinning: " + host + " using managed trust roots, accepting");
+                    addKnownValidHandshake(handshake);
+                    return chain.proceed(chain.request());
+                }
+            }
+
+            // Verify at least one peer certificate matches a configured pin
+            List<Certificate> peerCerts = handshake.peerCertificates();
+            boolean pinMatched = false;
+            outer:
+            for (Certificate cert : peerCerts) {
+                for (String pin : expectedPins) {
+                    if (matchesSPKIPin(cert, pin)) {
+                        pinMatched = true;
+                        break outer;
                     }
                 }
             }
-            CertificatePinner pinner = pinBuilder.build();
 
-            // verify the peer certificates presented during the TLS handshake
-            List<Certificate> peerCerts = handshake.peerCertificates();
-            try {
-                pinner.check(host, peerCerts);
-            } catch (SSLPeerUnverifiedException e) {
-                // close the socket to force a fresh TLS negotiation on the next request
-                Log.d(TAG, "pinning: failure for " + host + ": " + e.getMessage());
+            if (!pinMatched) {
+                Log.d(TAG, "pinning: failure for " + host);
                 Socket socket = connection.socket();
                 if (socket != null)
                     socket.close();
-                throw e;
+                throw new SSLPeerUnverifiedException(
+                        "Approov pinning: certificate pin mismatch for " + host);
             }
 
             addKnownValidHandshake(handshake);
@@ -176,5 +187,24 @@ public class ApproovPinningInterceptor implements Interceptor {
         }
 
         return chain.proceed(chain.request());
+    }
+
+    /**
+     * Returns true if the certificate's SPKI SHA-256 digest matches the given
+     * base64-encoded pin value (as returned by Approov.getPins("public-key-sha256")).
+     *
+     * @param cert     the peer certificate to check
+     * @param pinBase64 the expected SHA-256 SPKI digest, base64-encoded
+     * @return true if the pin matches
+     */
+    private static boolean matchesSPKIPin(Certificate cert, String pinBase64) {
+        try {
+            byte[] spki = cert.getPublicKey().getEncoded();
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(spki);
+            String actual = android.util.Base64.encodeToString(hash, android.util.Base64.NO_WRAP);
+            return pinBase64.equals(actual);
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

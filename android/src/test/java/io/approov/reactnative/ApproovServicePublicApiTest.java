@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
@@ -110,9 +109,7 @@ public class ApproovServicePublicApiTest {
             OkHttpClient client = new OkHttpClient.Builder()
                 .addInterceptor(new ApproovInterceptor(service))
                 .addInterceptor(extraInterceptor)
-                .certificatePinner(new CertificatePinner.Builder()
-                    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                    .build())
+                .addNetworkInterceptor(new ApproovPinningInterceptor(service))
                 .build();
             okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
 
@@ -139,65 +136,49 @@ public class ApproovServicePublicApiTest {
     }
 
     @Test
-    public void clientBuilderRefreshesCertificatePinsWhenPinListenersAreNotified() throws Exception {
+    public void clientBuilderAddsApproovPinningInterceptorToNetworkInterceptors() throws Exception {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             ApproovService service = newService();
             setStaticField("isInitialized", true);
             setStaticField("initialConfig", "test-config");
 
-            Map<String, List<String>> initialPins = Collections.singletonMap(
-                "example.com",
-                Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
-            );
-            Map<String, List<String>> updatedPins = Collections.singletonMap(
-                "example.com",
-                Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-            );
-
-            approov.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(initialPins)
-                .thenReturn(updatedPins);
-
             ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
-            OkHttpClient.Builder firstBuilder = new OkHttpClient.Builder();
-            clientBuilder.apply(firstBuilder);
-            CertificatePinner firstPinner = firstBuilder.build().certificatePinner();
+            OkHttpClient.Builder builder = new OkHttpClient.Builder();
+            clientBuilder.apply(builder);
+            OkHttpClient client = builder.build();
 
-            assertTrue("expected initial pinner to contain BBB... pin but was " + firstPinner.getPins(),
-                hasPinHash(firstPinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
-
-            service.notifyPinChangeListeners();
-
-            OkHttpClient.Builder secondBuilder = new OkHttpClient.Builder();
-            clientBuilder.apply(secondBuilder);
-            CertificatePinner secondPinner = secondBuilder.build().certificatePinner();
-
-            assertTrue("expected refreshed pinner to contain AAA... pin but was " + secondPinner.getPins(),
-                hasPinHash(secondPinner, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+            boolean found = false;
+            for (Interceptor interceptor : client.networkInterceptors()) {
+                if (interceptor instanceof ApproovPinningInterceptor) {
+                    found = true;
+                    break;
+                }
+            }
+            assertTrue("ApproovPinningInterceptor should be in networkInterceptors", found);
         }
     }
 
     @Test
-    public void exclusionRegexDoesNotDisableCertificatePinning() throws Exception {
+    public void exclusionRegexDoesNotRemoveApproovPinningInterceptor() throws Exception {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             ApproovService service = newService();
             setStaticField("isInitialized", true);
             setStaticField("initialConfig", "test-config");
             service.addExclusionURLRegex("^.*excluded.*$");
 
-            approov.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(Collections.singletonMap(
-                    "example.com",
-                    Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
-                ));
-
             ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
             OkHttpClient.Builder builder = new OkHttpClient.Builder();
             clientBuilder.apply(builder);
-            CertificatePinner pinner = builder.build().certificatePinner();
+            OkHttpClient client = builder.build();
 
-            assertTrue("expected exclusion regex to leave certificate pinning active",
-                hasPinHash(pinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
+            boolean found = false;
+            for (Interceptor interceptor : client.networkInterceptors()) {
+                if (interceptor instanceof ApproovPinningInterceptor) {
+                    found = true;
+                    break;
+                }
+            }
+            assertTrue("ApproovPinningInterceptor should remain in networkInterceptors when exclusion regex is set", found);
         }
     }
 
@@ -256,14 +237,4 @@ public class ApproovServicePublicApiTest {
         }
     }
 
-    private boolean hasPinHash(CertificatePinner pinner, String expectedHashBase64) throws Exception {
-        for (Object pin : pinner.getPins()) {
-            Object hash = pin.getClass().getMethod("getHash").invoke(pin);
-            String actualHashBase64 = (String) hash.getClass().getMethod("base64").invoke(hash);
-            if (expectedHashBase64.equals(actualHashBase64)) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

@@ -70,15 +70,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
 
-    /**
-     * Interface kept for source compatibility only — no longer used internally.
-     * Pin updates are now handled by ApproovPinningInterceptor at TLS handshake time.
-     * @deprecated
-     */
-    @Deprecated
-    public interface PinChangeListener {
-        void approovPinsUpdated();
-    }
 
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
@@ -187,9 +178,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // set of URL regexs that should be excluded from any Approov protection, mapped
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
-
-    // list of listeners for pin changes
-    private List<PinChangeListener> pinChangeListeners;
 
     // the long-lived client builder holding the pinning interceptor, kept so that
     // clearPinningCache() can reach the interceptor's handshake cache
@@ -411,8 +399,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-        pinChangeListeners = new ArrayList<>();
-        clientBuilder = null;
+
 
         // load any configuration and use it to initialize the SDK
         String config = loadApproovConfig();
@@ -546,34 +533,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } catch (Exception e) {
             promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
         }
-    }
-
-    /**
-     * Adds a pin change listener.
-     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
-     */
-    @Deprecated
-    public synchronized void addPinChangeListener(PinChangeListener listener) {
-        pinChangeListeners.add(listener);
-    }
-
-    /**
-     * Gets all pin change listeners.
-     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
-     */
-    @Deprecated
-    public synchronized List<PinChangeListener> getPinChangeListeners() {
-        return new ArrayList<PinChangeListener>(pinChangeListeners);
-    }
-
-    /**
-     * Notifies registered pin change listeners.
-     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
-     *             Call clearPinningCache() instead to force a pin re-check.
-     */
-    @Deprecated
-    public void notifyPinChangeListeners() {
-        clearPinningCache();
     }
 
     /**

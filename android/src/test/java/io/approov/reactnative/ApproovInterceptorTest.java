@@ -166,7 +166,7 @@ public class ApproovInterceptorTest {
         when(service.getUseApproovStatusIfNoToken()).thenReturn(false);
         when(service.isInitialized()).thenReturn(true);
         when(service.isApproovEnabled()).thenReturn(true);
-        doNothing().when(service).notifyPinChangeListeners();
+        doNothing().when(service).clearPinningCache();
         when(chain.proceed(any())).thenAnswer(invocation -> {
             Request proceeded = invocation.getArgument(0);
             return new Response.Builder()
@@ -452,7 +452,7 @@ public class ApproovInterceptorTest {
             interceptor.intercept(chain);
 
             approov.verify(Approov::fetchConfig);
-            verify(service).notifyPinChangeListeners();
+            verify(service).clearPinningCache();
         }
     }
 
@@ -469,12 +469,12 @@ public class ApproovInterceptorTest {
             IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
             assertTrue(error.getMessage().contains("Approov pins need to be updated"));
-            verify(service).notifyPinChangeListeners();
+            verify(service).clearPinningCache();
         }
     }
 
     @Test
-    public void headerSubstitutionNetworkFailureSkipsTheSubstitutionButStillProceeds() throws Exception {
+    public void headerSubstitutionNetworkFailureThrowsIOException() throws Exception {
         Request request = new Request.Builder()
             .url("https://api.example.com/data")
             .header("Api-Key", "Bearer header-secret")
@@ -492,11 +492,10 @@ public class ApproovInterceptorTest {
             approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
                 .thenReturn(substitutionResult);
 
-            Response response = interceptor.intercept(chain);
-
-            assertEquals("Bearer header-secret", response.request().header("Api-Key"));
-            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
-            verify(chain).proceed(any());
+            // Network failure during substitution now throws (matching okhttp/iOS behavior)
+            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
+            assertTrue(error.getCause() instanceof ApproovNetworkException);
+            verify(chain, never()).proceed(any());
         }
     }
 

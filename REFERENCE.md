@@ -397,7 +397,7 @@ ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
 - Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts. The default is `0` (disabled).
 
 ## getPinningDiagnostics
-Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
+Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and `ApproovPinningInterceptor` are still present in the OkHttp execution chain. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
 
 ```Javascript
 ApproovService.getPinningDiagnostics();
@@ -405,7 +405,7 @@ ApproovService.getPinningDiagnostics();
 
 This function returns a `Promise` resolving to an object with the following structure:
 * `isInterceptorPresent` (boolean): (Android only) True if the Approov HTTP interceptor is configured.
-* `isPinnerPresent` (boolean): (Android only) True if the Approov Certificate Pinner is configured.
+* `isPinnerPresent` (boolean): (Android only) True if the `ApproovPinningInterceptor` is registered as a network interceptor in the active `OkHttpClient`. This interceptor reads pins dynamically from Approov's SDK cache at TLS handshake time.
 * `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
 * `totalAuthChallenges` (number): (iOS only) Total TLS auth challenges observed across intercepted sessions.
 * `totalPinned` (number): (iOS only) Number of auth challenges where pinning validation succeeded.

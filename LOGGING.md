@@ -87,7 +87,7 @@ We also recommend capturing the structured metadata returned by `ApproovService.
 2. immediately after the first protected request
 
 This metadata complements the native logs:
-* **Android:** confirms whether the active shared `OkHttpClient` still contains the Approov interceptor and certificate pinner.
+* **Android:** confirms whether the active shared `OkHttpClient` still contains the Approov interceptor and pinning interceptor.
 * **iOS:** confirms whether registered sessions have verified pinning, and highlights `sessionsWithoutPinning` / `unpinnedSessions` when requests were observed without successful pinning verification.
 
 On iOS, remember that a completely bypassed session may not appear in the metadata at all. In that case, the native logs remain the primary signal.

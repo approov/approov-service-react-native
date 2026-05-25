@@ -32,7 +32,6 @@ import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
 
 import org.json.JSONObject;
@@ -292,7 +291,6 @@ public class ApproovServiceMiniSdkTest {
 
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNull(getHeader(reply, "Approov-Token"));
@@ -358,7 +356,7 @@ public class ApproovServiceMiniSdkTest {
         OkHttpClient client = new OkHttpClient.Builder()
             .addInterceptor(new ApproovInterceptor(service))
             .addInterceptor(extraInterceptor)
-            .certificatePinner(ApproovCertificatePinner.build(service))
+            .addNetworkInterceptor(new ApproovPinningInterceptor(service))
             .build();
 
         try (org.mockito.MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
@@ -392,9 +390,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-accept-any");
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
-
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+        service.clearPinningCache();
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNotNull(getHeader(reply, "Approov-Token"));
@@ -408,10 +404,7 @@ public class ApproovServiceMiniSdkTest {
         assertNotNull(getHeader(firstReply, "Approov-Token"));
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
-
-        CertificatePinner refreshedPinner = ApproovCertificatePinner.build(service);
-        assertEquals(0, refreshedPinner.getPins().size());
+        service.clearPinningCache();
 
         JSONObject secondReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNotNull(getHeader(secondReply, "Approov-Token"));

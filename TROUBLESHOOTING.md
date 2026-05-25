@@ -102,7 +102,7 @@ const status = await ApproovService.getPinningDiagnostics();
 console.log("Approov Native Networking Status:", JSON.stringify(status, null, 2));
 ```
 
-* **SUCCESS:** If `isInterceptorPresent: true` and `isPinnerPresent: true`, your Android integration is perfect. Approov tokens and certificate pins are actively protecting the global `fetch()` client.
+* **SUCCESS:** If `isInterceptorPresent: true` and `isPinnerPresent: true`, your Android integration is perfect. Approov tokens and dynamic certificate pinning are actively protecting the global `fetch()` client.
 * **FAILURE:** If `isInterceptorPresent: false`, another Android SDK (e.g., Firebase, Datadog) has overwritten the React Native networking factory and severed Approov's hooks.
 * **THE FIX:** You must tell Approov to "heal" the factory. Wait for the conflicting SDK to finish initializing, and then execute:
   ```javascript

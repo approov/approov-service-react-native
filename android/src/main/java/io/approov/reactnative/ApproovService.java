@@ -699,6 +699,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 clearEarliestNetworkRequestTime();
                 if (isApproovEnabled()) {
                     log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
+                    // TODO: notifyPinChangeListeners() calls getPins() which calls refreshConfig() and
+                    // blocks on a CountDownLatch with no timeout until a FetchConfig network request
+                    // completes (~2s on a blocked network). This delays promise resolution. Consider
+                    // moving this call to a background thread after promise.resolve(null) to make
+                    // initialize() return to JS immediately on all paths.
                     notifyPinChangeListeners();
                 } else {
                     log(LOG_INFO, TAG, "initialized without Approov SDK");

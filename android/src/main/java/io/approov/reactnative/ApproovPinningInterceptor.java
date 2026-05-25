@@ -123,6 +123,11 @@ public class ApproovPinningInterceptor implements Interceptor {
         if (!approovService.isInitialized() || !approovService.isApproovEnabled())
             return chain.proceed(chain.request());
 
+        // consult the mutator to decide whether pinning should be applied to this
+        // request — allows custom mutators to exempt specific URLs from pin checking
+        if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(chain.request()))
+            return chain.proceed(chain.request());
+
         // obtain the TLS connection details — only available in a NetworkInterceptor
         String host = chain.request().url().host();
         Connection connection = chain.connection();

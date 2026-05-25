@@ -1820,10 +1820,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient.Builder builder;
             if (wrapExisting) {
                 builder = currentClient.newBuilder();
-                // OkHttp's newBuilder() clones the interceptor list, so remove any
-                // previously-added ApproovInterceptors to avoid stacking duplicate
-                // token-fetching and signature-generation on repeated recovery calls.
+                // OkHttp's newBuilder() clones both interceptor lists, so strip any
+                // previously-added Approov interceptors to avoid stacking duplicates on
+                // repeated recovery calls.
                 builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
+                builder.networkInterceptors().removeIf(i -> i instanceof ApproovPinningInterceptor);
             } else {
                 builder = new OkHttpClient.Builder();
             }
@@ -1831,6 +1832,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // add the Approov protection to the builder (one-shot snapshot client)
             ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
             approovBuilder.apply(builder);
+            // update clientBuilder so clearPinningCache() targets the interceptor that
+            // is now installed in the active recovered client, not the original long-lived one
+            clientBuilder = approovBuilder;
 
             // build the new client
             OkHttpClient newClient = builder.build();

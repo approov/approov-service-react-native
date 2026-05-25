@@ -33,6 +33,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -308,9 +309,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        String sigHeader = Dictionary.valueOf(Map.of(
+        String sigHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, ByteSequenceItem.valueOf(signature))).serialize();
-        String sigInputHeader = Dictionary.valueOf(Map.of(
+        String sigInputHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, params.toComponentValue())).serialize();
 
         // Debugging - log the message and signature-related headers
@@ -331,7 +332,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 MessageDigest digestBuilder = MessageDigest.getInstance("SHA-256");
                 digestBuilder.reset();
                 byte[] digest = digestBuilder.digest(message.getBytes(StandardCharsets.UTF_8));
-                String digestHeader = Dictionary.valueOf(Map.of(
+                String digestHeader = Dictionary.valueOf(Collections.singletonMap(
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
                 signedBuilder.header("Signature-Base-Digest", digestHeader);
             } catch (NoSuchAlgorithmException e) {
@@ -599,7 +600,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                     return false;
             }
             // generate the header value
-            Dictionary digestHeader = Dictionary.valueOf(Map.of(
+            Dictionary digestHeader = Dictionary.valueOf(Collections.singletonMap(
                     bodyDigestAlgorithm, ByteSequenceItem.valueOf(digest.toByteArray())));
 
             // add the digest to the request

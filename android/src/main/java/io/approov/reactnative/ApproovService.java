@@ -42,7 +42,7 @@ import com.facebook.react.modules.network.OkHttpClientFactory;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
-import okhttp3.CertificatePinner;
+
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -1751,8 +1751,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Gets pinning diagnostics showing if the Approov interceptor and certificate
-     * pinner are present.
+     * Gets pinning diagnostics showing if the Approov interceptor and pinning
+     * interceptor are present in the OkHttp chain.
+     *
+     * Pinning is now performed by ApproovPinningInterceptor (a NetworkInterceptor)
+     * rather than OkHttp's CertificatePinner, so isPinnerPresent reflects whether
+     * ApproovPinningInterceptor is registered in the network interceptor chain.
      * 
      * @param promise to be fulfilled with the diagnostics map
      */
@@ -1762,6 +1766,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
             WritableMap diagnostics = safeCreateMap();
             boolean isInterceptorPresent = false;
+            boolean isPinnerPresent = false;
             WritableArray interceptors = safeCreateArray();
 
             for (Interceptor interceptor : client.interceptors()) {
@@ -1774,16 +1779,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
             for (Interceptor interceptor : client.networkInterceptors()) {
                 String name = interceptor.getClass().getName();
                 interceptors.pushString(name);
-                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
-                    isInterceptorPresent = true;
+                if (name.equals("io.approov.reactnative.ApproovPinningInterceptor"))
+                    isPinnerPresent = true;
             }
 
             diagnostics.putBoolean("isInterceptorPresent", isInterceptorPresent);
-            diagnostics.putArray("interceptors", interceptors);
-
-            CertificatePinner pinner = client.certificatePinner();
-            boolean isPinnerPresent = (pinner != null) && !pinner.equals(CertificatePinner.DEFAULT);
             diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
+            diagnostics.putArray("interceptors", interceptors);
 
             log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());
             promise.resolve(diagnostics);

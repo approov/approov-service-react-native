@@ -413,7 +413,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // initialize the Approov SDK
             try {
                 if (!config.isEmpty()) {
-                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.initialize(applicationContext, config, "auto", null);
                     Approov.setUserProperty("approov-react-native");
                 }
                 initialConfig = config;

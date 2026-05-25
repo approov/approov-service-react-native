@@ -82,9 +82,17 @@ public class ApproovClientBuilder implements CustomClientBuilder {
         if (wrappedBuilder != null)
             wrappedBuilder.apply(builder);
 
-        if (builder != null) {
-            builder.addInterceptor(interceptor)
-                   .addNetworkInterceptor(pinningInterceptor);
+        if (builder == null)
+            return;
+
+        // guard against duplicate insertion (e.g. both the OkHttpClientFactory and the legacy
+        // setCustomClientBuilder paths firing on RN < 0.73, or any other repeated apply() call)
+        for (Interceptor existing : builder.interceptors()) {
+            if (existing instanceof ApproovInterceptor)
+                return; // already present — skip to avoid stacking
         }
+
+        builder.addInterceptor(interceptor)
+               .addNetworkInterceptor(pinningInterceptor);
     }
 }

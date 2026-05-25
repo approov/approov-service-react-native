@@ -1,5 +1,6 @@
 package io.approov.reactnative;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -52,6 +53,29 @@ public class ApproovClientBuilderTest {
     }
 
     @Test
+    public void applyIsIdempotentAndDoesNotStackDuplicateInterceptors() {
+        ApproovService service = mock(ApproovService.class);
+        when(service.isInitialized()).thenReturn(false);
+
+        ApproovClientBuilder builder = new ApproovClientBuilder(service, null);
+        OkHttpClient.Builder okBuilder = new OkHttpClient.Builder();
+        // simulate both OkHttpClientFactory and setCustomClientBuilder paths firing
+        builder.apply(okBuilder);
+        builder.apply(okBuilder);
+        OkHttpClient client = okBuilder.build();
+
+        long approovCount = client.interceptors().stream()
+                .filter(i -> i instanceof ApproovInterceptor)
+                .count();
+        assertEquals("apply() called twice must not stack ApproovInterceptor", 1, approovCount);
+
+        long pinningCount = client.networkInterceptors().stream()
+                .filter(i -> i instanceof ApproovPinningInterceptor)
+                .count();
+        assertEquals("apply() called twice must not stack ApproovPinningInterceptor", 1, pinningCount);
+    }
+
+    @Test
     public void getPinningInterceptorReturnsTheInstalledInstance() {
         ApproovService service = mock(ApproovService.class);
         when(service.isInitialized()).thenReturn(false);
@@ -60,7 +84,7 @@ public class ApproovClientBuilderTest {
         OkHttpClient.Builder okBuilder = new OkHttpClient.Builder();
         builder.apply(okBuilder);
 
-        ApproovPinningInterceptor pinningInterceptor = builder.getPinningInterceptor();
-        assertNotNull("getPinningInterceptor() should return a non-null instance", pinningInterceptor);
+        assertNotNull("getPinningInterceptor() should return a non-null instance",
+                builder.getPinningInterceptor());
     }
 }

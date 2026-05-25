@@ -71,9 +71,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     private static final String TAG = "ApproovService";
 
     /**
-     * Interface to be implemented by classes that wish to be notified of any pin
-     * changes.
+     * Interface kept for source compatibility only — no longer used internally.
+     * Pin updates are now handled by ApproovPinningInterceptor at TLS handshake time.
+     * @deprecated
      */
+    @Deprecated
     public interface PinChangeListener {
         void approovPinsUpdated();
     }
@@ -188,6 +190,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // list of listeners for pin changes
     private List<PinChangeListener> pinChangeListeners;
+
+    // the long-lived client builder holding the pinning interceptor, kept so that
+    // clearPinningCache() can reach the interceptor's handshake cache
+    private ApproovClientBuilder clientBuilder;
 
     // Log levels matching iOS/ApproovUtils
     private static final int LOG_EXTREME = 0;
@@ -406,6 +412,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
         pinChangeListeners = new ArrayList<>();
+        clientBuilder = null;
 
         // load any configuration and use it to initialize the SDK
         String config = loadApproovConfig();
@@ -457,7 +464,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // Register Approov protection in the React Native networking stack.
         // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
         // (RN < 0.73) versions.
-        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, null);
+        clientBuilder = new ApproovClientBuilder(this, null);
 
         // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
         // 0.73+) ---
@@ -542,32 +549,42 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Adds a pin change listener that will be notified of any future Approov
-     * pin changes.
-     * 
-     * @param listener is the pin change listener
+     * Adds a pin change listener.
+     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
      */
+    @Deprecated
     public synchronized void addPinChangeListener(PinChangeListener listener) {
         pinChangeListeners.add(listener);
     }
 
     /**
-     * Gets all of the pin change listeners.
-     * 
-     * @return List of pin change listeners
+     * Gets all pin change listeners.
+     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
      */
+    @Deprecated
     public synchronized List<PinChangeListener> getPinChangeListeners() {
         return new ArrayList<PinChangeListener>(pinChangeListeners);
     }
 
     /**
-     * Notifies pin change listeners of a pin update.
+     * Notifies registered pin change listeners.
+     * @deprecated Pin updates are now handled by ApproovPinningInterceptor internally.
+     *             Call clearPinningCache() instead to force a pin re-check.
      */
+    @Deprecated
     public void notifyPinChangeListeners() {
-        List<PinChangeListener> listeners = getPinChangeListeners();
-        for (PinChangeListener listener : listeners) {
-            listener.approovPinsUpdated();
-        }
+        clearPinningCache();
+    }
+
+    /**
+     * Clears the pinning interceptor's handshake cache, forcing the next request to
+     * re-read pins from Approov.getPins() and re-verify peer certificates. This should
+     * be called when a dynamic configuration change or force-apply-pins signal is received.
+     */
+    public void clearPinningCache() {
+        ApproovClientBuilder builder = clientBuilder;
+        if (builder != null)
+            builder.getPinningInterceptor().clearHandshakeCache();
     }
 
     /**
@@ -699,12 +716,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 clearEarliestNetworkRequestTime();
                 if (isApproovEnabled()) {
                     log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                    // TODO: notifyPinChangeListeners() calls getPins() which calls refreshConfig() and
-                    // blocks on a CountDownLatch with no timeout until a FetchConfig network request
-                    // completes (~2s on a blocked network). This delays promise resolution. Consider
-                    // moving this call to a background thread after promise.resolve(null) to make
-                    // initialize() return to JS immediately on all paths.
-                    notifyPinChangeListeners();
                 } else {
                     log(LOG_INFO, TAG, "initialized without Approov SDK");
                 }
@@ -1815,10 +1826,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 builder = new OkHttpClient.Builder();
             }
 
-            // add the Approov protection to the builder
-            // updateClientFactory builds a one-shot recovered client snapshot, so the
-            // builder should not register as a PinChangeListener.
-            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
+            // add the Approov protection to the builder (one-shot snapshot client)
+            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
             approovBuilder.apply(builder);
 
             // build the new client
@@ -1943,9 +1952,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on
-                // every fetch
-                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
+                // ephemeral builder for fetchWithApproov
+                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
 

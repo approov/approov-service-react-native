@@ -271,7 +271,8 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                return false;
+                throw new ApproovNetworkException(status,
+                        "Header substitution for " + header + ": " + status.toString());
             case UNKNOWN_KEY:
                 return false;
             default:
@@ -312,7 +313,8 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                return false;
+                throw new ApproovNetworkException(status,
+                        "Query parameter substitution for " + queryKey + ": " + status.toString());
             case UNKNOWN_KEY:
                 return false;
             default:

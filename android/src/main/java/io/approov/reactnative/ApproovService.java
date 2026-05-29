@@ -723,11 +723,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } catch (IllegalArgumentException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
             clearEarliestNetworkRequestTime();
-            promise.reject("initialize", e.getMessage(), getErrorUserInfo(false));
+            promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
         } catch (IllegalStateException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
             clearEarliestNetworkRequestTime();
-            promise.reject("initialize", e.getMessage(), getErrorUserInfo(false));
+            promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
 
@@ -1440,6 +1440,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         if (!isApproovEnabled()) {
             promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
+            return;
+        }
+        if (data == null) {
+            promise.reject("setDataHashInToken", "IllegalArgument: data must not be null", getErrorUserInfo(false));
             return;
         }
         try {

@@ -231,6 +231,22 @@ In practice, pass string bodies (`JSON.stringify(...)` or plain text) and use th
 
 For critical security and authentication calls, `fetchWithApproov` provides guaranteed protection.
 
+## Default Behavior
+
+By default, the `ApproovService` processes requests based on the attestation status returned by the platform SDK. The SDK provides a cryptographically signed JWT token as proof of attestation. Requesting this token typically returns immediately from a local cache; however, a network connection to the Approov cloud is required on app launch or when the token is nearing expiration. The SDK can only determine whether a token was obtained — it cannot verify the token's validity, as that check is performed by your backend.
+
+The behavior described here applies to the Approov token fetch that occurs inside the network interceptor for every protected request. For the complete set of fetch statuses and their meanings, see the official documentation: [Approov Token Fetch Results](https://approov.io/docs/latest/approov-usage-documentation/#approov-token-fetch-results). The equivalent behavior table for the `approov-service-okhttp` layer is documented in [Default Behavior — approov-service-okhttp](https://github.com/approov/approov-service-okhttp/blob/main/USAGE.md#default-behavior).
+
+The table below covers only the statuses relevant to the network interceptor path:
+
+| Approov Fetch Status | Action | Result |
+| :--- | :--- | :--- |
+| **Success** | Proceed | The request is sent with the `Approov-Token` header populated with the signed JWT. |
+| **No Network / Poor Network / MITM Detected** | Fail (temporary) | `fetch()` rejects with `TypeError: Network request failed`. The request should be retried. |
+| **No Approov Service** | Proceed | The request is sent with an **empty** `Approov-Token` header (or carries the fetch status string if `setUseApproovStatusIfNoToken(true)` is enabled). |
+
+> **Note:** `UNKNOWN_URL` and `UNPROTECTED_URL` statuses cause the request to proceed **without** adding an `Approov-Token` header at all, as the URL is not under Approov protection. `REJECTION` statuses are only relevant to explicit `precheck()` calls, not to the interceptor path.
+
 ---
 
 # Approov Service Mutator

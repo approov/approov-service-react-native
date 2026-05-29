@@ -660,66 +660,75 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Initializes the Approov SDK and thus enables the Approov features if the
-     * initialization was not performed using configuration files on launch.
-     * 
-     * @param config  is the configuration to be used
-     * @param promise to be fulfilled once the initialization is completed
+     * Initializes the ApproovService with an account configuration and comment.
+     * Resets all service-layer state unconditionally before initializing the platform
+     * SDK. The platform SDK returns true on first initialization or false if it is
+     * already initialized with the same configuration (treated as success). Any other
+     * failure — such as a different-config conflict — throws and is surfaced as a
+     * rejected promise.
+     *
+     * @param config  the configuration string, or empty string for bypass mode
+     * @param comment optional comment forwarded to the native SDK, or null
+     * @param promise resolved on success, rejected on failure
      */
     @ReactMethod
     public void initialize(String config, String comment, Promise promise) {
-        String effectiveComment = comment == null ? "" : comment;
-        boolean allowReinitialize = effectiveComment.startsWith("reinit");
-        boolean allowEnableAfterEmptyInitialization = isInitialized && (initialConfig != null)
-                && initialConfig.isEmpty() && !config.isEmpty();
-
-        if (isInitialized && !allowEnableAfterEmptyInitialization) {
-            // if the SDK is previously initialized then the config should be the same
-            if (!config.equals(initialConfig)) {
-                log(LOG_ERROR, TAG, "attempt to reinitialize with a different config");
-                promise.reject("initialize", "attempt to reinitialize with a different config",
-                        getErrorUserInfo(false));
-                return;
-            }
-            if (!allowReinitialize) {
-                promise.resolve(null);
-                return;
-            }
+        if (config == null) {
+            promise.reject("initialize", "config must not be null; pass \"\" for bypass mode",
+                    getErrorUserInfo(false));
+            return;
         }
 
-        // initialize the Approov SDK and notify any pin change listeners since pins may
-        // now be available
-            try {
-                if (!config.isEmpty()) {
-                    Approov.initialize(applicationContext, config, "auto", effectiveComment);
-                    Approov.setUserProperty("approov-react-native");
+
+        // Reset service layer state unconditionally (mirrors approov-service-okhttp)
+        isInitialized = false;
+        initialConfig = null;
+        useApproovStatusIfNoToken = false;
+        approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        bindingHeader = null;
+        substitutionHeaders = new HashMap<>();
+        substitutionQueryParams = new HashMap<>();
+        exclusionURLRegexs = new HashMap<>();
+        suppressLoggingUnknownURL = false;
+        sessionMetadataCollectionEnabled = true;
+
+        // Initialize the platform SDK if not in bypass mode (empty config).
+        // The SDK returns true if initialization succeeded, false if already initialized
+        // with the same config — that is not an error. Any other failure (e.g. different
+        // config conflict) throws and is surfaced as a rejected promise.
+        try {
+            if (!config.isEmpty()) {
+                boolean sdkInitialized = Approov.initialize(applicationContext, config, "auto", comment);
+                if (!sdkInitialized) {
+                    log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
-                initialConfig = config;
-                isInitialized = true;
-                clearEarliestNetworkRequestTime();
-                if (isApproovEnabled()) {
-                    log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                    // TODO: notifyPinChangeListeners() calls getPins() which calls refreshConfig() and
-                    // blocks on a CountDownLatch with no timeout until a FetchConfig network request
-                    // completes (~2s on a blocked network). This delays promise resolution. Consider
-                    // moving this call to a background thread after promise.resolve(null) to make
-                    // initialize() return to JS immediately on all paths.
-                    notifyPinChangeListeners();
-                } else {
-                    log(LOG_INFO, TAG, "initialized without Approov SDK");
-                }
-                if (pendingPrefetch) {
-                    prefetch();
-                    pendingPrefetch = false;
-                }
-                promise.resolve(null);
-            } catch (IllegalArgumentException e) {
-                log(LOG_ERROR, TAG, "initialization failed with IllegalArgument: " + e.getMessage());
-                promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
-            } catch (IllegalStateException e) {
-                log(LOG_ERROR, TAG, "initialization failed with IllegalState: " + e.getMessage());
-                promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
             }
+            initialConfig = config;
+            isInitialized = true;
+            clearEarliestNetworkRequestTime();
+            if (isApproovEnabled()) {
+                Approov.setUserProperty("approov-react-native");
+                log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
+                notifyPinChangeListeners();
+            } else {
+                log(LOG_INFO, TAG, "initialized without Approov SDK");
+            }
+            if (pendingPrefetch) {
+                prefetch();
+                pendingPrefetch = false;
+            }
+            promise.resolve(null);
+        } catch (IllegalArgumentException e) {
+            log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            clearEarliestNetworkRequestTime();
+            promise.reject("initialize", e.getMessage(), getErrorUserInfo(false));
+        } catch (IllegalStateException e) {
+            log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            clearEarliestNetworkRequestTime();
+            promise.reject("initialize", e.getMessage(), getErrorUserInfo(false));
+        }
     }
 
     /**

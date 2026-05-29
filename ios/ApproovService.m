@@ -327,100 +327,101 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 }
 
 /*
- * Initializes the ApproovService with the provided configuration string. The
- * call is ignored if the ApproovService has already been initialized with the
- * same configuration string.
+ * Initializes the ApproovService with an account configuration and comment.
+ * Resets all service-layer state unconditionally before initializing the
+ * platform SDK. The platform SDK returns YES on first initialization, or NO
+ * with a nil error if already initialized with the same configuration (treated
+ * as success). NO with a non-nil error indicates a genuine failure such as a
+ * different-config conflict, which is surfaced as a rejected promise.
+ * The startup synchronization gate is cleared on both success and failure so
+ * that pending requests are never held indefinitely.
  *
- * @param config is the string to be used for initialization
- * @param resolve is used if the operation resolved without error
- * @param reject is used if the operation failed with an error
+ * @param config   the configuration string, or empty string for bypass mode
+ * @param comment  optional comment forwarded to the native SDK, or nil
+ * @param resolve  called on success
+ * @param reject   called on failure
  */
 RCT_EXPORT_METHOD(initialize : (NSString *)config
                   comment : (NSString *_Nullable)comment
                   resolver : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
-  @synchronized(initializerLock) {
-    BOOL allowReinitialize =
-        comment != nil && [comment hasPrefix:@"reinit"];
-    BOOL allowEnableAfterEmptyInitialization =
-        isInitialized && initialConfigString != nil &&
-        [initialConfigString length] == 0 && [config length] != 0;
-    if (isInitialized && !allowEnableAfterEmptyInitialization) {
-      // if the SDK is previously initialized then check the config string is the same
-      if (![initialConfigString isEqualToString:config]) {
-        NSError *error =
-            [[NSError alloc] initWithDomain:@"io.approov.reactnative"
-                                       code:0
-                                   userInfo:[self errorUserInfo:NO]];
-        reject(@"initialize",
-               @"attempt to reinitialize Approov SDK with a different config",
-               error);
-        return;
-      }
-      
-      if (!allowReinitialize) {
-        resolve(nil);
-        return;
-      }
-    }
+  if (config == nil) {
+    NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                               code:0
+                                           userInfo:[self errorUserInfo:NO]];
+    reject(@"initialize", @"config must not be nil; pass @\"\" for bypass mode",
+           error);
+    return;
+  }
 
-    // initialize the Approov SDK
+  @synchronized(initializerLock) {
+    // Reset service-layer state unconditionally (mirrors approov-service-okhttp
+    // and the Android bridge).
+    isInitialized = NO;
+    initialConfigString = nil;
+    useApproovStatusIfNoToken = NO;
+    approovTokenHeader = @"Approov-Token";
+    approovTraceIDHeader = @"Approov-TraceID";
+    approovTokenPrefix = @"";
+    bindingHeader = @"";
+    substitutionHeaders = [[NSMutableDictionary alloc] init];
+    substitutionQueryParams = [[NSMutableSet alloc] init];
+    exclusionURLRegexs = [[NSMutableSet alloc] init];
+    suppressLoggingUnknownURL = NO;
+
+    // Initialize the platform SDK if not in bypass mode (empty config).
+    // YES = first initialization succeeded.
+    // NO + nil error = already initialized with the same config (not an error).
+    // NO + non-nil error = genuine failure (e.g. different config conflict).
     NSError *initializationError = nil;
     BOOL initializationResult = YES;
     if ([config length] != 0) {
-        initializationResult = [Approov initialize:config
-                                      updateConfig:@"auto"
-                                           comment:comment
-                                             error:&initializationError];
+      initializationResult = [Approov initialize:config
+                                    updateConfig:@"auto"
+                                         comment:comment
+                                           error:&initializationError];
+    }
+
+    if (initializationError != nil) {
+      // Genuine initialization failure — release the gate so pending requests
+      // are not held indefinitely (they will proceed without a token).
+      ApproovLogE(@"initialization failed: %@",
+                  [initializationError localizedDescription]);
+      @synchronized(earliestNetworkRequestTimeLock) {
+        earliestNetworkRequestTime = 0.0;
       }
-      if (!initializationResult && initializationError == nil) {
-        ApproovLogI(@"native SDK reported already initialized during explicit "
-                    @"initialization");
-        initialConfigString = config;
-        isInitialized = YES;
-        @synchronized(earliestNetworkRequestTimeLock) {
-          earliestNetworkRequestTime = 0.0;
-        }
-        if (ApproovIsEnabled()) {
-          [Approov setUserProperty:@"approov-react-native"];
-          ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
-        } else {
-          ApproovLogI(@"initialized without Approov SDK");
-        }
-        if (pendingPrefetch) {
-          [self prefetch];
-          pendingPrefetch = NO;
-        }
-        resolve(nil);
-      } else if (initializationError) {
-        ApproovLogE(@"initialization failed: %@",
-                    [initializationError localizedDescription]);
-        NSError *error =
-            [[NSError alloc] initWithDomain:@"io.approov.reactnative"
-                                       code:0
-                                   userInfo:[self errorUserInfo:NO]];
-        NSString *details = [NSString
-            stringWithFormat:@"initialization failed: %@",
-                             [initializationError localizedDescription]];
-        reject(@"initialize", details, error);
-      } else {
-        initialConfigString = config;
-        isInitialized = YES;
-        @synchronized(earliestNetworkRequestTimeLock) {
-          earliestNetworkRequestTime = 0.0;
-        }
-        if (ApproovIsEnabled()) {
-          [Approov setUserProperty:@"approov-react-native"];
-          ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
-        } else {
-          ApproovLogI(@"initialized without Approov SDK");
-        }
-        if (pendingPrefetch) {
-          [self prefetch];
-          pendingPrefetch = NO;
-        }
-        resolve(nil);
-      }
+      NSError *error =
+          [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                     code:0
+                                 userInfo:[self errorUserInfo:NO]];
+      NSString *details =
+          [NSString stringWithFormat:@"initialization failed: %@",
+                                     [initializationError localizedDescription]];
+      reject(@"initialize", details, error);
+      return;
+    }
+
+    // Success path — covers both first initialization and same-config
+    // re-initialization (SDK returns NO with nil error in that case).
+    if (!initializationResult) {
+      ApproovLogD(@"native SDK already initialized");
+    }
+    initialConfigString = config;
+    isInitialized = YES;
+    @synchronized(earliestNetworkRequestTimeLock) {
+      earliestNetworkRequestTime = 0.0;
+    }
+    if (ApproovIsEnabled()) {
+      [Approov setUserProperty:@"approov-react-native"];
+      ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
+    } else {
+      ApproovLogI(@"initialized without Approov SDK");
+    }
+    if (pendingPrefetch) {
+      [self prefetch];
+      pendingPrefetch = NO;
+    }
+    resolve(nil);
   }
 }
 

@@ -247,12 +247,12 @@ static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
              @"Different-configuration native SDK error should leave the layer uninitialized");
 }
 
-// Verifies the transition: empty-config bootstrap → SDK failure.
+// Per TESTING_REQUIREMENTS.md §20: SDK Initialization Failure After Empty Bootstrap.
 // After bootstrapping with an empty config the layer is initialized but Approov
 // is disabled. A subsequent attempt with a real config that fails at the SDK
-// level should reject the promise while preserving the initialized (but disabled)
-// bootstrap state.
-static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(void) {
+// level must reject the promise AND leave the service layer UNINITIALIZED.
+// Callers must re-initialize with the correct config before using the service.
+static void TestInitializeWithEmptyConfigThenSdkFailureBecomesUninitialized(void) {
   ApproovService *service = FreshService();
 
   // Bootstrap with empty config
@@ -288,9 +288,9 @@ static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(void) 
              @"SDK failure after empty bootstrap should reject");
   AssertEqualObjects(@"initialize", rejectionCode,
                      @"SDK failure after empty bootstrap should reject with initialize");
-  // The layer stays initialized from the empty bootstrap
-  AssertTrue(isInitialized,
-             @"SDK failure after empty bootstrap should preserve the initialized state");
+  // Per TESTING_REQUIREMENTS §20: service is left uninitialized after SDK failure.
+  AssertTrue(!isInitialized,
+             @"SDK failure after empty bootstrap should leave the layer uninitialized");
 }
 
 
@@ -614,7 +614,7 @@ int main(void) {
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
-      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(); },
+      ^{ TestInitializeWithEmptyConfigThenSdkFailureBecomesUninitialized(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },

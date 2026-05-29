@@ -244,8 +244,9 @@ The table below covers only the statuses relevant to the network interceptor pat
 | **Success** | Proceed | The request is sent with the `Approov-Token` header populated with the signed JWT. |
 | **No Network / Poor Network / MITM Detected** | Fail (temporary) | `fetch()` rejects with `TypeError: Network request failed`. The request should be retried. |
 | **No Approov Service** | Proceed | The request is sent with an **empty** `Approov-Token` header (or carries the fetch status string if `setUseApproovStatusIfNoToken(true)` is enabled). |
+| **Unknown URL / Unprotected URL** | Proceed (unmodified) | The request is forwarded as-is with **no** `Approov-Token` header added. The URL is not registered under Approov protection. |
 
-> **Note:** `UNKNOWN_URL` and `UNPROTECTED_URL` statuses cause the request to proceed **without** adding an `Approov-Token` header at all, as the URL is not under Approov protection. `REJECTION` statuses are only relevant to explicit `precheck()` calls, not to the interceptor path.
+> **Note:** `REJECTION` statuses are only relevant to explicit `precheck()` calls, not to the interceptor path.
 
 ---
 

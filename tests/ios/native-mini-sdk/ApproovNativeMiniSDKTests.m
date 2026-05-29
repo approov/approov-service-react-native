@@ -406,10 +406,8 @@ static void TestInitializeRejectsDifferentConfig(void) {
   });
 
   AssertEqualObjects(@"initialize", rejected[@"code"], @"Different-config reinitialization should reject");
-  // Per TESTING_REQUIREMENTS §17-18: the SDK surfaces the mismatch via an exception whose message
-  // text is implementation-defined; we only verify the rejection code and that state was reset.
-  // Per TESTING_REQUIREMENTS §17-18: different-config failure resets state; service is uninitialized.
-  AssertTrue(!isInitialized, @"Different-config reinitialization should reset state and leave the layer uninitialized");
+  // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+  AssertTrue(isInitialized, @"Different-config reinitialization should leave the layer initialized");
 }
 
 static void TestInitializeAcceptsReinitComment(void) {
@@ -1465,16 +1463,19 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
 
   AssertEqualObjects(@"initialize", rejected[@"code"],
                      @"Different-config reinitialization should reject");
-  // Per TESTING_REQUIREMENTS §17-18: different-config failure resets state; service is uninitialized.
-  AssertTrue(!isInitialized,
-             @"Different-config rejection should reset state and leave the layer uninitialized");
+  // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+  AssertTrue(isInitialized,
+             @"Different-config rejection should preserve the initialized state");
   NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
     [service isApproovEnabled:resolve rejecter:reject];
   });
-  AssertEqualObjects(@(NO), enabledAfter[@"value"],
-                     @"Different-config rejection should disable Approov");
-  // The service is now uninitialized; no network request is made since it would not add an Approov
-  // token and would fail in AwaitResolved if the service guard rejects the fetch.
+  AssertEqualObjects(@(YES), enabledAfter[@"value"],
+                     @"Different-config rejection should preserve the enabled state");
+
+  // Verify the original configuration still works.
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"),
+               @"Original config should remain functional after a different-config rejection");
 }
 
 static void TestLogMessageDoesNotCrashAtAnyLevel(void) {

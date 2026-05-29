@@ -250,9 +250,9 @@ static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
 // Per TESTING_REQUIREMENTS.md §20: SDK Initialization Failure After Empty Bootstrap.
 // After bootstrapping with an empty config the layer is initialized but Approov
 // is disabled. A subsequent attempt with a real config that fails at the SDK
-// level must reject the promise AND leave the service layer UNINITIALIZED.
-// Callers must re-initialize with the correct config before using the service.
-static void TestInitializeWithEmptyConfigThenSdkFailureBecomesUninitialized(void) {
+// level must reject the promise while leaving the service layer in bypass mode
+// (initialized, Approov disabled). The service layer is NOT left uninitialized.
+static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(void) {
   ApproovService *service = FreshService();
 
   // Bootstrap with empty config
@@ -288,9 +288,9 @@ static void TestInitializeWithEmptyConfigThenSdkFailureBecomesUninitialized(void
              @"SDK failure after empty bootstrap should reject");
   AssertEqualObjects(@"initialize", rejectionCode,
                      @"SDK failure after empty bootstrap should reject with initialize");
-  // Per TESTING_REQUIREMENTS §20: service is left uninitialized after SDK failure.
-  AssertTrue(!isInitialized,
-             @"SDK failure after empty bootstrap should leave the layer uninitialized");
+  // Per TESTING_REQUIREMENTS §20: service stays in bypass mode (initialized, Approov disabled).
+  AssertTrue(isInitialized,
+             @"SDK failure after empty bootstrap should preserve the bypass initialized state");
 }
 
 
@@ -614,7 +614,7 @@ int main(void) {
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
-      ^{ TestInitializeWithEmptyConfigThenSdkFailureBecomesUninitialized(); },
+      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },

@@ -679,25 +679,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
-
-        // Reset service layer state unconditionally (mirrors approov-service-okhttp)
-        isInitialized = false;
-        initialConfig = null;
-        useApproovStatusIfNoToken = false;
-        approovTokenHeader = APPROOV_TOKEN_HEADER;
-        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-        bindingHeader = null;
-        substitutionHeaders = new HashMap<>();
-        substitutionQueryParams = new HashMap<>();
-        exclusionURLRegexs = new HashMap<>();
-        suppressLoggingUnknownURL = false;
-        sessionMetadataCollectionEnabled = true;
-
         // Initialize the platform SDK if not in bypass mode (empty config).
-        // The SDK returns true if initialization succeeded, false if already initialized
-        // with the same config — that is not an error. Any other failure (e.g. different
-        // config conflict) throws and is surfaced as a rejected promise.
+        // State is only modified after the SDK confirms success, preserving the current
+        // operating mode (protected or bypass) if the call fails.
         try {
             if (!config.isEmpty()) {
                 boolean sdkInitialized = Approov.initialize(applicationContext, config, "auto", comment);
@@ -705,6 +689,19 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
             }
+            // SDK succeeded (or bypass) — now reset and commit new service-layer state.
+            isInitialized = false;
+            initialConfig = null;
+            useApproovStatusIfNoToken = false;
+            approovTokenHeader = APPROOV_TOKEN_HEADER;
+            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+            bindingHeader = null;
+            substitutionHeaders = new HashMap<>();
+            substitutionQueryParams = new HashMap<>();
+            exclusionURLRegexs = new HashMap<>();
+            suppressLoggingUnknownURL = false;
+            sessionMetadataCollectionEnabled = true;
             initialConfig = config;
             isInitialized = true;
             clearEarliestNetworkRequestTime();
@@ -722,10 +719,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.resolve(null);
         } catch (IllegalArgumentException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            // Release the startup sync gate so any waiting threads are not held indefinitely.
+            // Service-layer state is NOT modified — previous operating mode is preserved.
             clearEarliestNetworkRequestTime();
             promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
         } catch (IllegalStateException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            // Release the startup sync gate so any waiting threads are not held indefinitely.
+            // Service-layer state is NOT modified — previous operating mode is preserved.
             clearEarliestNetworkRequestTime();
             promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
         }

@@ -188,9 +188,9 @@ public class ApproovServiceMiniSdkTest {
 
         assertEquals("initialize", rejected.code);
         assertTrue(rejected.message.contains("Illegal"));
-        // Per TESTING_REQUIREMENTS §17-18: different-config failure resets state; service is uninitialized.
-        assertFalse(service.isInitialized());
-        assertFalse(service.isApproovEnabled());
+        // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
     }
 
     @Test
@@ -243,7 +243,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
-    public void initializeWithEmptyConfigThenSdkFailureRejectsAndBecomesUninitialized() throws Exception {
+    public void initializeWithEmptyConfigThenSdkFailurePreservesBootstrapState() throws Exception {
         awaitResolvedPromise(promise -> service.initialize("", null, promise));
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
@@ -258,14 +258,15 @@ public class ApproovServiceMiniSdkTest {
 
             assertEquals("initialize", rejected.code);
             assertTrue(rejected.message.contains("IllegalArgument"));
-            // Per TESTING_REQUIREMENTS §20: SDK failure after empty bootstrap leaves service uninitialized.
-            assertFalse(service.isInitialized());
+            // Per TESTING_REQUIREMENTS §20: failure after empty bootstrap preserves bypass mode.
+            assertTrue(service.isInitialized());
             assertFalse(service.isApproovEnabled());
         }
     }
 
     @Test
-    public void initializeWithDifferentConfigResetsStateAndBecomesUninitialized() throws Exception {
+    public void initializeWithDifferentConfigPreservesExistingState() throws Exception {
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
         awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
         assertTrue(service.isInitialized());
         assertTrue(service.isApproovEnabled());
@@ -278,9 +279,14 @@ public class ApproovServiceMiniSdkTest {
 
         assertEquals("initialize", rejected.code);
         assertTrue(rejected.message.contains("Illegal"));
-        // Per TESTING_REQUIREMENTS §17-18: different-config failure resets state; service is uninitialized.
-        assertFalse(service.isInitialized());
-        assertFalse(service.isApproovEnabled());
+        // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+
+        // Verify the original configuration still works — a protected request
+        // should still produce an Approov token.
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(reply, "Approov-Token"));
     }
 
     @Test

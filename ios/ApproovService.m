@@ -328,13 +328,14 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 
 /*
  * Initializes the ApproovService with an account configuration and comment.
- * Resets all service-layer state unconditionally before initializing the
- * platform SDK. The platform SDK returns YES on first initialization, or NO
- * with a nil error if already initialized with the same configuration (treated
- * as success). NO with a non-nil error indicates a genuine failure such as a
- * different-config conflict, which is surfaced as a rejected promise.
- * The startup synchronization gate is cleared on both success and failure so
- * that pending requests are never held indefinitely.
+ * Service-layer state is only modified after the platform SDK confirms success,
+ * preserving the current operating mode (protected or bypass) on any failure.
+ * The platform SDK returns YES on first initialization, or NO with a nil error
+ * if already initialized with the same configuration (treated as success).
+ * NO with a non-nil error indicates a genuine failure such as a different-config
+ * conflict, which is surfaced as a rejected promise. The startup synchronization
+ * gate is cleared on both success and failure so that pending requests are never
+ * held indefinitely.
  *
  * @param config   the configuration string, or empty string for bypass mode
  * @param comment  optional comment forwarded to the native SDK, or nil
@@ -355,21 +356,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
   }
 
   @synchronized(initializerLock) {
-    // Reset service-layer state unconditionally (mirrors approov-service-okhttp
-    // and the Android bridge).
-    isInitialized = NO;
-    initialConfigString = nil;
-    useApproovStatusIfNoToken = NO;
-    approovTokenHeader = @"Approov-Token";
-    approovTraceIDHeader = @"Approov-TraceID";
-    approovTokenPrefix = @"";
-    bindingHeader = @"";
-    substitutionHeaders = [[NSMutableDictionary alloc] init];
-    substitutionQueryParams = [[NSMutableSet alloc] init];
-    exclusionURLRegexs = [[NSMutableSet alloc] init];
-    suppressLoggingUnknownURL = NO;
-
     // Initialize the platform SDK if not in bypass mode (empty config).
+    // State is only modified after the SDK confirms success, preserving the
+    // current operating mode (protected or bypass) on any failure.
     // YES = first initialization succeeded.
     // NO + nil error = already initialized with the same config (not an error).
     // NO + non-nil error = genuine failure (e.g. different config conflict).
@@ -384,7 +373,8 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
 
     if (initializationError != nil) {
       // Genuine initialization failure — release the gate so pending requests
-      // are not held indefinitely (they will proceed without a token).
+      // are not held indefinitely. Service-layer state is NOT modified;
+      // the previous operating mode (protected or bypass) is fully preserved.
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
       @synchronized(earliestNetworkRequestTimeLock) {
@@ -401,11 +391,21 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // Success path — covers both first initialization and same-config
-    // re-initialization (SDK returns NO with nil error in that case).
+    // SDK succeeded (or bypass) — now reset and commit new service-layer state.
     if (!initializationResult) {
       ApproovLogD(@"native SDK already initialized");
     }
+    isInitialized = NO;
+    initialConfigString = nil;
+    useApproovStatusIfNoToken = NO;
+    approovTokenHeader = @"Approov-Token";
+    approovTraceIDHeader = @"Approov-TraceID";
+    approovTokenPrefix = @"";
+    bindingHeader = @"";
+    substitutionHeaders = [[NSMutableDictionary alloc] init];
+    substitutionQueryParams = [[NSMutableSet alloc] init];
+    exclusionURLRegexs = [[NSMutableSet alloc] init];
+    suppressLoggingUnknownURL = NO;
     initialConfigString = config;
     isInitialized = YES;
     @synchronized(earliestNetworkRequestTimeLock) {

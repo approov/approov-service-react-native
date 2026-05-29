@@ -10,6 +10,22 @@
 //   original location:
 //   - https://github.com/facebook/react-native/blob/0.58-stable/local-cli/templates/HelloWorld/android/app/build.gradle
 
+buildscript {
+    // The Android Gradle plugin is only required when opening the android folder stand-alone.
+    // This avoids unnecessary downloads and potential conflicts when the library is included as a
+    // module dependency in an application project.
+    // ref: https://docs.gradle.org/current/userguide/tutorial_using_tasks.html#sec:build_script_external_dependencies
+    if (project == rootProject) {
+        repositories {
+            google()
+            mavenCentral()
+        }
+        dependencies {
+            classpath 'com.android.tools.build:gradle:8.5.2'
+        }
+    }
+}
+
 plugins {
     id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
@@ -31,22 +47,6 @@ def candidateMiniSdkRoots = [
 ]
 def miniSdkAndroidRoot = candidateMiniSdkRoots.find { it.exists() }?.absoluteFile
 def miniSdkApproovJar = miniSdkAndroidRoot ? new File(miniSdkAndroidRoot, 'approov-sdk/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar') : null
-
-buildscript {
-    // The Android Gradle plugin is only required when opening the android folder stand-alone.
-    // This avoids unnecessary downloads and potential conflicts when the library is included as a
-    // module dependency in an application project.
-    // ref: https://docs.gradle.org/current/userguide/tutorial_using_tasks.html#sec:build_script_external_dependencies
-    if (project == rootProject) {
-        repositories {
-            google()
-            mavenCentral()
-        }
-        dependencies {
-            classpath 'com.android.tools.build:gradle:8.5.2'
-        }
-    }
-}
 
 android {
     namespace = "io.approov.reactnative"

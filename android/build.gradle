@@ -22,9 +22,10 @@ def safeExtGet(prop, fallback) {
 buildscript {
     repositories {
         gradlePluginPortal()
+        mavenCentral()
     }
     dependencies {
-        classpath 'com.github.jengelman.gradle.plugins:shadow:8.1.1'
+        classpath 'io.github.goooler.shadow:shadow:8.1.1'
     }
 }
 

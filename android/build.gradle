@@ -22,15 +22,14 @@ def safeExtGet(prop, fallback) {
 buildscript {
     repositories {
         gradlePluginPortal()
-        mavenCentral()
     }
     dependencies {
-        classpath 'io.github.goooler.shadow:shadow:8.1.1'
+        classpath 'com.gradleup.shadow:shadow-gradle-plugin:9.4.2'
     }
 }
 
 apply plugin: 'com.android.library'
-apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'com.gradleup.shadow'
 
 def candidateMiniSdkRoots = [
     new File(projectDir, '../../core-service-layers-testing/mini-sdk/android'),
@@ -116,7 +115,7 @@ configurations {
     shadowed
 }
 
-tasks.register('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+tasks.register('shadowJar', com.gradleup.shadow.tasks.ShadowJar) {
     archiveClassifier.set('shadow')
     configurations = [project.configurations.shadowed]
     relocate 'org.bouncycastle', 'io.approov.internal.bouncycastle'

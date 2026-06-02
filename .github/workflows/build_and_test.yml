@@ -48,8 +48,18 @@ jobs:
       - name: Verify worker endpoints
         run: |
           # ── URL resolution ──────────────────────────────────────────────────
-          PROTECTED_URL="${TESTING_REPLY_URL:-https://replay.ivol.workers.dev}"
-          UNPROTECTED_URL="${TESTING_REPLY_URL_UNPROTECTED:-https://replay-unprotected.ivol.workers.dev}"
+          # URLs MUST be set as GitHub organisation or repository variables.
+          # No hardcoded fallback is provided to avoid exposing endpoints
+          # in the public repository.
+          if [[ -z "$TESTING_REPLY_URL" || -z "$TESTING_REPLY_URL_UNPROTECTED" ]]; then
+            echo "ERROR: TESTING_REPLY_URL and TESTING_REPLY_URL_UNPROTECTED must be"
+            echo "       set as GitHub organisation or repository variables."
+            echo "       See CONTRIBUTING.md for setup instructions."
+            exit 1
+          fi
+
+          PROTECTED_URL="$TESTING_REPLY_URL"
+          UNPROTECTED_URL="$TESTING_REPLY_URL_UNPROTECTED"
           
           echo "TESTING_REPLY_URL=$PROTECTED_URL"       >> "$GITHUB_ENV"
           echo "TESTING_REPLY_URL_UNPROTECTED=$UNPROTECTED_URL" >> "$GITHUB_ENV"

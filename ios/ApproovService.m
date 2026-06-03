@@ -358,7 +358,7 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
   @synchronized(initializerLock) {
     // If we are already initialized with a valid config, ignore any subsequent
     // empty config initialization
-    if (isInitialized && initialConfigString != nil && [initialConfigString length] != 0 && [config length] == 0) {
+    if (ApproovIsEnabled() && [config length] == 0) {
       ApproovLogI(@"ApproovService already initialized with a valid config; ignoring empty configuration");
       resolve(nil);
       return;

@@ -681,7 +681,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
         // If we are already initialized with a valid config, ignore any subsequent
         // empty config initialization
-        if (isInitialized && initialConfig != null && !initialConfig.isEmpty() && config.isEmpty()) {
+        if (isApproovEnabled() && config.isEmpty()) {
             log(LOG_INFO, TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
             promise.resolve(null);
             return;

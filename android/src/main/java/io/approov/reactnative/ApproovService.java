@@ -679,6 +679,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
+        // If we are already initialized with a valid config, ignore any subsequent
+        // empty config initialization
+        if (isInitialized && initialConfig != null && !initialConfig.isEmpty() && config.isEmpty()) {
+            log(LOG_INFO, TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
+            promise.resolve(null);
+            return;
+        }
+
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.

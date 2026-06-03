@@ -356,6 +356,14 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
   }
 
   @synchronized(initializerLock) {
+    // If we are already initialized with a valid config, ignore any subsequent
+    // empty config initialization
+    if (isInitialized && initialConfigString != nil && [initialConfigString length] != 0 && [config length] == 0) {
+      ApproovLogI(@"ApproovService already initialized with a valid config; ignoring empty configuration");
+      resolve(nil);
+      return;
+    }
+
     // Initialize the platform SDK if not in bypass mode (empty config).
     // State is only modified after the SDK confirms success, preserving the
     // current operating mode (protected or bypass) on any failure.

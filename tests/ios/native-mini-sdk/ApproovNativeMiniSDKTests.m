@@ -427,6 +427,36 @@ static void TestInitializeAcceptsReinitComment(void) {
   AssertTrue(isInitialized, @"Reinit comment should be accepted");
 }
 
+static void TestInitializeWithValidThenEmptyConfigIgnoresEmptyConfig(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Layer should be initialized");
+  NSDictionary *enabledBefore = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledBefore[@"value"], @"Approov should be enabled");
+
+  // Reinitialize with empty config (should be ignored)
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Layer should remain initialized");
+  NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledAfter[@"value"], @"Approov should remain enabled");
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"),
+               @"Approov token should still be added");
+}
+
 static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
   ApproovService *service = FreshService();
 
@@ -1507,6 +1537,7 @@ int main(void) {
       ^{ TestInitializeIgnoresSameConfig(); },
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },
+      ^{ TestInitializeWithValidThenEmptyConfigIgnoresEmptyConfig(); },
       ^{ TestInitializeAcceptsOptionsComment(); },
       ^{ TestInitializeIgnoresSameConfigWithOptionsComment(); },
       ^{ TestInitializeWithDifferentConfigPreservesExistingState(); },

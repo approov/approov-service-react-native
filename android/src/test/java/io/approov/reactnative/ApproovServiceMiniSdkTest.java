@@ -323,6 +323,25 @@ public class ApproovServiceMiniSdkTest {
     }
 
     @Test
+    public void initializeWithValidThenEmptyConfigIgnoresEmptyConfig() throws Exception {
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("rn"), "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        
+        // Initialize with valid config
+        awaitResolvedPromise(promise -> service.initialize(validInitialConfig, null, promise));
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+
+        // Reinitialize with empty config (should be ignored)
+        awaitResolvedPromise(promise -> service.initialize("", null, promise));
+        assertTrue(service.isInitialized());
+        assertTrue(service.isApproovEnabled());
+
+        // Verify that requests are still protected
+        JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
+        assertNotNull(getHeader(reply, "Approov-Token"));
+    }
+
+    @Test
     public void uninitializedServiceCallsRejectProperly() throws Exception {
         // CHANGELOG 3.5.13: Ensure ApproovService calls to the native SDK are rejected if the service layer is not yet initialized.
         PromiseResult precheckRejected = awaitPromise(service::precheck);

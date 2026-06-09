@@ -12,4 +12,4 @@ We encourage all users of these service layers to update to the latest version f
 Thank you for letting us know about possible security vulnerabilities to this project. 
 Please don’t publish details in a public issue or PR, send us a private email at support@approov.io. Please disclose which version your report refers to. 
 
-Your message will recieve a prompt reply. 
+Your message will receive a prompt reply.

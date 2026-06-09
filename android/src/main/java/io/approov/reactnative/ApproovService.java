@@ -258,6 +258,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(level, tag, msg, null);
     }
 
+    /**
+     * Logs a message at INFO through the shared, level-gated logger. Exposed
+     * package-privately so collaborators such as {@link ApproovInterceptor} honour the
+     * configured log level (set via setLogLevel) instead of writing to android.util.Log
+     * unconditionally. This matches the iOS ApproovLogI behaviour, where the equivalent
+     * "task mutation" log is suppressed below INFO.
+     *
+     * @param tag the logging tag
+     * @param msg the message to log
+     */
+    void logInfo(String tag, String msg) {
+        log(LOG_INFO, tag, msg);
+    }
+
     private void log(int level, String tag, String msg, Throwable tr) {
         if (level < currentLogLevel)
             return;

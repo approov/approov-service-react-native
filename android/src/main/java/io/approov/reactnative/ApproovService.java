@@ -710,22 +710,35 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
             // configuration is only reset when the config actually changes; a same-config
             // re-initialization preserves any configuration applied after the first call.
-            if (!configUnchanged) {
-                isInitialized = false;
-                initialConfig = null;
-                useApproovStatusIfNoToken = false;
-                approovTokenHeader = APPROOV_TOKEN_HEADER;
-                approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-                approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-                bindingHeader = null;
-                substitutionHeaders = new HashMap<>();
-                substitutionQueryParams = new HashMap<>();
-                exclusionURLRegexs = new HashMap<>();
-                suppressLoggingUnknownURL = false;
-                sessionMetadataCollectionEnabled = true;
+            //
+            // The reset and commit are performed under the instance monitor so the
+            // transition is atomic relative to the interceptor, which reads isInitialized,
+            // isApproovEnabled and the header/substitution/exclusion state through
+            // synchronized getters on OkHttp network threads. Without this lock a request
+            // racing a re-initialization could observe the transient isInitialized=false /
+            // initialConfig=null window (these are non-volatile static fields written with
+            // no happens-before guarantee), and forward a request that should be protected
+            // without an Approov token. The platform SDK call above is intentionally left
+            // outside the lock so its network work never blocks those getters. iOS performs
+            // the equivalent reset inside @synchronized(initializerLock).
+            synchronized (this) {
+                if (!configUnchanged) {
+                    isInitialized = false;
+                    initialConfig = null;
+                    useApproovStatusIfNoToken = false;
+                    approovTokenHeader = APPROOV_TOKEN_HEADER;
+                    approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                    approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                    bindingHeader = null;
+                    substitutionHeaders = new HashMap<>();
+                    substitutionQueryParams = new HashMap<>();
+                    exclusionURLRegexs = new HashMap<>();
+                    suppressLoggingUnknownURL = false;
+                    sessionMetadataCollectionEnabled = true;
+                }
+                initialConfig = config;
+                isInitialized = true;
             }
-            initialConfig = config;
-            isInitialized = true;
             clearEarliestNetworkRequestTime();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");

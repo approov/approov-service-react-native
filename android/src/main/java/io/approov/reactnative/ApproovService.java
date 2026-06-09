@@ -687,6 +687,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
+        // Detect whether this is a re-initialization with the identical config that is
+        // already in force. Re-initializing with the same config (e.g. an ApproovProvider
+        // remount, a React StrictMode double-invoke or Fast Refresh in development) must
+        // NOT discard the runtime configuration the app set up after the first initialize()
+        // call — substitution headers, exclusion URL regexes and token/binding header
+        // settings. Wiping those silently would drop request mutations and, more seriously,
+        // exclusion rules that are security relevant. Only a genuinely different config
+        // resets the service-layer state.
+        boolean configUnchanged = isInitialized && config.equals(initialConfig);
+
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.
@@ -697,19 +707,23 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
             }
-            // SDK succeeded (or bypass) — now reset and commit new service-layer state.
-            isInitialized = false;
-            initialConfig = null;
-            useApproovStatusIfNoToken = false;
-            approovTokenHeader = APPROOV_TOKEN_HEADER;
-            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-            bindingHeader = null;
-            substitutionHeaders = new HashMap<>();
-            substitutionQueryParams = new HashMap<>();
-            exclusionURLRegexs = new HashMap<>();
-            suppressLoggingUnknownURL = false;
-            sessionMetadataCollectionEnabled = true;
+            // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
+            // configuration is only reset when the config actually changes; a same-config
+            // re-initialization preserves any configuration applied after the first call.
+            if (!configUnchanged) {
+                isInitialized = false;
+                initialConfig = null;
+                useApproovStatusIfNoToken = false;
+                approovTokenHeader = APPROOV_TOKEN_HEADER;
+                approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                bindingHeader = null;
+                substitutionHeaders = new HashMap<>();
+                substitutionQueryParams = new HashMap<>();
+                exclusionURLRegexs = new HashMap<>();
+                suppressLoggingUnknownURL = false;
+                sessionMetadataCollectionEnabled = true;
+            }
             initialConfig = config;
             isInitialized = true;
             clearEarliestNetworkRequestTime();

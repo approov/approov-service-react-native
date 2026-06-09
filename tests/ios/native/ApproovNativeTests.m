@@ -293,6 +293,49 @@ static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(v
              @"SDK failure after empty bootstrap should preserve the bypass initialized state");
 }
 
+// Regression guard: re-initializing with the SAME config (e.g. an ApproovProvider
+// remount, a React StrictMode double-invoke or Fast Refresh in development) must NOT
+// discard the runtime configuration the app applied after the first initialize() call.
+// Wiping substitution headers and, more seriously, exclusion URL regexes would silently
+// drop request mutations and security-relevant exclusion rules.
+static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
+  ApproovService *service = FreshService();
+
+  __block BOOL firstResolved = NO;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) { firstResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(firstResolved, @"First initialization should resolve");
+  AssertTrue(isInitialized, @"First initialization should mark the layer initialized");
+
+  // Configure runtime state after the first initialization, as an app would via
+  // addSubstitutionHeader:/addExclusionURLRegex:/setTokenHeader:. Those are RCT-exported
+  // methods that are not declared in the public header, so the equivalent service-layer
+  // state is set directly here — it is precisely the state the reset block would wipe.
+  [substitutionHeaders setObject:@"Bearer " forKey:@"Authorization"];
+  [exclusionURLRegexs addObject:@"https://example.com/excluded/.*"];
+  approovTokenHeader = @"X-Custom-Token";
+
+  // Re-initialize with the SAME config.
+  __block BOOL secondResolved = NO;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) { secondResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(secondResolved, @"Same-config re-initialization should resolve");
+
+  // The runtime configuration must survive the same-config re-initialization.
+  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] != nil,
+             @"Substitution header should be preserved across same-config re-init");
+  AssertTrue([exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
+             @"Exclusion URL regex should be preserved across same-config re-init");
+  AssertEqualObjects(@"X-Custom-Token", approovTokenHeader,
+                     @"Token header should be preserved across same-config re-init");
+}
+
 
 static NSURLSession *MockSession(void) {
   NSURLSessionConfiguration *configuration =
@@ -615,6 +658,7 @@ int main(void) {
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
       ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
+      ^{ TestInitializeWithSameConfigPreservesRuntimeConfiguration(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },

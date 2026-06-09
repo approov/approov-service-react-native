@@ -265,6 +265,59 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
+    public void initializeWithSameConfigPreservesRuntimeConfiguration() {
+        ApproovService service = newService();
+        String config = "valid-config";
+
+        // Approov.initialize returns false here (mockStatic default) meaning the native
+        // SDK is treated as already initialized — no exception, so the service layer
+        // commits the configuration successfully.
+        Promise firstInit = mock(Promise.class);
+        service.initialize(config, null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+        assertTrue(service.isApproovEnabled());
+
+        // Configure runtime state after the first initialization, exactly as an app
+        // would after ApproovService.initialize() resolves.
+        service.addSubstitutionHeader("Authorization", "Bearer ");
+        service.addExclusionURLRegex("https://example.com/excluded/.*");
+        service.setTokenHeader("X-Custom-Token", "Bearer ");
+        service.setBindingHeader("Authorization");
+
+        // Re-initialize with the SAME config (e.g. a provider remount / StrictMode).
+        Promise secondInit = mock(Promise.class);
+        service.initialize(config, null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        // The runtime configuration must survive the same-config re-initialization.
+        assertTrue("substitution header should be preserved",
+            service.getSubstitutionHeaders().containsKey("Authorization"));
+        assertTrue("exclusion URL regex should be preserved",
+            service.getExclusionURLRegexs().containsKey("https://example.com/excluded/.*"));
+        assertEquals("token header should be preserved", "X-Custom-Token", service.getTokenHeader());
+        assertEquals("binding header should be preserved", "Authorization", service.getBindingHeader());
+        assertTrue(service.isApproovEnabled());
+    }
+
+    @Test
+    public void initializeWithDifferentConfigResetsRuntimeConfiguration() {
+        ApproovService service = newService();
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize("config-one", null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+        service.addSubstitutionHeader("Authorization", "Bearer ");
+
+        // A genuinely different config still resets the runtime configuration.
+        Promise secondInit = mock(Promise.class);
+        service.initialize("config-two", null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        assertFalse("substitution header should be cleared on a different config",
+            service.getSubstitutionHeaders().containsKey("Authorization"));
+    }
+
+    @Test
     public void statusMethodsReflectServiceLayerAndApproovEnabledStates() {
         ApproovService service = newService();
         Promise initializedPromise = mock(Promise.class);

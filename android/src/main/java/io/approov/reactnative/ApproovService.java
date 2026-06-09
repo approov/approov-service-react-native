@@ -258,6 +258,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(level, tag, msg, null);
     }
 
+    /**
+     * Logs a message at INFO through the shared, level-gated logger. Exposed
+     * package-privately so collaborators such as {@link ApproovInterceptor} honour the
+     * configured log level (set via setLogLevel) instead of writing to android.util.Log
+     * unconditionally. This matches the iOS ApproovLogI behaviour, where the equivalent
+     * "task mutation" log is suppressed below INFO.
+     *
+     * @param tag the logging tag
+     * @param msg the message to log
+     */
+    void logInfo(String tag, String msg) {
+        log(LOG_INFO, tag, msg);
+    }
+
     private void log(int level, String tag, String msg, Throwable tr) {
         if (level < currentLogLevel)
             return;
@@ -687,6 +701,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
+        // Detect whether this is a re-initialization with the identical config that is
+        // already in force. Re-initializing with the same config (e.g. an ApproovProvider
+        // remount, a React StrictMode double-invoke or Fast Refresh in development) must
+        // NOT discard the runtime configuration the app set up after the first initialize()
+        // call — substitution headers, exclusion URL regexes and token/binding header
+        // settings. Wiping those silently would drop request mutations and, more seriously,
+        // exclusion rules that are security relevant. Only a genuinely different config
+        // resets the service-layer state.
+        boolean configUnchanged = isInitialized && config.equals(initialConfig);
+
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.
@@ -697,21 +721,38 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
             }
-            // SDK succeeded (or bypass) — now reset and commit new service-layer state.
-            isInitialized = false;
-            initialConfig = null;
-            useApproovStatusIfNoToken = false;
-            approovTokenHeader = APPROOV_TOKEN_HEADER;
-            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-            bindingHeader = null;
-            substitutionHeaders = new HashMap<>();
-            substitutionQueryParams = new HashMap<>();
-            exclusionURLRegexs = new HashMap<>();
-            suppressLoggingUnknownURL = false;
-            sessionMetadataCollectionEnabled = true;
-            initialConfig = config;
-            isInitialized = true;
+            // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
+            // configuration is only reset when the config actually changes; a same-config
+            // re-initialization preserves any configuration applied after the first call.
+            //
+            // The reset and commit are performed under the instance monitor so the
+            // transition is atomic relative to the interceptor, which reads isInitialized,
+            // isApproovEnabled and the header/substitution/exclusion state through
+            // synchronized getters on OkHttp network threads. Without this lock a request
+            // racing a re-initialization could observe the transient isInitialized=false /
+            // initialConfig=null window (these are non-volatile static fields written with
+            // no happens-before guarantee), and forward a request that should be protected
+            // without an Approov token. The platform SDK call above is intentionally left
+            // outside the lock so its network work never blocks those getters. iOS performs
+            // the equivalent reset inside @synchronized(initializerLock).
+            synchronized (this) {
+                if (!configUnchanged) {
+                    isInitialized = false;
+                    initialConfig = null;
+                    useApproovStatusIfNoToken = false;
+                    approovTokenHeader = APPROOV_TOKEN_HEADER;
+                    approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                    approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                    bindingHeader = null;
+                    substitutionHeaders = new HashMap<>();
+                    substitutionQueryParams = new HashMap<>();
+                    exclusionURLRegexs = new HashMap<>();
+                    suppressLoggingUnknownURL = false;
+                    sessionMetadataCollectionEnabled = true;
+                }
+                initialConfig = config;
+                isInitialized = true;
+            }
             clearEarliestNetworkRequestTime();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");

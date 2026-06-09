@@ -364,6 +364,16 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
+    // Detect a re-initialization with the identical config already in force. Re-initializing
+    // with the same config (e.g. an ApproovProvider remount, a React StrictMode double-invoke
+    // or Fast Refresh in development) must NOT discard the runtime configuration the app set
+    // up after the first initialize() call — substitution headers, exclusion URL regexes and
+    // token/binding header settings. Wiping those silently would drop request mutations and,
+    // more seriously, exclusion rules that are security relevant. Only a genuinely different
+    // config resets the service-layer state.
+    BOOL configUnchanged = isInitialized && initialConfigString != nil &&
+        [initialConfigString isEqualToString:config];
+
     // Initialize the platform SDK if not in bypass mode (empty config).
     // State is only modified after the SDK confirms success, preserving the
     // current operating mode (protected or bypass) on any failure.
@@ -399,21 +409,25 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // SDK succeeded (or bypass) — now reset and commit new service-layer state.
+    // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
+    // configuration is only reset when the config actually changes; a same-config
+    // re-initialization preserves any configuration applied after the first call.
     if (!initializationResult) {
       ApproovLogD(@"native SDK already initialized");
     }
-    isInitialized = NO;
-    initialConfigString = nil;
-    useApproovStatusIfNoToken = NO;
-    approovTokenHeader = @"Approov-Token";
-    approovTraceIDHeader = @"Approov-TraceID";
-    approovTokenPrefix = @"";
-    bindingHeader = @"";
-    substitutionHeaders = [[NSMutableDictionary alloc] init];
-    substitutionQueryParams = [[NSMutableSet alloc] init];
-    exclusionURLRegexs = [[NSMutableSet alloc] init];
-    suppressLoggingUnknownURL = NO;
+    if (!configUnchanged) {
+      isInitialized = NO;
+      initialConfigString = nil;
+      useApproovStatusIfNoToken = NO;
+      approovTokenHeader = @"Approov-Token";
+      approovTraceIDHeader = @"Approov-TraceID";
+      approovTokenPrefix = @"";
+      bindingHeader = @"";
+      substitutionHeaders = [[NSMutableDictionary alloc] init];
+      substitutionQueryParams = [[NSMutableSet alloc] init];
+      exclusionURLRegexs = [[NSMutableSet alloc] init];
+      suppressLoggingUnknownURL = NO;
+    }
     initialConfigString = config;
     isInitialized = YES;
     @synchronized(earliestNetworkRequestTimeLock) {

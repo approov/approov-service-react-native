@@ -217,10 +217,13 @@ public class ApproovInterceptor implements Interceptor {
             request = request.newBuilder().header(traceIDHeader, traceID).build();
         }
 
-        // log the request mutation result (matches iOS "task mutation" log at INFO level)
+        // log the request mutation result (matches iOS "task mutation" log at INFO level).
+        // Routed through the service's level-gated logger so it honours setLogLevel and is
+        // suppressed below INFO, matching the iOS ApproovLogI behaviour — rather than
+        // writing to android.util.Log unconditionally for every request.
         String tokenAfter = request.header(tokenHeaderKey);
         String traceAfter = (traceIDHeader != null) ? request.header(traceIDHeader) : null;
-        Log.i(TAG, "request mutation " + url
+        approovService.logInfo(TAG, "request mutation " + url
                 + " token=" + headerState(tokenBefore) + "->" + headerState(tokenAfter)
                 + " trace=" + headerState(traceAfter));
 

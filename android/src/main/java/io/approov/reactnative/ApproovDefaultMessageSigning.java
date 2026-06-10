@@ -20,9 +20,9 @@ package io.approov.reactnative;
 import android.util.Base64;
 import android.util.Log;
 
-import org.bouncycastle.asn1.ASN1InputStream;
-import org.bouncycastle.asn1.ASN1Integer;
-import org.bouncycastle.asn1.ASN1Sequence;
+import io.approov.internal.reactnative.bouncycastle.asn1.ASN1InputStream;
+import io.approov.internal.reactnative.bouncycastle.asn1.ASN1Integer;
+import io.approov.internal.reactnative.bouncycastle.asn1.ASN1Sequence;
 
 import java.io.IOException;
 import java.math.BigInteger;

@@ -58,6 +58,19 @@ public class ApproovInterceptor implements Interceptor {
         this.approovService = approovService;
     }
 
+    /**
+     * Returns a diagnostic string describing the state of a header value.
+     * Matches the iOS headerStateForValue: format.
+     *
+     * @param value the header value (may be null)
+     * @return "missing", "empty", or "present(len=N)"
+     */
+    private static String headerState(String value) {
+        if (value == null) return "missing";
+        if (value.isEmpty()) return "empty";
+        return "present(len=" + value.length() + ")";
+    }
+
     @Override
     public Response intercept(Chain chain) throws IOException {
         // if there are any accesses to localhost then they are just passed through
@@ -174,6 +187,10 @@ public class ApproovInterceptor implements Interceptor {
             throw new IOException(e);
         }
 
+        // capture pre-mutation header state for diagnostics
+        String tokenHeaderKey = approovService.getTokenHeader();
+        String tokenBefore = request.header(tokenHeaderKey);
+
         // we successfully obtained a token so add it to the header for the request
         String addedTokenHeader = null;
         String addedTokenPrefix = null;
@@ -199,6 +216,16 @@ public class ApproovInterceptor implements Interceptor {
             addedTraceIDHeader = traceIDHeader;
             request = request.newBuilder().header(traceIDHeader, traceID).build();
         }
+
+        // log the request mutation result (matches iOS "task mutation" log at INFO level).
+        // Routed through the service's level-gated logger so it honours setLogLevel and is
+        // suppressed below INFO, matching the iOS ApproovLogI behaviour — rather than
+        // writing to android.util.Log unconditionally for every request.
+        String tokenAfter = request.header(tokenHeaderKey);
+        String traceAfter = (traceIDHeader != null) ? request.header(traceIDHeader) : null;
+        approovService.logInfo(TAG, "request mutation " + url
+                + " token=" + headerState(tokenBefore) + "->" + headerState(tokenAfter)
+                + " trace=" + headerState(traceAfter));
 
         // we now deal with any header substitutions
         Map<String, String> subsHeaders = approovService.getSubstitutionHeaders();

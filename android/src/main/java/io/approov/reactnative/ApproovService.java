@@ -258,6 +258,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(level, tag, msg, null);
     }
 
+    /**
+     * Logs a message at INFO through the shared, level-gated logger. Exposed
+     * package-privately so collaborators such as {@link ApproovInterceptor} honour the
+     * configured log level (set via setLogLevel) instead of writing to android.util.Log
+     * unconditionally. This matches the iOS ApproovLogI behaviour, where the equivalent
+     * "task mutation" log is suppressed below INFO.
+     *
+     * @param tag the logging tag
+     * @param msg the message to log
+     */
+    void logInfo(String tag, String msg) {
+        log(LOG_INFO, tag, msg);
+    }
+
     private void log(int level, String tag, String msg, Throwable tr) {
         if (level < currentLogLevel)
             return;
@@ -413,7 +427,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // initialize the Approov SDK
             try {
                 if (!config.isEmpty()) {
-                    Approov.initialize(applicationContext, config, "auto", "init-fetch");
+                    Approov.initialize(applicationContext, config, "auto", null);
                     Approov.setUserProperty("approov-react-native");
                 }
                 initialConfig = config;
@@ -660,61 +674,112 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Initializes the Approov SDK and thus enables the Approov features if the
-     * initialization was not performed using configuration files on launch.
-     * 
-     * @param config  is the configuration to be used
-     * @param promise to be fulfilled once the initialization is completed
+     * Initializes the ApproovService with an account configuration and comment.
+     * Resets service-layer state if the configuration changes. A same-config
+     * re-initialization preserves any configuration applied after the first setup.
+     * The platform SDK returns true on first initialization or false if it is
+     * already initialized with the same configuration (treated as success). Any other
+     * failure — such as a different-config conflict — throws and is surfaced as a
+     * rejected promise.
+     *
+     * @param config  the configuration string, or empty string for bypass mode
+     * @param comment optional comment forwarded to the native SDK, or null
+     * @param promise resolved on success, rejected on failure
      */
     @ReactMethod
     public void initialize(String config, String comment, Promise promise) {
-        String effectiveComment = comment == null ? "" : comment;
-        boolean allowReinitialize = effectiveComment.startsWith("reinit");
-        boolean allowEnableAfterEmptyInitialization = isInitialized && (initialConfig != null)
-                && initialConfig.isEmpty() && !config.isEmpty();
-
-        if (isInitialized && !allowEnableAfterEmptyInitialization) {
-            // if the SDK is previously initialized then the config should be the same
-            if (!config.equals(initialConfig)) {
-                log(LOG_ERROR, TAG, "attempt to reinitialize with a different config");
-                promise.reject("initialize", "attempt to reinitialize with a different config",
-                        getErrorUserInfo(false));
-                return;
-            }
-            if (!allowReinitialize) {
-                promise.resolve(null);
-                return;
-            }
+        if (config == null) {
+            promise.reject("initialize", "config must not be null; pass \"\" for bypass mode",
+                    getErrorUserInfo(false));
+            return;
         }
 
-        // initialize the Approov SDK and notify any pin change listeners since pins may
-        // now be available
-            try {
-                if (!config.isEmpty()) {
-                    Approov.initialize(applicationContext, config, "auto", effectiveComment);
-                    Approov.setUserProperty("approov-react-native");
+        // If we are already initialized with a valid config, ignore any subsequent
+        // empty config initialization
+        if (isApproovEnabled() && config.isEmpty()) {
+            log(LOG_INFO, TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
+            promise.resolve(null);
+            return;
+        }
+
+        // Detect whether this is a re-initialization with the identical config that is
+        // already in force. Re-initializing with the same config (e.g. an ApproovProvider
+        // remount, a React StrictMode double-invoke or Fast Refresh in development) must
+        // NOT discard the runtime configuration the app set up after the first initialize()
+        // call — substitution headers, exclusion URL regexes and token/binding header
+        // settings. Wiping those silently would drop request mutations and, more seriously,
+        // exclusion rules that are security relevant. Only a genuinely different config
+        // resets the service-layer state.
+        boolean configUnchanged = isInitialized && config.equals(initialConfig);
+
+        // Initialize the platform SDK if not in bypass mode (empty config).
+        // State is only modified after the SDK confirms success, preserving the current
+        // operating mode (protected or bypass) if the call fails.
+        try {
+            if (!config.isEmpty()) {
+                boolean sdkInitialized = Approov.initialize(applicationContext, config, "auto", comment);
+                if (!sdkInitialized) {
+                    log(LOG_DEBUG, TAG, "Approov SDK already initialized");
+                }
+            }
+            // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
+            // configuration is only reset when the config actually changes; a same-config
+            // re-initialization preserves any configuration applied after the first call.
+            //
+            // The reset and commit are performed under the instance monitor so the
+            // transition is atomic relative to the interceptor, which reads isInitialized,
+            // isApproovEnabled and the header/substitution/exclusion state through
+            // synchronized getters on OkHttp network threads. Without this lock a request
+            // racing a re-initialization could observe the transient isInitialized=false /
+            // initialConfig=null window (these are non-volatile static fields written with
+            // no happens-before guarantee), and forward a request that should be protected
+            // without an Approov token. The platform SDK call above is intentionally left
+            // outside the lock so its network work never blocks those getters. iOS performs
+            // the equivalent reset inside @synchronized(initializerLock).
+            synchronized (this) {
+                if (!configUnchanged) {
+                    isInitialized = false;
+                    initialConfig = null;
+                    useApproovStatusIfNoToken = false;
+                    approovTokenHeader = APPROOV_TOKEN_HEADER;
+                    approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                    approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                    bindingHeader = null;
+                    substitutionHeaders = new HashMap<>();
+                    substitutionQueryParams = new HashMap<>();
+                    exclusionURLRegexs = new HashMap<>();
+                    suppressLoggingUnknownURL = false;
+                    sessionMetadataCollectionEnabled = true;
                 }
                 initialConfig = config;
                 isInitialized = true;
-                clearEarliestNetworkRequestTime();
-                if (isApproovEnabled()) {
-                    log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                    notifyPinChangeListeners();
-                } else {
-                    log(LOG_INFO, TAG, "initialized without Approov SDK");
-                }
-                if (pendingPrefetch) {
-                    prefetch();
-                    pendingPrefetch = false;
-                }
-                promise.resolve(null);
-            } catch (IllegalArgumentException e) {
-                log(LOG_ERROR, TAG, "initialization failed with IllegalArgument: " + e.getMessage());
-                promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
-            } catch (IllegalStateException e) {
-                log(LOG_ERROR, TAG, "initialization failed with IllegalState: " + e.getMessage());
-                promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
             }
+            clearEarliestNetworkRequestTime();
+            if (isApproovEnabled()) {
+                Approov.setUserProperty("approov-react-native");
+                log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
+                notifyPinChangeListeners();
+            } else {
+                log(LOG_INFO, TAG, "initialized without Approov SDK");
+            }
+            if (pendingPrefetch) {
+                prefetch();
+                pendingPrefetch = false;
+            }
+            promise.resolve(null);
+        } catch (IllegalArgumentException e) {
+            log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            // Release the startup sync gate so any waiting threads are not held indefinitely.
+            // Service-layer state is NOT modified — previous operating mode is preserved.
+            clearEarliestNetworkRequestTime();
+            promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
+        } catch (IllegalStateException e) {
+            log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
+            // Release the startup sync gate so any waiting threads are not held indefinitely.
+            // Service-layer state is NOT modified — previous operating mode is preserved.
+            clearEarliestNetworkRequestTime();
+            promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
+        }
     }
 
     /**
@@ -833,6 +898,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setInstallAttrsInToken(String attrs, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "setInstallAttrsInToken: Approov is not enabled");
+            promise.reject("setInstallAttrsInToken", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setInstallAttrsInToken(attrs);
             log(LOG_DEBUG, TAG, "setInstallAttrsInToken");
@@ -900,6 +970,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setDevKey(String devKey, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "setDevKey: Approov is not enabled");
+            promise.reject("setDevKey", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDevKey(devKey);
             log(LOG_DEBUG, TAG, "setDevKey");
@@ -1256,6 +1331,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @throws ApproovException if there was a problem
      */
     public static String getAccountMessageSignature(String message) throws ApproovException {
+        if (!isInitialized || initialConfig == null || initialConfig.isEmpty()) {
+            throw new ApproovException("getAccountMessageSignature: Approov is not enabled");
+        }
         try {
             String signature = Approov.getMessageSignature(message);
             if (signature == null)
@@ -1277,6 +1355,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @throws ApproovException if there was a problem
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
+        if (!isInitialized || initialConfig == null || initialConfig.isEmpty()) {
+            throw new ApproovException("getInstallMessageSignature: Approov is not enabled");
+        }
         try {
             String signature = Approov.getInstallMessageSignature(message);
             if (signature == null)
@@ -1428,6 +1509,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.reject("approov_error", "Approov is disabled", getErrorUserInfo(false));
             return;
         }
+        if (data == null) {
+            promise.reject("setDataHashInToken", "IllegalArgument: data must not be null", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDataHashInToken(data);
             log(LOG_DEBUG, TAG, "setDataHashInToken");
@@ -1522,6 +1607,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void getMessageSignature(String message, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "getMessageSignature: Approov is not enabled");
+            promise.reject("getMessageSignature", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             String signature = Approov.getMessageSignature(message);
             log(LOG_DEBUG, TAG, "getMessageSignature");

@@ -1012,10 +1012,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
               return RSSWCallOriginal([result request]);
             }
             case ApproovInterceptorActionRetry: {
-              // return a task with 5xx error code suggesting retry
+              // return a task with a network-style error (matches Android IOException behavior)
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                             withErrorCode:503
                                withMessage:[result message]];
             }
             default: {
@@ -1078,7 +1078,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]
                          completionHandler:completionHandler];
             default:
@@ -1134,7 +1134,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]];
             default:
               return [ApproovMockURLProtocol
@@ -1193,7 +1193,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]
                          completionHandler:completionHandler];
             default:
@@ -1276,7 +1276,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]];
             default:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
@@ -1337,7 +1337,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return [ApproovMockURLProtocol
                   createMockUploadTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]
                          completionHandler:completionHandler];
             default:
@@ -1395,7 +1395,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]];
             default:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
@@ -1455,7 +1455,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return [ApproovMockURLProtocol
                   createMockUploadTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]
                          completionHandler:completionHandler];
             default:
@@ -1511,7 +1511,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             case ApproovInterceptorActionRetry:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:503
+                            withErrorCode:503
                                withMessage:[result message]];
             default:
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
@@ -1721,7 +1721,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result request]);
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1765,7 +1765,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result request], completionHandler);
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1807,7 +1807,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result.request URL]);
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1852,7 +1852,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result.request URL], completionHandler);
               return [ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1898,7 +1898,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result request], bodyData);
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1945,7 +1945,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                         completionHandler);
               return [ApproovMockURLProtocol
                   createMockUploadTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -1987,7 +1987,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result request], fileURL);
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -2033,7 +2033,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                         completionHandler);
               return [ApproovMockURLProtocol
                   createMockUploadTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499
@@ -2074,7 +2074,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                 return RSSWCallOriginal([result request]);
               return (NSURLSessionUploadTask *)[ApproovMockURLProtocol
                   createMockTaskForSession:self
-                            withStatusCode:([result action] ==
+                            withErrorCode:([result action] ==
                                             ApproovInterceptorActionRetry)
                                                ? 503
                                                : 499

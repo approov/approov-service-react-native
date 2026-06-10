@@ -247,12 +247,12 @@ static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
              @"Different-configuration native SDK error should leave the layer uninitialized");
 }
 
-// Verifies the transition: empty-config bootstrap → SDK failure.
+// Per TESTING_REQUIREMENTS.md §20: SDK Initialization Failure After Empty Bootstrap.
 // After bootstrapping with an empty config the layer is initialized but Approov
 // is disabled. A subsequent attempt with a real config that fails at the SDK
-// level should reject the promise while preserving the initialized (but disabled)
-// bootstrap state.
-static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(void) {
+// level must reject the promise while leaving the service layer in bypass mode
+// (initialized, Approov disabled). The service layer is NOT left uninitialized.
+static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(void) {
   ApproovService *service = FreshService();
 
   // Bootstrap with empty config
@@ -288,9 +288,52 @@ static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(void) 
              @"SDK failure after empty bootstrap should reject");
   AssertEqualObjects(@"initialize", rejectionCode,
                      @"SDK failure after empty bootstrap should reject with initialize");
-  // The layer stays initialized from the empty bootstrap
+  // Per TESTING_REQUIREMENTS §20: service stays in bypass mode (initialized, Approov disabled).
   AssertTrue(isInitialized,
-             @"SDK failure after empty bootstrap should preserve the initialized state");
+             @"SDK failure after empty bootstrap should preserve the bypass initialized state");
+}
+
+// Regression guard: re-initializing with the SAME config (e.g. an ApproovProvider
+// remount, a React StrictMode double-invoke or Fast Refresh in development) must NOT
+// discard the runtime configuration the app applied after the first initialize() call.
+// Wiping substitution headers and, more seriously, exclusion URL regexes would silently
+// drop request mutations and security-relevant exclusion rules.
+static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
+  ApproovService *service = FreshService();
+
+  __block BOOL firstResolved = NO;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) { firstResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(firstResolved, @"First initialization should resolve");
+  AssertTrue(isInitialized, @"First initialization should mark the layer initialized");
+
+  // Configure runtime state after the first initialization, as an app would via
+  // addSubstitutionHeader:/addExclusionURLRegex:/setTokenHeader:. Those are RCT-exported
+  // methods that are not declared in the public header, so the equivalent service-layer
+  // state is set directly here — it is precisely the state the reset block would wipe.
+  [substitutionHeaders setObject:@"Bearer " forKey:@"Authorization"];
+  [exclusionURLRegexs addObject:@"https://example.com/excluded/.*"];
+  approovTokenHeader = @"X-Custom-Token";
+
+  // Re-initialize with the SAME config.
+  __block BOOL secondResolved = NO;
+  [service initialize:@"test-config"
+              comment:nil
+             resolver:^(__unused id value) { secondResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(secondResolved, @"Same-config re-initialization should resolve");
+
+  // The runtime configuration must survive the same-config re-initialization.
+  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] != nil,
+             @"Substitution header should be preserved across same-config re-init");
+  AssertTrue([exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
+             @"Exclusion URL regex should be preserved across same-config re-init");
+  AssertEqualObjects(@"X-Custom-Token", approovTokenHeader,
+                     @"Token header should be preserved across same-config re-init");
 }
 
 
@@ -433,10 +476,10 @@ static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
       delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   AssertEqualIntegers(0, waitResult,
                       @"Synthetic dataTaskWithURL retry should complete in time");
-  AssertTrue(delegate.error == nil,
-             @"Synthetic dataTaskWithURL retry should not fail with NSError");
-  AssertEqualIntegers(503, delegate.response.statusCode,
-                      @"Synthetic dataTaskWithURL retry should surface a 503 status");
+  AssertTrue(delegate.error != nil,
+             @"Synthetic dataTaskWithURL retry should fail with an NSError");
+  AssertEqualIntegers(503, delegate.error.code,
+                      @"Synthetic dataTaskWithURL retry should surface a 503 error code");
   AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
                       @"Synthetic dataTaskWithURL retry should not include a body");
   AssertEqualIntegers(1, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
@@ -488,10 +531,10 @@ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
       delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   AssertEqualIntegers(0, waitResult,
                       @"Synthetic retry response should complete in time");
-  AssertTrue(delegate.error == nil,
-             @"Synthetic retry response should not complete with an NSError");
-  AssertEqualIntegers(503, delegate.response.statusCode,
-                      @"Synthetic retry response should surface a 503 status");
+  AssertTrue(delegate.error != nil,
+             @"Synthetic retry response should complete with an NSError");
+  AssertEqualIntegers(503, delegate.error.code,
+                      @"Synthetic retry response should surface a 503 error code");
   AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
                       @"Synthetic retry response should not include a body payload");
   AssertEqualIntegers(1, (NSInteger)ApproovTestFetchApproovTokenCallCount(),
@@ -614,7 +657,8 @@ int main(void) {
       ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
-      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrap(); },
+      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
+      ^{ TestInitializeWithSameConfigPreservesRuntimeConfiguration(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },

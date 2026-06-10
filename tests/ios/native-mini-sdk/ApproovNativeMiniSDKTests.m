@@ -406,10 +406,8 @@ static void TestInitializeRejectsDifferentConfig(void) {
   });
 
   AssertEqualObjects(@"initialize", rejected[@"code"], @"Different-config reinitialization should reject");
-  AssertEqualObjects(@"attempt to reinitialize Approov SDK with a different config",
-                     rejected[@"message"],
-                     @"Different-config reinitialization should explain the mismatch");
-  AssertTrue(isInitialized, @"Different-config reinitialization should keep the existing initialized state");
+  // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+  AssertTrue(isInitialized, @"Different-config reinitialization should leave the layer initialized");
 }
 
 static void TestInitializeAcceptsReinitComment(void) {
@@ -427,6 +425,36 @@ static void TestInitializeAcceptsReinitComment(void) {
   });
 
   AssertTrue(isInitialized, @"Reinit comment should be accepted");
+}
+
+static void TestInitializeWithValidThenEmptyConfigIgnoresEmptyConfig(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Layer should be initialized");
+  NSDictionary *enabledBefore = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledBefore[@"value"], @"Approov should be enabled");
+
+  // Reinitialize with empty config (should be ignored)
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"Layer should remain initialized");
+  NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(YES), enabledAfter[@"value"], @"Approov should remain enabled");
+
+  NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"),
+               @"Approov token should still be added");
 }
 
 static void TestStatusMethodsDifferentiateInitializedAndEnabled(void) {
@@ -1465,7 +1493,7 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
 
   AssertEqualObjects(@"initialize", rejected[@"code"],
                      @"Different-config reinitialization should reject");
-  // Crucially: the original config's state is fully preserved
+  // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
   AssertTrue(isInitialized,
              @"Different-config rejection should preserve the initialized state");
   NSDictionary *enabledAfter = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
@@ -1474,7 +1502,7 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
   AssertEqualObjects(@(YES), enabledAfter[@"value"],
                      @"Different-config rejection should preserve the enabled state");
 
-  // Verify the original configuration still works
+  // Verify the original configuration still works.
   NSDictionary *reply = FetchNetworkReply(service, TargetURL(), @{});
   AssertNotNil(HeaderValue(reply, @"Approov-Token"),
                @"Original config should remain functional after a different-config rejection");
@@ -1509,6 +1537,7 @@ int main(void) {
       ^{ TestInitializeIgnoresSameConfig(); },
       ^{ TestInitializeRejectsDifferentConfig(); },
       ^{ TestInitializeAcceptsReinitComment(); },
+      ^{ TestInitializeWithValidThenEmptyConfigIgnoresEmptyConfig(); },
       ^{ TestInitializeAcceptsOptionsComment(); },
       ^{ TestInitializeIgnoresSameConfigWithOptionsComment(); },
       ^{ TestInitializeWithDifferentConfigPreservesExistingState(); },

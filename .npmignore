@@ -1,0 +1,38 @@
+# Exclude tests
+tests/
+__tests__/
+test-support/
+test-apps/
+
+# Exclude local properties and Gradle cache/outputs
+.gradle/
+.idea/
+.ruby-lsp/
+local.properties
+android/local.properties
+android/mini-sdk-init.gradle
+android/compile_errors.txt
+android/android_test_output.log
+android/build/
+ios/build/
+ios/Pods/
+
+# Exclude GitHub config
+.github/
+
+# Exclude tool configs
+babel.config.cjs
+jest.config.cjs
+jest.setup.cjs
+tsconfig.json
+package-lock.json
+
+# Exclude temporary and log files
+*.log
+.DS_Store
+
+# Exclude test analysis artifacts
+TEST_COMPARISON_ANALYSIS.md
+TEST_INVENTORY.md
+test_output.log
+android_test_output.log

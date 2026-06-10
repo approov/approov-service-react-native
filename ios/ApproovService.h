@@ -112,7 +112,7 @@ typedef NS_ENUM(NSUInteger, ApproovTrustDecision) {
 /// Returns the current exclusion URL regexs.
 ///
 /// @return a set of exclusion URL regexs
-+ (NSMutableSet<NSString *> * _Nonnull)sharedExclusionURLRegexs;
++ (NSMutableSet<NSString *> * _Nullable)sharedExclusionURLRegexs;
 
 /// Gets the signature for the given message using the install private key.
 ///

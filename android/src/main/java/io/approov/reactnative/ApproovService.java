@@ -675,8 +675,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Initializes the ApproovService with an account configuration and comment.
-     * Resets all service-layer state unconditionally before initializing the platform
-     * SDK. The platform SDK returns true on first initialization or false if it is
+     * Resets service-layer state if the configuration changes. A same-config
+     * re-initialization preserves any configuration applied after the first setup.
+     * The platform SDK returns true on first initialization or false if it is
      * already initialized with the same configuration (treated as success). Any other
      * failure — such as a different-config conflict — throws and is surfaced as a
      * rejected promise.

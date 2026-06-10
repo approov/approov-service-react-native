@@ -9,7 +9,7 @@ let package = Package(
     products: [
         .library(
             name: "approov-service-react-native",
-            targets: ["approov-service-react-native"]
+            targets: ["approov_service_react_native"]
         ),
     ],
     dependencies: [
@@ -20,7 +20,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "approov-service-react-native",
+            name: "approov_service_react_native",
             dependencies: [
                 .product(name: "Approov", package: "approov-ios-sdk"),
                 .product(name: "StructuredHeaders", package: "swift-http-structured-headers")

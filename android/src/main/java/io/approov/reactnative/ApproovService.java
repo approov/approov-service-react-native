@@ -897,6 +897,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setInstallAttrsInToken(String attrs, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "setInstallAttrsInToken: Approov is not enabled");
+            promise.reject("setInstallAttrsInToken", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setInstallAttrsInToken(attrs);
             log(LOG_DEBUG, TAG, "setInstallAttrsInToken");
@@ -964,6 +969,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setDevKey(String devKey, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "setDevKey: Approov is not enabled");
+            promise.reject("setDevKey", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             Approov.setDevKey(devKey);
             log(LOG_DEBUG, TAG, "setDevKey");
@@ -1320,6 +1330,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @throws ApproovException if there was a problem
      */
     public static String getAccountMessageSignature(String message) throws ApproovException {
+        if (!isInitialized || initialConfig == null || initialConfig.isEmpty()) {
+            throw new ApproovException("getAccountMessageSignature: Approov is not enabled");
+        }
         try {
             String signature = Approov.getMessageSignature(message);
             if (signature == null)
@@ -1341,6 +1354,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @throws ApproovException if there was a problem
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
+        if (!isInitialized || initialConfig == null || initialConfig.isEmpty()) {
+            throw new ApproovException("getInstallMessageSignature: Approov is not enabled");
+        }
         try {
             String signature = Approov.getInstallMessageSignature(message);
             if (signature == null)
@@ -1590,6 +1606,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void getMessageSignature(String message, Promise promise) {
+        if (!isApproovEnabled()) {
+            log(LOG_ERROR, TAG, "getMessageSignature: Approov is not enabled");
+            promise.reject("getMessageSignature", "Approov is not enabled", getErrorUserInfo(false));
+            return;
+        }
         try {
             String signature = Approov.getMessageSignature(message);
             log(LOG_DEBUG, TAG, "getMessageSignature");

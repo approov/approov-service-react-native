@@ -522,6 +522,14 @@ RCT_EXPORT_METHOD(getLastARC : (RCTPromiseResolveBlock)
  */
 RCT_EXPORT_METHOD(setInstallAttrsInToken : (NSString *)attrs resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"setInstallAttrsInToken", @"Approov is not enabled", error);
+    return;
+  }
   @try {
     ApproovLogI(@"setInstallAttrsInToken");
     [Approov setInstallAttrsInToken:attrs];
@@ -609,6 +617,14 @@ RCT_EXPORT_METHOD(getSessionMetadataCollectionEnabled
  */
 RCT_EXPORT_METHOD(setDevKey : (NSString *)devKey resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!ApproovIsEnabled()) {
+    NSError *error =
+        [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                   code:0
+                               userInfo:[self errorUserInfo:NO]];
+    reject(@"setDevKey", @"Approov is not enabled", error);
+    return;
+  }
   ApproovLogI(@"setDevKey");
   [Approov setDevKey:devKey];
   resolve(nil);
@@ -918,6 +934,13 @@ RCT_EXPORT_METHOD(precheck : (RCTPromiseResolveBlock)
  */
 RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!ApproovIsEnabled()) {
+    NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                                code:0
+                                            userInfo:[self errorUserInfo:NO]];
+    reject(@"getDeviceID", @"Approov is not enabled", error);
+    return;
+  }
   NSString *deviceID = [Approov getDeviceID];
   ApproovLogI(@"getDeviceID: %@", deviceID);
   if (deviceID == nil) {
@@ -1042,6 +1065,13 @@ RCT_EXPORT_METHOD(fetchToken : (NSString *)url resolver : (
  */
 RCT_EXPORT_METHOD(getMessageSignature : (NSString *)message resolver : (
     RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  if (!ApproovIsEnabled()) {
+    NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
+                                                code:0
+                                            userInfo:[self errorUserInfo:NO]];
+    reject(@"getMessageSignature", @"Approov is not enabled", error);
+    return;
+  }
   ApproovLogI(@"getMessageSignature");
   NSString *signature = [Approov getMessageSignature:message];
   if (signature == nil) {

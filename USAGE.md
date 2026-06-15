@@ -424,19 +424,12 @@ No extra JavaScript is required to send the status: `setUseApproovStatusIfNoToke
 
 ### Customizing Mutators with Message Signing
 
-Message signing is **decoupled** from the mutator and applied as a separate, on-by-default step *after* the mutator, so a custom mutator no longer needs to invoke the signer itself — signing runs regardless of which mutator is installed and covers any headers your mutator adds.
+Message signing is **decoupled** from the mutator and applied as a separate, on-by-default step *after* the mutator. A custom mutator therefore implements **decision policy only** and must **not** invoke the signer itself — signing runs automatically regardless of which mutator is installed, and covers any headers your mutator adds.
 
-> ⚠️ **Do not call the signer from a mutator.** The examples in this subsection wrap an
-> `ApproovDefaultMessageSigning` and call `handleInterceptorProcessedRequest` from inside the mutator;
-> that is the **pre-3.6.0 pattern and is no longer correct** — the default signer also runs afterwards
-> and will overwrite the mutator's signature, so the signing you configured inside the mutator is wasted
-> (and your custom signing config is silently ignored). Instead:
-> - implement **decision policy only** in the mutator (e.g. `handleInterceptorFetchTokenResult`), and
-> - to **customise** signing, install a configured signer with
->   `ApproovService.setMessageSigner(...)`; to **disable** it use `setMessageSigningEnabled(false)`; to
->   add a signed header use `addSignedHeader(...)`.
->
-> The examples below are retained for reference but should be adapted to remove the signer wrapping.
+- To **customise** signing (algorithms, per-host factories) install a configured signer with `ApproovService.setMessageSigner(...)`.
+- To **disable** signing use `setMessageSigningEnabled(false)`; to add a signed header use `addSignedHeader(...)`.
+
+> **Tip:** if all you need is to *require attestation* — block the request when the Approov service is unreachable rather than proceeding without a token — you do not need a custom mutator at all; use the built-in `ApproovService.setServiceMutator(ApproovService.Mutator.REQUIRE_ATTESTATION)`. Write a custom mutator only for logic beyond the off-the-shelf policies (e.g. per-host rules, or adding your own headers). The example below shows a decision-only custom mutator; message signing still runs automatically afterwards.
 
 ### Android Implementation (Java)
 
@@ -445,68 +438,47 @@ On Android, create a class implementing `io.approov.reactnative.ApproovServiceMu
 ```java
 package com.yourcompany.yourapp;
 
+import com.criticalblue.approovsdk.Approov;
+
+import io.approov.reactnative.ApproovException;
+import io.approov.reactnative.ApproovService;
 import io.approov.reactnative.ApproovServiceMutator;
-import io.approov.reactnative.ApproovServiceMutatorDefault;
-import com.approov.service.ApproovService;
-import com.approov.service.TokenFetchResult;
-import okhttp3.Request;
-import java.io.IOException;
 
+// A decision-only mutator that requires an Approov token: it blocks when the Approov service is
+// unreachable instead of proceeding token-less, and otherwise applies the standard policy.
+// Message signing is applied automatically and separately, so this class never touches the signer.
 public class EnforceTokenMutator implements ApproovServiceMutator {
-    
-    private ApproovServiceMutator signer;
-
-    public EnforceTokenMutator(ApproovServiceMutator signer) {
-        this.signer = signer;
-    }
 
     @Override
-    public boolean handleInterceptorFetchTokenResult(TokenFetchResult approovResults, String url) throws IOException {
-        if (approovResults.getStatus() == TokenFetchResult.Status.NO_APPROOV_SERVICE) {
-            throw new IOException("Approov service not available. Token required.");
+    public boolean handleInterceptorFetchTokenResult(ApproovService service,
+            Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.NO_APPROOV_SERVICE) {
+            throw new ApproovException("Approov service not available; a token is required for " + url);
         }
-        return ApproovServiceMutatorDefault.getInstance().handleInterceptorFetchTokenResult(approovResults, url);
-    }
-    
-    @Override
-    public boolean handleInterceptorShouldProcessRequest(Request request) throws IOException {
-        return ApproovServiceMutatorDefault.getInstance().handleInterceptorShouldProcessRequest(request);
-    }
-
-    @Override
-    public Request handleInterceptorProcessedRequest(Request request, ApproovServiceMutator.ApproovRequestMutations changes) throws IOException {
-        // We MUST call the signer here so that message signing still works!
-        if (signer != null) {
-            return signer.handleInterceptorProcessedRequest(request, changes);
-        }
-        return request;
+        // delegate every other status to the standard policy
+        return ApproovServiceMutator.super.handleInterceptorFetchTokenResult(service, approovResults, url);
     }
 }
 ```
 
-Register this mutator combined with the message signer configuration before initializing your React Native application (e.g., in `MainApplication.java` inside `onCreate`):
+Register the mutator before React Native networking starts (e.g., in `MainApplication.java` inside `onCreate`). You do not configure or pass a signer — message signing is on by default and runs automatically:
 
 ```java
 import io.approov.reactnative.ApproovService;
-import io.approov.reactnative.ApproovDefaultMessageSigning;
 
 public class MainApplication extends Application implements ReactApplication {
   @Override
   public void onCreate() {
     super.onCreate();
-    
-    // 1. Configure the signer natively (or skip if disabling signing)
-    ApproovDefaultMessageSigning.SignatureParametersFactory factory = 
-        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory();
-    ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
-    signer.setDefaultFactory(factory);
 
-    // 2. Wrap it with your custom mutator
-    EnforceTokenMutator myMutator = new EnforceTokenMutator(signer);
+    // Register the decision-only custom mutator BEFORE React Native networking starts.
+    ApproovService.setServiceMutator(new EnforceTokenMutator());
 
-    // 3. Register custom mutator BEFORE React Native networking starts
-    ApproovService.setServiceMutator(myMutator);
-    
+    // (Optional) customise message signing separately, e.g.:
+    //   ApproovService.setMessageSigner(
+    //       new ApproovDefaultMessageSigning().setDefaultFactory(
+    //           ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
+
     // ... remaining React Native init
   }
 }
@@ -516,43 +488,27 @@ public class MainApplication extends Application implements ReactApplication {
 
 On iOS, you can define your mutator in Swift using the `ApproovServiceMutator` protocol from `approov_service_react_native`.
 
+The `ApproovServiceMutator` protocol provides default implementations for every method, so a custom mutator only overrides the decision point it cares about:
+
 ```swift
 import Foundation
 import approov_service_react_native
 
+// A decision-only mutator that requires an Approov token: it blocks when the Approov service is
+// unreachable. Message signing is applied automatically and separately, so it is not referenced here.
 class EnforceTokenMutator: ApproovServiceMutator {
-    private let signer: ApproovServiceMutator?
-
-    init(signer: ApproovServiceMutator?) {
-        self.signer = signer
-    }
-
-    func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult, url: String) throws -> Bool {
+    func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                           url: String) throws -> Bool {
         if approovResults.status == .noApproovService {
-            throw NSError(domain: "ApproovService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Approov service not available."])
+            throw NSError(domain: "ApproovService", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Approov service not available; a token is required."])
         }
-        return true
+        return try ApproovServiceMutatorDefault.shared.handleInterceptorFetchTokenResult(approovResults, url: url)
     }
-    
-    func handleInterceptorProcessedRequest(_ request: URLRequest, changes: ApproovRequestMutations) throws -> URLRequest {
-        if let signer = signer {
-            return try signer.handleInterceptorProcessedRequest(request, changes: changes)
-        }
-        return request
-    }
-    
-    func handleInterceptorShouldProcessRequest(_ request: URLRequest) throws -> Bool { return true }
-    func handlePrecheckResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleFetchTokenResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleFetchSecureStringResult(_ approovResults: ApproovTokenFetchResult, operation: String, key: String) throws {}
-    func handleFetchCustomJWTResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleInterceptorHeaderSubstitutionResult(_ approovResults: ApproovTokenFetchResult, header: String) throws -> Bool { return true }
-    func handleInterceptorQueryParamSubstitutionResult(_ approovResults: ApproovTokenFetchResult, queryKey: String) throws -> Bool { return true }
-    func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool { return true }
 }
 ```
 
-Register your mutator in `AppDelegate.swift` or `AppDelegate.mm`:
+Register your mutator in `AppDelegate.swift` or `AppDelegate.mm`. You do not wire up a signer — message signing is on by default and runs automatically:
 
 ```swift
 import approov_service_react_native
@@ -560,18 +516,8 @@ import approov_service_react_native
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        
-        // 1. Configure the signer natively
-        let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-        let signer = ApproovDefaultMessageSigning()
-        _ = signer.setDefaultFactory(factory)
-        
-        // 2. Wrap it
-        let myMutator = EnforceTokenMutator(signer: signer)
-        
-        // 3. Register it with the React Native Bridge BEFORE React Native init
-        ApproovServiceMutatorBridge.shared.serviceMutator = myMutator
-        
+        // Register the decision-only custom mutator BEFORE React Native init.
+        ApproovServiceMutatorBridge.shared.serviceMutator = EnforceTokenMutator()
         return true
     }
 }
@@ -581,7 +527,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 ## Real-world examples
 
-### Policy-driven mutator (host scoping, offline fallback, message signing, pinning)
+### Policy-driven mutator (host scoping, offline fallback, custom header, pinning)
 
 This example implementation demonstrates how to customize the native `ApproovServiceMutator` to apply different options to API requests based on the hostname. Note that because custom mutators run directly on the underlying native HTTP client hooks, you must implement them in Java/Kotlin (Android) and Swift/Objective-C (iOS).
 
@@ -592,6 +538,7 @@ package com.yourcompany.yourapp;
 import io.approov.reactnative.ApproovServiceMutator;
 import io.approov.reactnative.ApproovService;
 import io.approov.reactnative.ApproovException;
+import io.approov.reactnative.ApproovRequestMutations;
 import com.criticalblue.approovsdk.Approov;
 import okhttp3.Request;
 import java.util.Arrays;
@@ -599,14 +546,15 @@ import java.util.HashSet;
 import java.util.Set;
 import java.net.URL;
 
+// A decision-only mutator. It scopes processing by host, allows offline for selected hosts, skips
+// pinning for selected hosts, and adds a custom header. Message signing is applied automatically and
+// separately afterwards (and will cover the header added below), so this class does not touch the signer.
 public class PolicyDrivenMutator implements ApproovServiceMutator {
-    private ApproovServiceMutator signer;
     private Set<String> protectedHosts;
     private Set<String> allowOfflineForHosts;
     private Set<String> skipPinningHosts;
 
-    public PolicyDrivenMutator(ApproovServiceMutator signer) {
-        this.signer = signer;
+    public PolicyDrivenMutator() {
         this.protectedHosts = new HashSet<>(Arrays.asList("api.example.com"));
         this.allowOfflineForHosts = new HashSet<>(Arrays.asList("status.example.com"));
         this.skipPinningHosts = new HashSet<>(Arrays.asList("metrics.example.com"));
@@ -638,12 +586,10 @@ public class PolicyDrivenMutator implements ApproovServiceMutator {
     }
 
     @Override
-    public Request handleInterceptorProcessedRequest(ApproovService service, Request request, ApproovServiceMutator.ApproovRequestMutations changes) throws ApproovException {
-        Request req = request;
-        if (signer != null) {
-            req = signer.handleInterceptorProcessedRequest(service, req, changes);
-        }
-        return req.newBuilder().header("X-Client-Platform", "android").build();
+    public Request handleInterceptorProcessedRequest(ApproovService service, Request request,
+            ApproovRequestMutations changes) throws ApproovException {
+        // add a custom header; message signing runs automatically afterwards and will cover it
+        return request.newBuilder().header("X-Client-Platform", "android").build();
     }
     
     @Override
@@ -659,19 +605,18 @@ public class PolicyDrivenMutator implements ApproovServiceMutator {
 import Foundation
 import approov_service_react_native
 
+// A decision-only mutator (host scoping, offline fallback, pinning skip, custom header). Message
+// signing is applied automatically and separately afterwards, so it is not referenced here.
 class PolicyDrivenMutator: ApproovServiceMutator {
-    private let signer: ApproovServiceMutator?
     private let protectedHosts: Set<String>
     private let allowOfflineForHosts: Set<String>
     private let skipPinningHosts: Set<String>
 
     init(
-        signer: ApproovServiceMutator? = nil,
         protectedHosts: Set<String> = ["api.example.com"],
         allowOfflineForHosts: Set<String> = ["status.example.com"],
         skipPinningHosts: Set<String> = ["metrics.example.com"]
     ) {
-        self.signer = signer
         self.protectedHosts = protectedHosts
         self.allowOfflineForHosts = allowOfflineForHosts
         self.skipPinningHosts = skipPinningHosts
@@ -694,10 +639,8 @@ class PolicyDrivenMutator: ApproovServiceMutator {
 
     func handleInterceptorProcessedRequest(_ request: URLRequest,
                                            changes: ApproovRequestMutations) throws -> URLRequest {
+        // add a custom header; message signing runs automatically afterwards and will cover it
         var req = request
-        if let signer = signer {
-            req = try signer.handleInterceptorProcessedRequest(req, changes: changes)
-        }
         req.setValue("ios", forHTTPHeaderField: "X-Client-Platform")
         return req
     }
@@ -706,14 +649,8 @@ class PolicyDrivenMutator: ApproovServiceMutator {
         guard let host = request.url?.host else { return true }
         return !skipPinningHosts.contains(host)
     }
-    
-    // Other required protocol methods with default behavior:
-    func handlePrecheckResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleFetchTokenResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleFetchSecureStringResult(_ approovResults: ApproovTokenFetchResult, operation: String, key: String) throws {}
-    func handleFetchCustomJWTResult(_ approovResults: ApproovTokenFetchResult) throws {}
-    func handleInterceptorHeaderSubstitutionResult(_ approovResults: ApproovTokenFetchResult, header: String) throws -> Bool { return true }
-    func handleInterceptorQueryParamSubstitutionResult(_ approovResults: ApproovTokenFetchResult, queryKey: String) throws -> Bool { return true }
+
+    // All other protocol methods use their default implementations.
 }
 ```
 

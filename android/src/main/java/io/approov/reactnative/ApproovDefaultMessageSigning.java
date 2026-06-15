@@ -287,69 +287,66 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             return request;
         }
 
-        // Apply the params to get the message
-        SignatureBaseBuilder baseBuilder = new SignatureBaseBuilder(params, provider);
-        String message = baseBuilder.createSignatureBase();
-        // WARNING never log the message as it contains an Approov token which provides
-        // access to your API.
-
-        // Generate the signature
+        // Determine the signing algorithm. An unsupported algorithm is a configuration error and
+        // fails CLOSED (the request is aborted). Every other signing failure below fails OPEN: the
+        // request proceeds unsigned and the reason is logged at error level. The backend is the
+        // enforcement point for message signatures, so the client favours availability.
+        String alg = params.getAlg();
         String sigId;
-        byte[] signature;
-        switch (params.getAlg()) {
-            case ALG_ES256: {
-                sigId = "install";
-                String base64;
-                try {
-                    base64 = getInstallMessageSignature(message);
-                } catch (ApproovException e) {
-                    Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
-                    return request;
-                }
-                if (base64.isEmpty()) {
-                    Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
-                    return request;
-                }
-                signature = decodeBase64(base64);
-                // decode the signature from ASN.1 DER format
-                try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
-                    ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
-                    if (sequence instanceof ASN1Sequence) {
-                        // Combine r and s into a single byte array
-                        byte[] rBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(0));
-                        byte[] sBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(1));
-                        signature = new byte[rBytes.length + sBytes.length];
-                        System.arraycopy(rBytes, 0, signature, 0, rBytes.length);
-                        System.arraycopy(sBytes, 0, signature, rBytes.length, sBytes.length);
-                    } else {
-                        throw new IllegalStateException("Not an ASN1Sequence");
-                    }
-                } catch (Exception e) {
-                    throw new IllegalStateException("Failed to decode ASN.1 DER ES256 signature", e);
-                }
-                break;
-            }
-            case ALG_HS256: {
-                sigId = "account";
-                String base64 = getAccountMessageSignature(message);
-                signature = decodeBase64(base64);
-                break;
-            }
-            default:
-                throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
+        if (ALG_ES256.equals(alg)) {
+            sigId = "install";
+        } else if (ALG_HS256.equals(alg)) {
+            sigId = "account";
+        } else {
+            throw new IllegalStateException("Unsupported algorithm identifier: " + alg);
         }
 
-        String sigHeader = Dictionary.valueOf(Map.of(
-                sigId, ByteSequenceItem.valueOf(signature))).serialize();
-        String sigInputHeader = Dictionary.valueOf(Map.of(
-                sigId, params.toComponentValue())).serialize();
+        String message = null;
+        String sigHeader;
+        String sigInputHeader;
+        try {
+            // Apply the params to get the message.
+            // WARNING never log the message as it contains an Approov token which provides
+            // access to your API.
+            SignatureBaseBuilder baseBuilder = new SignatureBaseBuilder(params, provider);
+            message = baseBuilder.createSignatureBase();
 
-        // Debugging - log the message and signature-related headers
-        // WARNING never log the message in production code as it contains the Approov
-        // token which allows API access
-        // Log.d(TAG, "Message Value - Signature Message: " + message);
-        // Log.d(TAG, "Message Header - Signature: " + sigHeader);
-        // Log.d(TAG, "Message Header Signature-Input: " + sigInputHeader);
+            String base64 = ALG_ES256.equals(alg) ? getInstallMessageSignature(message)
+                                                   : getAccountMessageSignature(message);
+            if (base64 == null || base64.isEmpty()) {
+                Log.e(TAG, "message signing: " + sigId + " signature unavailable - proceeding unsigned");
+                return request;
+            }
+
+            byte[] signature = decodeBase64(base64);
+            if (ALG_ES256.equals(alg)) {
+                // decode the ES256 signature from ASN.1 DER format into raw r||s
+                try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
+                    ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
+                    if (sequence == null) {
+                        throw new IllegalStateException("Not an ASN1Sequence");
+                    }
+                    byte[] rBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(0));
+                    byte[] sBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(1));
+                    signature = new byte[rBytes.length + sBytes.length];
+                    System.arraycopy(rBytes, 0, signature, 0, rBytes.length);
+                    System.arraycopy(sBytes, 0, signature, rBytes.length, sBytes.length);
+                }
+            }
+
+            sigHeader = Dictionary.valueOf(Map.of(
+                    sigId, ByteSequenceItem.valueOf(signature))).serialize();
+            sigInputHeader = Dictionary.valueOf(Map.of(
+                    sigId, params.toComponentValue())).serialize();
+        } catch (ApproovException e) {
+            // the SDK could not provide a signature (no key/account key, attestation/token fetch failed)
+            Log.e(TAG, "message signing: failed to obtain " + sigId + " signature - proceeding unsigned: " + e);
+            return request;
+        } catch (Exception e) {
+            // base64 decode, ASN.1/DER decode, or header serialization failure - fail open
+            Log.e(TAG, "message signing: failed to build " + sigId + " signature - proceeding unsigned: " + e);
+            return request;
+        }
 
         // Update the request from the one held by the component provider as the
         // signature builder

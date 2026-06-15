@@ -235,4 +235,37 @@ public class ApproovDefaultMessageSigningTest {
         assertNotNull(signed.header("Signature"));
         assertNotNull(signed.header("Signature-Input"));
     }
+
+    private Request unsignedRequestFixture() {
+        // a clean request (no stale signature headers) so that the absence of a signature is observable
+        return new Request.Builder()
+            .url("https://api.example.com/reply")
+            .header("Approov-Token", "Bearer jwt-token")
+            .header("Approov-TraceID", "trace-123")
+            .build();
+    }
+
+    @Test
+    public void installSignatureBase64DecodeFailureProceedsUnsigned() throws Exception {
+        // an SDK signature that is not valid base64 must fail OPEN (proceed unsigned), not throw
+        signer.setInstallSignatureBase64("!!! not valid base64 !!!");
+
+        Request signed = signer.processedRequest(unsignedRequestFixture(), changes);
+
+        assertNull(signed.header("Signature"));
+        assertNull(signed.header("Signature-Input"));
+        assertEquals("Bearer jwt-token", signed.header("Approov-Token"));
+    }
+
+    @Test
+    public void installSignatureAsn1DecodeFailureProceedsUnsigned() throws Exception {
+        // valid base64 but not a valid ASN.1 DER ES256 signature — must fail OPEN, not throw
+        signer.setInstallSignatureBase64(Base64.getEncoder().encodeToString(new byte[] { 0x01, 0x02, 0x03 }));
+
+        Request signed = signer.processedRequest(unsignedRequestFixture(), changes);
+
+        assertNull(signed.header("Signature"));
+        assertNull(signed.header("Signature-Input"));
+        assertEquals("Bearer jwt-token", signed.header("Approov-Token"));
+    }
 }

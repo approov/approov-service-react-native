@@ -166,69 +166,76 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                 return request
             }
 
-            // Build the signature base
-            let baseBuilder = SignatureBaseBuilder(sigParams: params, ctx: provider)
-            let message = try baseBuilder.createSignatureBase()
-            // WARNING never log the message as it contains an Approov token which provides access to your API.
-
-            // Generate the signature
+            // Determine the signing algorithm. An unsupported algorithm is a configuration error and
+            // fails CLOSED (the request is aborted). Every other signing failure below fails OPEN: the
+            // request proceeds unsigned and the reason is logged at error level, because the backend is
+            // the enforcement point for message signatures.
+            let alg = params.getAlg()
             let sigId: String
-            let signature: Data
-            switch params.getAlg() {
+            switch alg {
             case ApproovDefaultMessageSigning.ALG_ES256:
                 sigId = "install"
-                guard let base64Signature = ApproovService.getInstallMessageSignature(message),
-                      let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    os_log("ApproovService: install message signature unavailable, skipping signing", type: .error)
-                    return request
-                }
-                // The backend verifier expects the raw IEEE-P1363 r||s form.
-                signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
             case ApproovDefaultMessageSigning.ALG_HS256:
                 sigId = "account"
-                guard let base64Signature = ApproovService.getAccountMessageSignature(message),
-                      let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    throw ApproovServiceError.permanentError(message: "Failed to generate HMAC signature")
-                }
-                signature = decodedSignature
             default:
-                throw ApproovServiceError.permanentError(message: "Unsupported algorithm identifier: \(params.getAlg() ?? "unknown")")
+                throw ApproovServiceError.permanentError(message: "Unsupported algorithm identifier: \(alg ?? "unknown")")
             }
 
-            // Create signature headers
-            guard let sigHeader = try SFV.serializeDictionary(key: sigId, data: signature) else {
-                throw ApproovServiceError.permanentError(message: "Failed to serialize signature header")
-            }
-            guard let sigInputHeader = try SFV.serializeDictionary(key: sigId, innerList: params.toComponentValue()) else {
-                throw ApproovServiceError.permanentError(message: "Failed to serialize signature input header")
-            }
+            do {
+                // Build the signature base.
+                // WARNING never log the message as it contains an Approov token which provides access to your API.
+                let baseBuilder = SignatureBaseBuilder(sigParams: params, ctx: provider)
+                let message = try baseBuilder.createSignatureBase()
 
-            // Debugging - log the message and signature-related headers
-            // WARNING never log the message in production code as it contains the Approov token which allows API access
-            // os_log("Message Value - Signature Message: %@", type: .debug, message)
-            // os_log("Message Header - Signature: %@", type: .debug, sigHeader)
-            // os_log("Message Header Signature-Input: %@", type: .debug, sigInputHeader)
-
-            // Replace any previous signing headers so re-processing the same
-            // request stays idempotent.
-            var signedRequest = provider.getRequest()
-            signedRequest.setValue(sigHeader, forHTTPHeaderField: "Signature")
-            signedRequest.setValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
-
-            if params.isDebugMode() {
-                let digest = ApproovDefaultMessageSigning.sha256(data: Data(message.utf8))
-                if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
-                    signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
+                let signature: Data
+                if alg == ApproovDefaultMessageSigning.ALG_ES256 {
+                    guard let base64Signature = ApproovService.getInstallMessageSignature(message),
+                          let decodedSignature = Data(base64Encoded: base64Signature) else {
+                        os_log("ApproovService: install message signature unavailable - proceeding unsigned", type: .error)
+                        return request
+                    }
+                    // The backend verifier expects the raw IEEE-P1363 r||s form.
+                    signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
                 } else {
-                    os_log("ApproovService: Failed to get digest algorithm - no debug entry", type: .debug)
+                    guard let base64Signature = ApproovService.getAccountMessageSignature(message),
+                          let decodedSignature = Data(base64Encoded: base64Signature) else {
+                        os_log("ApproovService: account message signature unavailable - proceeding unsigned", type: .error)
+                        return request
+                    }
+                    signature = decodedSignature
                 }
-            } else {
-                signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")
-            }
 
-            // WARNING never log the full request as it contains an Approov token which provides access to your API
-            // os_log("Request String: %@", type: .debug, "\(signedRequest)")
-            return signedRequest
+                // Create signature headers
+                guard let sigHeader = try SFV.serializeDictionary(key: sigId, data: signature),
+                      let sigInputHeader = try SFV.serializeDictionary(key: sigId, innerList: params.toComponentValue()) else {
+                    os_log("ApproovService: failed to serialize signature headers - proceeding unsigned", type: .error)
+                    return request
+                }
+
+                // Replace any previous signing headers so re-processing the same
+                // request stays idempotent.
+                var signedRequest = provider.getRequest()
+                signedRequest.setValue(sigHeader, forHTTPHeaderField: "Signature")
+                signedRequest.setValue(sigInputHeader, forHTTPHeaderField: "Signature-Input")
+
+                if params.isDebugMode() {
+                    let digest = ApproovDefaultMessageSigning.sha256(data: Data(message.utf8))
+                    if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
+                        signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
+                    } else {
+                        os_log("ApproovService: Failed to get digest algorithm - no debug entry", type: .debug)
+                    }
+                } else {
+                    signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")
+                }
+
+                // WARNING never log the full request as it contains an Approov token which provides access to your API
+                return signedRequest
+            } catch {
+                // base64/ASN.1-DER decode, header serialization, or signature-base build failure - fail open
+                os_log("ApproovService: %{public}@ message signing failed - proceeding unsigned: %{public}@", type: .error, sigId, "\(error)")
+                return request
+            }
         }
 
         return request

@@ -765,6 +765,27 @@ private func testSetServiceMutatorByTypeSelectsOffTheShelfPolicies() throws {
                 "an unknown mutator type should leave the current mutator unchanged")
 }
 
+private func testInstallSignatureAsn1DecodeFailsOpen() throws {
+    ApproovServiceStubState.reset()
+    // valid base64, but not a valid ASN.1 DER ES256 signature — must fail OPEN (proceed unsigned)
+    ApproovServiceStubState.installSignatureBase64 = Data([0x01, 0x02, 0x03]).base64EncodedString()
+
+    var request = URLRequest(url: URL(string: "https://api.example.com/reply")!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+
+    let signed = try defaultSigner().handleInterceptorProcessedRequest(request, changes: defaultChanges())
+
+    assertNil(signed.value(forHTTPHeaderField: "Signature"),
+              "ASN.1 decode failure must fail open (no Signature header added)")
+    assertNil(signed.value(forHTTPHeaderField: "Signature-Input"),
+              "ASN.1 decode failure must fail open (no Signature-Input header added)")
+    assertEqual("Bearer jwt-token", signed.value(forHTTPHeaderField: "Approov-Token"),
+                "the request should still proceed carrying its Approov token")
+}
+
 @main
 struct ApproovMessageSigningTestsRunner {
     static func main() {
@@ -787,6 +808,7 @@ struct ApproovMessageSigningTestsRunner {
             try testDisablingMessageSigningSkipsTheSignature()
             try testMessageSigningToggleAndAddSignedHeaderReenable()
             try testSetServiceMutatorByTypeSelectsOffTheShelfPolicies()
+            try testInstallSignatureAsn1DecodeFailsOpen()
         } catch {
             fail("Unexpected Swift message-signing test error: \(error)")
         }

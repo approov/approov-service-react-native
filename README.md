@@ -34,22 +34,44 @@ Note: do not worry if this generates warnings about duplicate UUIDs.
 
 ## ACTIVATING APPROOV
 
-In order to use Approov you must include it as a component that wraps your application components. This automatically deals with initializing Approov when the app is started. Import using the following:
+Approov must be initialized before it can protect your API calls, and you **MUST wait for initialization to complete before issuing any protected `fetch()` request**. A request made before initialization finishes is forwarded *without* an Approov token (and without a reliable pinning guarantee); once it has left the device it cannot be recovered. See [USAGE.md](USAGE.md) ("Critical: Initialization Timing & Network Requests") for full details.
+
+Import the service:
 
 ```Javascript
-import { ApproovProvider, ApproovService } from '@approov/approov-service-react-native';
+import { ApproovService } from '@approov/approov-service-react-native';
 ```
 
-This defines an `ApproovProvider` component and the `ApproovService` which allows you to make certain calls to Approov from your application.
+The `<enter-your-config-string-here>` referenced below is a custom string that configures your Approov account access; it will have been provided in your Approov onboarding email.
 
-You should define an initially empty function that is called just before Approov is initialized. You may wish to include certain `ApproovService` calls in this in the future:
+### Initialize and gate your requests
+
+Call `initialize()` once at startup, and `await` it before making any protected request:
+
+```Javascript
+await ApproovService.initialize("<enter-your-config-string-here>");
+// only now issue protected requests
+const response = await fetch("https://your.api/endpoint");
+```
+
+Structure your app so that any screens or logic that make protected calls do not run until initialization has resolved (for example behind a splash/bootstrap step).
+
+### Optional: the `ApproovProvider` convenience wrapper
+
+If you prefer a React-context style, you can instead wrap your component tree in `ApproovProvider`. It initializes Approov for you when the app starts and exposes a `useApproov()` hook so components can wait for readiness. This is **purely a convenience** — it is not required, and it does not remove the need to gate your network calls behind initialization.
+
+```Javascript
+import { ApproovProvider, useApproov } from '@approov/approov-service-react-native';
+```
+
+You may define a function that is called just before Approov is initialized; you can include certain `ApproovService` configuration calls in it:
 
 ```Javascript
 const approovSetup = () => {
 };
 ```
 
-You must now wrap your application with the `ApproovProvider` component. For instance, if your app's components (typically defined in `App.js`) are currently:
+Wrap your application with the `ApproovProvider` component. For instance, if your app's components (typically defined in `App.js`) are currently:
 
 ```Javascript
 return (
@@ -59,7 +81,7 @@ return (
 );
 ```
 
-This should be changed to the following:
+change them to:
 
 ```Javascript
 return (
@@ -71,12 +93,18 @@ return (
 );
 ```
 
-The `<enter-your-config-string-here>` is a custom string that configures your Approov account access. This will have been provided in your Approov onboarding email.
+Components can then gate rendering and requests on readiness:
+
+```Javascript
+const { approovReady, approovError } = useApproov(); // wait for approovReady before fetching
+```
+
+See [USAGE.md](USAGE.md) for both approaches in full (the `useApproov()` hook vs. awaiting the `initialize()` promise).
 
 ## CHECKING IT WORKS
 Once the initialization is called, it is possible for any network requests to have Approov tokens or secret substitutions made. Initially you won't have set which API domains to protect, so the requests will be unchanged. It will have called Approov though and made contact with the Approov cloud service. You will see `ApproovService` logging indicating `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 
-You may use the `ApproovMonitor` component (also imported from `@approov/approov-service-react-native`) inside the `ApproovProvider`. This will output console logging on the state of the Approov initialization.
+If you use `ApproovProvider`, you can also place the `ApproovMonitor` component (also imported from `@approov/approov-service-react-native`) inside it. This will output console logging on the state of the Approov initialization.
 
 During initial rollout and whenever you add observability SDKs, you should also capture `ApproovService.getPinningDiagnostics()` metadata in your app logging:
 * **Android:** fetch the metadata immediately before the first protected request and verify `isInterceptorPresent` and `isPinnerPresent`. If either is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.

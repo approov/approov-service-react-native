@@ -102,7 +102,7 @@ Sets a flag indicating if the Approov fetch status should be used as the token h
 ApproovService.setUseApproovStatusIfNoToken(shouldUse: boolean);
 ```
 
-This flag is **on by default** in the React Native service layer (note: this differs from the sibling Approov service layers, which default it off). When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made. Call with `false` to leave the header empty/omitted instead.
+This flag is **on by default** in the React Native service layer. When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made. Call with `false` to leave the header empty/omitted instead.
 
 ## setServiceMutator
 Selects one of the off-the-shelf service mutators (the token/substitution decision policy). Use the `ApproovService.Mutator` constants for the type identifier.

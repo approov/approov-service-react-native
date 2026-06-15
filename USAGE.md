@@ -218,7 +218,7 @@ If the value of the binding header changes (e.g., the user logs in and gets a ne
 
 When an actual token cannot be obtained, the Approov fetch status (e.g., `NO_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`) can be sent to your backend in place of the token. This allows your backend to distinguish between different failure reasons even when the `Approov-Token` would otherwise be empty or missing.
 
-**This feature is ON by default** in `@approov/approov-service-react-native`. (Note: this intentionally differs from the sibling Approov service layers — okhttp, swift6-urlsession and ios-swift-asynchttpclient — which default it off.)
+**This feature is ON by default.**
 
 When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
 
@@ -235,6 +235,8 @@ By default, the `@approov/approov-service-react-native` package uses **swizzling
 However, in some complex applications, other observability SDKs (like New Relic, Datadog, or Firebase) might aggressively hook into the same networking layer in a way that conflicts with or bypasses Approov's security checks.
 
 If you encounter such conflicts, you can use the `ApproovService.fetchWithApproov` API. It is a secure `fetch`-compatible API for sensitive calls, executed natively on isolated, protected HTTP clients that cannot be interfered with by other React Native modules.
+
+> **This is a stopgap, not the destination.** `fetchWithApproov` exists so you can keep moving — completing your proof-of-concept or evaluation, and protecting your most critical calls — while we work with you to identify and resolve the underlying interception conflict. It is deliberately a narrower API than standard `fetch()` (see [Limitations](#limitations-of-fetchwithapproov) below); once the conflict is resolved, the standard `fetch()` path protects *all* of your requests automatically, with no per-call changes. If you find you need `fetchWithApproov`, please contact Approov support so we can address the root cause.
 
 ```javascript
 import { ApproovService } from '@approov/approov-service-react-native';

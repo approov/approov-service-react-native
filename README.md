@@ -111,7 +111,7 @@ const { approovReady, approovError } = useApproov(); // wait for approovReady be
 See [USAGE.md](USAGE.md) for both approaches in full (the `useApproov()` hook vs. awaiting the `initialize()` promise).
 
 ## CHECKING IT WORKS
-Once the initialization is called, it is possible for any network requests to have Approov tokens or secret substitutions made. Initially you won't have set which API domains to protect, so the requests will be unchanged. It will have called Approov though and made contact with the Approov cloud service. You will see `ApproovService` logging indicating `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
+Once the initialization is called, it is possible for any network requests to have Approov tokens or secret substitutions made. Initially you won't have set which API domains to protect, so the requests will be unchanged. It will have called Approov though and made contact with the Approov cloud service.
 
 If you use `ApproovProvider`, you can also place the `ApproovMonitor` component (also imported from `@approov/approov-service-react-native`) inside it. This will output console logging on the state of the Approov initialization.
 

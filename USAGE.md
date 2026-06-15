@@ -95,6 +95,18 @@ async function bootstrapAppAndFetch() {
 }
 ```
 
+### Handling Initialization Failures
+
+`ApproovService.initialize()` parses the configuration **locally** and does **not** require network connectivity to succeed — a valid config initializes even when the device is offline (the SDK performs its first attestation fetch asynchronously in the background). It rejects its promise only in the cases below, so always `try/catch` it and do **not** make protected requests on failure:
+
+| Cause | What it means | What to do |
+| :--- | :--- | :--- |
+| **Malformed / invalid config string** | The string is not a valid Approov configuration (a typo, truncation, or wrong value). This is deterministic — it will fail every time, online or offline. | Use the exact config string from your Approov onboarding email or the `approov` CLI. |
+| **Already initialized with a *different* config** | Another Approov service layer (or an earlier call) already initialized the native SDK with a different configuration. The new config may itself be perfectly valid — the *conflict* is the problem. | Use one consistent config throughout the app. Re-initializing with the **same** config is a safe no-op. To deliberately switch accounts, pass a `comment` starting with `"reinit"`. |
+| **(App-level) config fetched online while the device is offline** | This is **not** an Approov failure. If you provision the config string remotely (e.g. Firebase Remote Config), your *own* fetch can fail on a flaky/absent connection, leaving you with no config to pass. | Prefer **bundling the static config string in the app** — it rarely changes and remote provisioning only adds a startup failure mode. If you must provision remotely, cache the last-known-good value and fall back to it, and gate protected traffic until a valid config has initialized. **Never pass `""` just because the fetch failed** — `""` is the explicit [bypass mode](#empty-config-initialization) that *disables* Approov protection. |
+
+> **Tip:** the Approov configuration string is static per account and changes very rarely, so in the vast majority of apps it should simply be embedded in the app rather than fetched at runtime.
+
 ### Recommended Early Diagnostics Metadata Capture
 During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
 

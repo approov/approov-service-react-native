@@ -63,7 +63,7 @@ try {
 const response = await fetch("https://your.api/endpoint");
 ```
 
-Structure your app so that any screens or logic that make protected calls do not run until initialization has resolved successfully (for example behind a splash/bootstrap step).
+Structure your app so that any screens or logic that make protected calls do not run until initialization has resolved successfully (for example behind a splash/bootstrap step). For the specific reasons `initialize()` can fail (a malformed config string, a conflicting re-initialization, or a remotely-provisioned config that could not be fetched offline) and how to handle each, see [USAGE.md → Handling Initialization Failures](USAGE.md#handling-initialization-failures).
 
 ### Optional: the `ApproovProvider` convenience wrapper
 

@@ -296,7 +296,7 @@ public class ApproovServiceMiniSdkTest {
 
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+        assertEquals(0, new ApproovPinningInterceptor(service).getCertificatePinner().getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNull(getHeader(reply, "Approov-Token"));
@@ -379,9 +379,9 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-diag");
         Interceptor extraInterceptor = chain -> chain.proceed(chain.request());
         OkHttpClient client = new OkHttpClient.Builder()
-            .addInterceptor(new ApproovInterceptor(service))
+            .addInterceptor(new ApproovTokenInterceptor(service))
             .addInterceptor(extraInterceptor)
-            .certificatePinner(ApproovCertificatePinner.build(service))
+            .addNetworkInterceptor(new ApproovPinningInterceptor(service))
             .build();
 
         try (org.mockito.MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
@@ -401,7 +401,7 @@ public class ApproovServiceMiniSdkTest {
             assertNotNull(interceptors);
             boolean foundApproovInterceptor = false;
             for (int i = 0; i < interceptors.size(); i++) {
-                if ("io.approov.reactnative.ApproovInterceptor".equals(interceptors.getString(i))) {
+                if ("io.approov.reactnative.ApproovTokenInterceptor".equals(interceptors.getString(i))) {
                     foundApproovInterceptor = true;
                     break;
                 }
@@ -415,9 +415,9 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-accept-any");
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
+        service.rebuildPins();
 
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+        assertEquals(0, new ApproovPinningInterceptor(service).getCertificatePinner().getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNotNull(getHeader(reply, "Approov-Token"));
@@ -431,9 +431,9 @@ public class ApproovServiceMiniSdkTest {
         assertNotNull(getHeader(firstReply, "Approov-Token"));
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
+        service.rebuildPins();
 
-        CertificatePinner refreshedPinner = ApproovCertificatePinner.build(service);
+        CertificatePinner refreshedPinner = new ApproovPinningInterceptor(service).getCertificatePinner();
         assertEquals(0, refreshedPinner.getPins().size());
 
         JSONObject secondReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());

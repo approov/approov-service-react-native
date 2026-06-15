@@ -41,8 +41,10 @@ import okhttp3.Response;
 
 import com.criticalblue.approovsdk.Approov;
 
-// interceptor to add Approov tokens or substitute headers and query parameters
-public class ApproovInterceptor implements Interceptor {
+// interceptor to add Approov tokens or substitute headers and query parameters. This is an
+// application interceptor; certificate pinning is handled separately by ApproovPinningInterceptor,
+// which runs as a network interceptor.
+public class ApproovTokenInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovService";
 
@@ -50,11 +52,11 @@ public class ApproovInterceptor implements Interceptor {
     private ApproovService approovService;
 
     /**
-     * Creates a new ApproovInterceptor for adding Approov protection to requests.
+     * Creates a new ApproovTokenInterceptor for adding Approov protection to requests.
      *
      * @param approovService the Approov service being used
      */
-    public ApproovInterceptor(ApproovService approovService) {
+    public ApproovTokenInterceptor(ApproovService approovService) {
         this.approovService = approovService;
     }
 
@@ -163,7 +165,7 @@ public class ApproovInterceptor implements Interceptor {
         if (approovResults.isConfigChanged()) {
             Log.d(TAG, "dynamic config update received");
             Approov.fetchConfig();
-            approovService.notifyPinChangeListeners();
+            approovService.rebuildPins();
         }
 
         // we cannot proceed if the pins need to be updated. We notify any certificate
@@ -175,7 +177,7 @@ public class ApproovInterceptor implements Interceptor {
         // there was poor network connectivity at that point.
         if (approovResults.isForceApplyPins()) {
             Log.d(TAG, "force apply pins asserted so aborting request");
-            approovService.notifyPinChangeListeners();
+            approovService.rebuildPins();
             throw new IOException("Approov pins need to be updated");
         }
 

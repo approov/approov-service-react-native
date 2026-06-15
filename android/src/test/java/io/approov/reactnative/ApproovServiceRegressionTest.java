@@ -343,7 +343,7 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
-    public void updateClientFactoryWrapExistingStripsDuplicateApproovInterceptors() {
+    public void updateClientFactoryWrapExistingStripsDuplicateApproovTokenInterceptors() {
         ApproovService service = newService();
         Promise promise = mock(Promise.class);
         NetworkingModule networkingModule = mock(NetworkingModule.class);
@@ -351,7 +351,7 @@ public class ApproovServiceRegressionTest {
 
         Interceptor extraInterceptor = chain -> chain.proceed(chain.request());
         OkHttpClient existingClient = new OkHttpClient.Builder()
-            .addInterceptor(new ApproovInterceptor(service))
+            .addInterceptor(new ApproovTokenInterceptor(service))
             .addInterceptor(extraInterceptor)
             .build();
 
@@ -372,7 +372,7 @@ public class ApproovServiceRegressionTest {
 
             OkHttpClient recoveredClient = capturedFactory.get().createNewNetworkModuleClient();
             long approovInterceptors = recoveredClient.interceptors().stream()
-                .filter(interceptor -> interceptor instanceof ApproovInterceptor)
+                .filter(interceptor -> interceptor instanceof ApproovTokenInterceptor)
                 .count();
 
             assertEquals(1, approovInterceptors);

@@ -13,24 +13,24 @@ import org.junit.Test;
 public class ApproovClientBuilderTest {
 
     @Test
-    public void longLivedBuildersRegisterForPinChangeNotifications() {
+    public void longLivedBuildersRegisterTheirPinningInterceptor() {
         ApproovService service = mock(ApproovService.class);
         when(service.isInitialized()).thenReturn(false);
 
         ApproovClientBuilder builder = new ApproovClientBuilder(service, null, false);
         builder.apply(new OkHttpClient.Builder());
 
-        verify(service).addPinChangeListener(builder);
+        verify(service).registerPinningInterceptor(any(ApproovPinningInterceptor.class));
     }
 
     @Test
-    public void ephemeralBuildersSkipPinChangeListenerRegistration() {
+    public void ephemeralBuildersSkipPinningInterceptorRegistration() {
         ApproovService service = mock(ApproovService.class);
         when(service.isInitialized()).thenReturn(false);
 
         ApproovClientBuilder builder = new ApproovClientBuilder(service, null, true);
         builder.apply(new OkHttpClient.Builder());
 
-        verify(service, never()).addPinChangeListener(any());
+        verify(service, never()).registerPinningInterceptor(any());
     }
 }

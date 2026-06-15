@@ -42,7 +42,6 @@ import com.facebook.react.modules.network.OkHttpClientFactory;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
-import okhttp3.CertificatePinner;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -69,14 +68,6 @@ import java.util.regex.PatternSyntaxException;
 public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
-
-    /**
-     * Interface to be implemented by classes that wish to be notified of any pin
-     * changes.
-     */
-    public interface PinChangeListener {
-        void approovPinsUpdated();
-    }
 
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
@@ -186,8 +177,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
-    // list of listeners for pin changes
-    private List<PinChangeListener> pinChangeListeners;
+    // registered long-lived pinning interceptors whose pins are rebuilt in place when the dynamic
+    // Approov configuration changes (ephemeral, single-use builders are not registered)
+    private List<ApproovPinningInterceptor> pinningInterceptors;
 
     // Log levels matching iOS/ApproovUtils
     private static final int LOG_EXTREME = 0;
@@ -260,7 +252,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Logs a message at INFO through the shared, level-gated logger. Exposed
-     * package-privately so collaborators such as {@link ApproovInterceptor} honour the
+     * package-privately so collaborators such as {@link ApproovTokenInterceptor} honour the
      * configured log level (set via setLogLevel) instead of writing to android.util.Log
      * unconditionally. This matches the iOS ApproovLogI behaviour, where the equivalent
      * "task mutation" log is suppressed below INFO.
@@ -419,7 +411,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-        pinChangeListeners = new ArrayList<>();
+        pinningInterceptors = new ArrayList<>();
 
         // load any configuration and use it to initialize the SDK
         String config = loadApproovConfig();
@@ -536,14 +528,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
             boolean found = false;
             for (Interceptor interceptor : client.interceptors()) {
-                if (interceptor instanceof ApproovInterceptor) {
+                if (interceptor instanceof ApproovTokenInterceptor) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
                 for (Interceptor interceptor : client.networkInterceptors()) {
-                    if (interceptor instanceof ApproovInterceptor) {
+                    if (interceptor instanceof ApproovTokenInterceptor) {
                         found = true;
                         break;
                     }
@@ -556,31 +548,35 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Adds a pin change listener that will be notified of any future Approov
-     * pin changes.
-     * 
-     * @param listener is the pin change listener
+     * Registers a long-lived pinning interceptor whose pins should be rebuilt in place when the
+     * dynamic Approov configuration changes. Ephemeral, single-use builders are not registered.
+     *
+     * @param pinningInterceptor the pinning interceptor to register
      */
-    public synchronized void addPinChangeListener(PinChangeListener listener) {
-        pinChangeListeners.add(listener);
+    public synchronized void registerPinningInterceptor(ApproovPinningInterceptor pinningInterceptor) {
+        pinningInterceptors.add(pinningInterceptor);
     }
 
     /**
-     * Gets all of the pin change listeners.
-     * 
-     * @return List of pin change listeners
+     * Gets a snapshot of the registered pinning interceptors.
+     *
+     * @return List of registered pinning interceptors
      */
-    public synchronized List<PinChangeListener> getPinChangeListeners() {
-        return new ArrayList<PinChangeListener>(pinChangeListeners);
+    public synchronized List<ApproovPinningInterceptor> getPinningInterceptors() {
+        return new ArrayList<ApproovPinningInterceptor>(pinningInterceptors);
     }
 
     /**
-     * Notifies pin change listeners of a pin update.
+     * Rebuilds the pins for all registered pinning interceptors. This is invoked when the dynamic
+     * configuration changes (and once initialization completes) so that the new pins take effect on
+     * already-installed clients. Note that rebuilding queries the Approov SDK which can block, so this
+     * must only be called off the request hot path (e.g. from the token interceptor on the OkHttp
+     * background thread, or from initialize()).
      */
-    public void notifyPinChangeListeners() {
-        List<PinChangeListener> listeners = getPinChangeListeners();
-        for (PinChangeListener listener : listeners) {
-            listener.approovPinsUpdated();
+    public void rebuildPins() {
+        List<ApproovPinningInterceptor> interceptors = getPinningInterceptors();
+        for (ApproovPinningInterceptor pinningInterceptor : interceptors) {
+            pinningInterceptor.buildPins();
         }
     }
 
@@ -758,7 +754,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");
                 log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                notifyPinChangeListeners();
+                rebuildPins();
             } else {
                 log(LOG_INFO, TAG, "initialized without Approov SDK");
             }
@@ -1836,27 +1832,32 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
             WritableMap diagnostics = safeCreateMap();
             boolean isInterceptorPresent = false;
+            boolean isPinnerPresent = false;
             WritableArray interceptors = safeCreateArray();
 
             for (Interceptor interceptor : client.interceptors()) {
                 String name = interceptor.getClass().getName();
                 interceptors.pushString(name);
-                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
+                if (name.equals("io.approov.reactnative.ApproovTokenInterceptor"))
                     isInterceptorPresent = true;
+                if (name.equals("io.approov.reactnative.ApproovPinningInterceptor"))
+                    isPinnerPresent = true;
             }
 
             for (Interceptor interceptor : client.networkInterceptors()) {
                 String name = interceptor.getClass().getName();
                 interceptors.pushString(name);
-                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
+                if (name.equals("io.approov.reactnative.ApproovTokenInterceptor"))
                     isInterceptorPresent = true;
+                if (name.equals("io.approov.reactnative.ApproovPinningInterceptor"))
+                    isPinnerPresent = true;
             }
 
             diagnostics.putBoolean("isInterceptorPresent", isInterceptorPresent);
             diagnostics.putArray("interceptors", interceptors);
 
-            CertificatePinner pinner = client.certificatePinner();
-            boolean isPinnerPresent = (pinner != null) && !pinner.equals(CertificatePinner.DEFAULT);
+            // pinning is now enforced by the ApproovPinningInterceptor network interceptor rather than
+            // an OkHttp CertificatePinner set on the builder, so its presence is detected above
             diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
 
             log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());
@@ -1892,17 +1893,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient.Builder builder;
             if (wrapExisting) {
                 builder = currentClient.newBuilder();
-                // OkHttp's newBuilder() clones the interceptor list, so remove any
-                // previously-added ApproovInterceptors to avoid stacking duplicate
-                // token-fetching and signature-generation on repeated recovery calls.
-                builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
+                // OkHttp's newBuilder() clones the interceptor lists, so remove any
+                // previously-added Approov interceptors to avoid stacking duplicate
+                // token-fetching/signature-generation and pinning checks on repeated recovery calls.
+                builder.interceptors().removeIf(i -> i instanceof ApproovTokenInterceptor);
+                builder.networkInterceptors().removeIf(i -> i instanceof ApproovPinningInterceptor);
             } else {
                 builder = new OkHttpClient.Builder();
             }
 
             // add the Approov protection to the builder
             // updateClientFactory builds a one-shot recovered client snapshot, so the
-            // builder should not register as a PinChangeListener.
+            // builder is ephemeral and does not register its pinning interceptor for dynamic updates.
             ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
             approovBuilder.apply(builder);
 
@@ -2028,8 +2030,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on
-                // every fetch
+                // ephemeral builder: skip registering the pinning interceptor to avoid leaking
+                // references on every fetch
                 ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();

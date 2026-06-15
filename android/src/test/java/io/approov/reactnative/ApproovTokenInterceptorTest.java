@@ -41,7 +41,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
-public class ApproovInterceptorTest {
+public class ApproovTokenInterceptorTest {
 
     private static final MediaType TEXT_PLAIN = MediaType.get("text/plain");
     private static final MediaType APPLICATION_JSON = MediaType.get("application/json");
@@ -50,7 +50,7 @@ public class ApproovInterceptorTest {
 
     private ApproovService service;
     private Interceptor.Chain chain;
-    private ApproovInterceptor interceptor;
+    private ApproovTokenInterceptor interceptor;
     private RecordingMutator mutator;
 
     private static final class RecordingMutator implements ApproovServiceMutator {
@@ -152,7 +152,7 @@ public class ApproovInterceptorTest {
     public void setUp() throws Exception {
         service = mock(ApproovService.class);
         chain = mock(Interceptor.Chain.class);
-        interceptor = new ApproovInterceptor(service);
+        interceptor = new ApproovTokenInterceptor(service);
         mutator = new RecordingMutator();
 
         when(service.isSuppressLoggingUnknownURL()).thenReturn(false);
@@ -166,7 +166,7 @@ public class ApproovInterceptorTest {
         when(service.getUseApproovStatusIfNoToken()).thenReturn(false);
         when(service.isInitialized()).thenReturn(true);
         when(service.isApproovEnabled()).thenReturn(true);
-        doNothing().when(service).notifyPinChangeListeners();
+        doNothing().when(service).rebuildPins();
         when(chain.proceed(any())).thenAnswer(invocation -> {
             Request proceeded = invocation.getArgument(0);
             return new Response.Builder()
@@ -452,12 +452,12 @@ public class ApproovInterceptorTest {
             interceptor.intercept(chain);
 
             approov.verify(Approov::fetchConfig);
-            verify(service).notifyPinChangeListeners();
+            verify(service).rebuildPins();
         }
     }
 
     @Test
-    public void forceApplyPinsStopsTheRequestAndNotifiesListeners() {
+    public void forceApplyPinsStopsTheRequestAndRebuildsPins() {
         Request request = request("https://api.example.com/data");
         when(chain.request()).thenReturn(request);
         Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
@@ -469,7 +469,7 @@ public class ApproovInterceptorTest {
             IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
             assertTrue(error.getMessage().contains("Approov pins need to be updated"));
-            verify(service).notifyPinChangeListeners();
+            verify(service).rebuildPins();
         }
     }
 

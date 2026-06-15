@@ -6,7 +6,6 @@
 #import "ios/ApproovService.h"
 
 extern BOOL isInitialized;
-extern NSTimeInterval earliestNetworkRequestTime;
 extern BOOL useApproovStatusIfNoToken;
 extern BOOL suppressLoggingUnknownURL;
 extern NSString *approovTokenHeader;
@@ -110,7 +109,6 @@ static ApproovService *FreshService(void) {
   ApproovMutatorBridgeReset();
 
   isInitialized = NO;
-  earliestNetworkRequestTime = 0;
   useApproovStatusIfNoToken = NO;
   suppressLoggingUnknownURL = NO;
   initialConfigString = @"test-config";

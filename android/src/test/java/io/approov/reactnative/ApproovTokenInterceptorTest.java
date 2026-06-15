@@ -232,18 +232,19 @@ public class ApproovTokenInterceptorTest {
     }
 
     @Test
-    public void uninitializedRequestsForwardWhenTheStartupWindowHasExpired() throws Exception {
+    public void uninitializedRequestsForwardImmediatelyWithoutBlocking() throws Exception {
+        // with the startup-sync timer removed, an uninitialized request is forwarded unchanged
+        // straight away (no blocking, no Approov SDK interaction); the app is responsible for
+        // awaiting initialize()/useApproov() before issuing protected requests
         Request request = request("https://example.com/data");
         when(chain.request()).thenReturn(request);
         when(service.isInitialized()).thenReturn(false);
         when(service.isApproovEnabled()).thenReturn(false);
-        when(service.getEarliestNetworkRequestTime()).thenReturn(System.currentTimeMillis() - 1L);
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Response response = interceptor.intercept(chain);
 
             assertEquals(request, response.request());
-            verify(service).setEarliestNetworkRequestTime();
             approov.verifyNoInteractions();
         }
     }

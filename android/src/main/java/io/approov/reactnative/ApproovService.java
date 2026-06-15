@@ -86,19 +86,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // any prefix to be added before the Approov token, such as "Bearer "
     private static final String APPROOV_TOKEN_PREFIX = "";
 
-    // time window (in millseconds) applied to any network request attempts made
-    // before Approov
-    // is initialized. The start of the window is defined by the first network
-    // request received
-    // prior to initialization. That network request, and any others arriving during
-    // the window, may
-    // then be delayed until the end of the window period. This is to allow time for
-    // the Approov
-    // initialization to be completed as it may be in a race with API requests made
-    // as the app
-    // starts up.
-    private static final long STARTUP_SYNC_TIME_WINDOW = 2500;
-
     // flag indicating whether the Approov SDK has been initialized - if not then no
     // Approov functionality is enabled
     private static boolean isInitialized = false;
@@ -108,12 +95,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // the application context used for certain framework calls
     private Context applicationContext;
-
-    // the earliest time that any network request will be allowed to avoid any
-    // potential race conditions with Approov
-    // protected API calls being made before Approov itself can be initialized - or
-    // 0 they may proceed immediately
-    private long earliestNetworkRequestTime;
 
     // flag indicating if there is a pending prefetch to be executed upon
     // initialization
@@ -539,7 +520,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // initialize the service state
         super(reactContext);
         applicationContext = reactContext;
-        earliestNetworkRequestTime = 0;
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
         sessionMetadataCollectionEnabled = true;
@@ -773,42 +753,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Sets the earliest network request based on the current time plus the window
-     * period if
-     * the time has not been previously set.
-     */
-    public synchronized void setEarliestNetworkRequestTime() {
-        if (earliestNetworkRequestTime == 0) {
-            earliestNetworkRequestTime = System.currentTimeMillis() + STARTUP_SYNC_TIME_WINDOW;
-            log(LOG_INFO, TAG, "startup sync time window started");
-        }
-    }
-
-    /**
-     * Clears the earliest network request time so any network requests can proceed
-     * immediately.
-     */
-    private synchronized void clearEarliestNetworkRequestTime() {
-        earliestNetworkRequestTime = 0;
-    }
-
-    /**
-     * Returns the earliest time that network requests should be allowed, in
-     * milliseconds, or 0
-     * if they are allowed immediately. This is used to perform a synchronization on
-     * any early network
-     * request thats should perhaps be subject to Approov protection that are
-     * performed prior to the
-     * initialization.
-     * 
-     * @return earliest network time in milliseconds, or 0 if no delay should be
-     *         imposed
-     */
-    public synchronized long getEarliestNetworkRequestTime() {
-        return earliestNetworkRequestTime;
-    }
-
-    /**
      * Initializes the ApproovService with an account configuration and comment.
      * Resets service-layer state if the configuration changes. A same-config
      * re-initialization preserves any configuration applied after the first setup.
@@ -889,7 +833,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 initialConfig = config;
                 isInitialized = true;
             }
-            clearEarliestNetworkRequestTime();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");
                 log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
@@ -904,15 +847,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.resolve(null);
         } catch (IllegalArgumentException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
             // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
             promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
         } catch (IllegalStateException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
             // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
             promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
         }
     }

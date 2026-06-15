@@ -1240,7 +1240,6 @@ public class ApproovServiceMiniSdkTest {
     private void resetServiceState() throws Exception {
         setStaticField("isInitialized", false);
         setStaticField("initialConfig", null);
-        setInstanceField("earliestNetworkRequestTime", 0L);
         setInstanceField("pendingPrefetch", false);
     }
 

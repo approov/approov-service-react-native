@@ -167,7 +167,9 @@ For robust Android deployments, it is **highly recommended** to perform the `App
 
 ## Message Signing
 
-It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:
+**Message signing is ON by default.** Unless you disable it, the service layer automatically adds a message signature to every protected outbound request that carries an Approov token — you do not need to opt in or call anything to enable it. (Actual signatures are produced when your Approov account has message signing enabled; see below to disable it or to customise what is signed.)
+
+Message signing makes HTTP requests verifiable to ensure message integrity and authenticity. There are two types of message signing available:
 
 1.  [Installation Message Signing](https://ext.approov.io/docs/latest/approov-usage-documentation/#installation-message-signing): Uses an installation-specific key (held in the device's Secure Enclave/TEE) to sign requests. This provides strong non-repudiation as the signing key never leaves the device and is unique to that specific installation.
 2.  [Account Message Signing](https://ext.approov.io/docs/latest/approov-usage-documentation/#account-message-signing): Uses a shared account-specific secret key (HMAC-SHA256) to sign requests. This key is delivered to the SDK only upon successful attestation.
@@ -317,21 +319,16 @@ If you need to change other networking behaviors, you can do so natively by sett
 
 You may want to modify the network behavior to suit specific app requirements. A common use case is handling `NO_APPROOV_SERVICE` statuses to enforce that an Approov Token must always be present, or proceeding on failures while preserving HTTP Message Signing.
 
-### Proceed On Selected Failure Statuses And Sign The Request
+### Proceed On Selected Failure Statuses
 
 The example below shows a custom mutator that:
 
 - uses the normal Approov token flow on `SUCCESS`
 - allows requests to continue on `MITM_DETECTED` and `NO_APPROOV_SERVICE`
-- signs the final outbound request with `ApproovDefaultMessageSigning`
 
-To send the failure reason in the token header when the request is allowed to continue without a real token, you must also enable:
+A custom mutator only implements the **decision policy**. Message signing is a separate concern that is applied automatically *after* the mutator (it is on by default), so the mutator must **not** invoke the signer itself — doing so would sign the request twice.
 
-```javascript
-ApproovService.setUseApproovStatusIfNoToken(true);
-```
-
-With that setting enabled, the service layer places the failure status string into the configured token header, for example `Approov-Token: MITM_DETECTED` or `Approov-Token: NO_APPROOV_SERVICE`.
+When the request is allowed to continue without a real token, the service layer places the failure status string into the configured token header (for example `Approov-Token: MITM_DETECTED`) because `setUseApproovStatusIfNoToken` is **on by default**. Call `ApproovService.setUseApproovStatusIfNoToken(false)` if you do not want this.
 
 
 ### Android Implementation (Java)
@@ -341,16 +338,13 @@ package com.yourcompany.yourapp;
 
 import com.criticalblue.approovsdk.Approov;
 
-import io.approov.reactnative.ApproovDefaultMessageSigning;
 import io.approov.reactnative.ApproovException;
 import io.approov.reactnative.ApproovService;
 import io.approov.reactnative.ApproovServiceMutator;
 
-public class ProceedOnSelectedStatusesMutator extends ApproovDefaultMessageSigning {
-
-    public ProceedOnSelectedStatusesMutator() {
-        setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-    }
+// A decision-only mutator. Message signing is applied separately and automatically,
+// so this class does not extend or call the signer.
+public class ProceedOnSelectedStatusesMutator implements ApproovServiceMutator {
 
     @Override
     public boolean handleInterceptorFetchTokenResult(ApproovService service,
@@ -393,17 +387,9 @@ public class MainApplication extends Application {
 import Foundation
 import approov_service_react_native
 
+// A decision-only mutator. Message signing is applied separately and automatically,
+// so this class does not hold or call a signer.
 final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
-    private let signer: ApproovDefaultMessageSigning
-
-    init() {
-        let signer = ApproovDefaultMessageSigning()
-        _ = signer.setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-        )
-        self.signer = signer
-    }
-
     func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
                                            url: String) throws -> Bool {
         switch approovResults.status {
@@ -413,11 +399,6 @@ final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
             return try ApproovServiceMutatorDefault.shared
                 .handleInterceptorFetchTokenResult(approovResults, url: url)
         }
-    }
-
-    func handleInterceptorProcessedRequest(_ request: URLRequest,
-                                           changes: ApproovRequestMutations) throws -> URLRequest {
-        return try signer.handleInterceptorProcessedRequest(request, changes: changes)
     }
 }
 ```
@@ -437,20 +418,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 ```
 
-In JavaScript, enable status-as-token before making protected requests:
-
-```javascript
-import { ApproovService } from '@approov/approov-service-react-native';
-
-await ApproovService.initialize('<your-config-string>');
-ApproovService.setUseApproovStatusIfNoToken(true);
-```
+No extra JavaScript is required to send the status: `setUseApproovStatusIfNoToken` is **on by default**, so when the mutator allows the request to proceed without a real token the failure status is placed in the token header automatically. Call `ApproovService.setUseApproovStatusIfNoToken(false)` if you do not want that.
 
 ### Customizing Mutators with Message Signing
 
-Message signing is now **decoupled** from the mutator and applied as a separate step *after* it, so a custom mutator no longer needs to invoke the signer itself — signing continues to run (on by default) regardless of which mutator is installed, and will cover any headers your mutator adds. The example below shows a custom mutator that enforces tokens; message signing still applies automatically.
+Message signing is **decoupled** from the mutator and applied as a separate, on-by-default step *after* the mutator, so a custom mutator no longer needs to invoke the signer itself — signing runs regardless of which mutator is installed and covers any headers your mutator adds.
 
-> Note: the older pattern of subclassing `ApproovDefaultMessageSigning` (so the mutator *is* the signer) still works for backward compatibility, but is no longer required. Prefer implementing the decision policy in the mutator and leaving signing to the separate, on-by-default signer (toggle it with `setMessageSigningEnabled`).
+> ⚠️ **Do not call the signer from a mutator.** The examples in this subsection wrap an
+> `ApproovDefaultMessageSigning` and call `handleInterceptorProcessedRequest` from inside the mutator;
+> that is the **pre-3.6.0 pattern and is no longer correct** — the default signer also runs afterwards
+> and will overwrite the mutator's signature, so the signing you configured inside the mutator is wasted
+> (and your custom signing config is silently ignored). Instead:
+> - implement **decision policy only** in the mutator (e.g. `handleInterceptorFetchTokenResult`), and
+> - to **customise** signing, install a configured signer with
+>   `ApproovService.setMessageSigner(...)`; to **disable** it use `setMessageSigningEnabled(false)`; to
+>   add a signed header use `addSignedHeader(...)`.
+>
+> The examples below are retained for reference but should be adapted to remove the signer wrapping.
 
 ### Android Implementation (Java)
 

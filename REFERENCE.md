@@ -65,7 +65,7 @@ ApproovService.isInterceptorActive();
 
 This function returns a `Promise<boolean>`.
 
-- **Android:** Returns `true` if the `ApproovInterceptor` is correctly configured in the active `OkHttpClient`.
+- **Android:** Returns `true` if the `ApproovTokenInterceptor` is correctly configured in the active `OkHttpClient`.
 - **iOS:** Returns `true` if swizzling is active and Approov is successfully monitoring `NSURLSession` creations.
 
 If this returns `false`, Approov is not currently intercepting or protecting network requests. On Android, you can use `updateClientFactory(true)` to attempt recovery.
@@ -102,7 +102,54 @@ Sets a flag indicating if the Approov fetch status should be used as the token h
 ApproovService.setUseApproovStatusIfNoToken(shouldUse: boolean);
 ```
 
-When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
+This flag is **on by default** in the React Native service layer (note: this differs from the sibling Approov service layers, which default it off). When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made. Call with `false` to leave the header empty/omitted instead.
+
+## setServiceMutator
+Selects one of the off-the-shelf service mutators (the token/substitution decision policy). Use the `ApproovService.Mutator` constants for the type identifier.
+
+```Javascript
+ApproovService.setServiceMutator(type: 'DEFAULT' | 'ALWAYS_PROCEED' | 'REQUIRE_ATTESTATION');
+```
+
+- `ApproovService.Mutator.DEFAULT` — standard fail-closed policy (installed by default).
+- `ApproovService.Mutator.ALWAYS_PROCEED` — fail-open: always send the request, attaching a token only on successful attestation; never throws.
+- `ApproovService.Mutator.REQUIRE_ATTESTATION` — strict fail-closed: like `DEFAULT` but also blocks when the Approov service is unreachable (`NO_APPROOV_SERVICE`).
+
+A custom mutator (more complex policies) must be implemented and installed in native code; see [USAGE.md](USAGE.md). Custom native mutators report as `"CUSTOM"`.
+
+## getServiceMutatorType
+Returns the type identifier of the active service mutator.
+
+```Javascript
+ApproovService.getServiceMutatorType();
+```
+
+Returns a `Promise<'DEFAULT' | 'ALWAYS_PROCEED' | 'REQUIRE_ATTESTATION' | 'CUSTOM'>`.
+
+## setMessageSigningEnabled
+Enables or disables HTTP message signing. Message signing is **decoupled from the service mutator** and is **on by default**: when a protected request carries an Approov token, a message signature is added automatically. Enabling installs the default signer if signing was disabled; disabling removes it.
+
+```Javascript
+ApproovService.setMessageSigningEnabled(enabled: boolean);
+```
+
+This function returns a `Promise<void>`.
+
+## isMessageSigningEnabled
+Returns whether message signing is currently enabled.
+
+```Javascript
+ApproovService.isMessageSigningEnabled();
+```
+
+This function returns a `Promise<boolean>`.
+
+## addSignedHeader
+Adds a header to be covered by the message signature **only when it is present** on the request (when absent the request is still signed without it, so this never fails closed). Re-enables the default signer first if signing was disabled. Intended to be called once at startup.
+
+```Javascript
+ApproovService.addSignedHeader(header: string);
+```
 
 ## setSessionMetadataCollectionEnabled
 Enables or disables the extended session metadata ledger used by `getSessionDiagnostics()` on iOS. This ledger records extra development-time information about registered and unregistered sessions, including skipped delegates, request counts, last observed URLs, and the owning image/bundle for delegate classes.
@@ -397,7 +444,7 @@ ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
 - Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts. The default is `0` (disabled).
 
 ## getPinningDiagnostics
-Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
+Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovTokenInterceptor` and the `ApproovPinningInterceptor` (the certificate-pinning network interceptor) are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
 
 ```Javascript
 ApproovService.getPinningDiagnostics();
@@ -405,7 +452,7 @@ ApproovService.getPinningDiagnostics();
 
 This function returns a `Promise` resolving to an object with the following structure:
 * `isInterceptorPresent` (boolean): (Android only) True if the Approov HTTP interceptor is configured.
-* `isPinnerPresent` (boolean): (Android only) True if the Approov Certificate Pinner is configured.
+* `isPinnerPresent` (boolean): (Android only) True if the Approov pinning network interceptor (`ApproovPinningInterceptor`) is present in the active `OkHttpClient`.
 * `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
 * `totalAuthChallenges` (number): (iOS only) Total TLS auth challenges observed across intercepted sessions.
 * `totalPinned` (number): (iOS only) Number of auth challenges where pinning validation succeeded.

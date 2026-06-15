@@ -9,7 +9,7 @@ By hooking into the underlying native networking components that React Native us
 
 To achieve this, the Approov service layer intercepts the following:
 - **iOS:** React Native uses `NSURLSession` under the hood (specifically `RCTHTTPRequestHandler`). We use Objective-C Method Swizzling to intercept these sessions and inject our logic.
-- **Android:** React Native uses a singleton `OkHttpClient`. We inject a custom `ApproovInterceptor` and `ApproovCertificatePinner` into the OkHttp builder factory to secure the requests.
+- **Android:** React Native uses a singleton `OkHttpClient`. We inject a custom `ApproovTokenInterceptor` (an OkHttp *application* interceptor that injects tokens and handles header/query mutations) and an `ApproovPinningInterceptor` (an OkHttp *network* interceptor that enforces dynamic certificate pinning against the peer-presented certificate chain) into the OkHttp client our factory builds.
 
 ---
 
@@ -47,7 +47,7 @@ To handle this timeline and the presence of third-party SDKs, our swizzling stra
 | Scenario | Network Call Source | Swizzle Result | Is Protected? | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Standard Fetch (Post-Init)** | Standard JS `fetch()` called after `ApproovService.initialize()` | `dataTaskWithRequest:` is intercepted. Interceptor recognizes the React Native `RCTHTTPRequestHandler` session. | ✅ **Yes** | The happy path. Token is added, and pinning delegate processes the TLS handshake. |
-| **Early Fetch (Pre-Init)** | JS `fetch()` called *before* `ApproovService.initialize()` finishes. | A passive `+load` probe may prove that startup networking primitives already existed, but the request itself can still leave the device before the interceptor is active. | ❌ **No** | Developers must ensure `fetch` calls await the `ApproovProvider` initialization completion. The request itself is not recoverable after it leaves the device. |
+| **Early Fetch (Pre-Init)** | JS `fetch()` called *before* `ApproovService.initialize()` finishes. | A passive `+load` probe may prove that startup networking primitives already existed, but the request itself can still leave the device before the interceptor is active. | ❌ **No** | Developers must ensure `fetch` calls await successful initialization — `await ApproovService.initialize(...)`, or the `ApproovProvider`/`useApproov()` readiness state. The request itself is not recoverable after it leaves the device. |
 | **Late URL Convenience Methods** | A specialized 3rd party React Native native module (e.g., a fast image downloader) makes calls reusing the React Native `RCTHTTPRequestHandler` session, but chooses to call `dataTaskWithURL:` internally instead of `dataTaskWithRequest:`. | `dataTaskWithURL:` is intercepted, converted to an `NSURLRequest`, and funneled into standard processing. | ✅ **Yes** | Previously an edge case bypass. Because our old hook only watched the `*WithRequest:` door, traffic entering the same protected session through the `*WithURL:` door snuck out without an Approov token. |
 | **Custom 3rd Party Session (Unrecognized Delegate)** | A 3rd party native module creates its completely own `NSURLSession` instance with a custom delegate. | Task is intercepted at the global class level, but Approov recognizes the delegate does not match React Native's `RCTHTTPRequestHandler`. | ❌ **No** | Approov explicitly skips interception to prevent crashing third-party logic. Developers must add the custom delegate class via `ApproovService.addAllowedDelegate()` to protect it. |
 | **Aggressive Swizzling Conflicts** | An observability SDK (like Datadog) globally swizzles all `NSURLSession` methods to track metrics. If they swizzle *after* Approov, proxy the delegate, or swallow auth challenges, they may sever part or all of our hook chain. | Our hook may be bypassed, our task mutation may be skipped, or our Delegate may never receive the TLS challenge. | ❌ **No** | Runtime auto-recovery is opt-in. If enabled, Approov can log `IMP CONFLICT` warnings and attempt recovery, but a fully bypassed first request is still not recoverable. Use startup diagnostics metadata and `fetchWithApproov` for critical calls if the race cannot be controlled. |
@@ -88,7 +88,7 @@ OkHttp utilizes an **Interceptor Chain**. When a network request is fired, it pa
 
 To protect React Native traffic on Android, Approov injects itself into this pipeline by:
 1. Registering a custom `OkHttpClientFactory` with `OkHttpClientProvider`.
-2. When the React Native networking module requests an HTTP client, our factory builds one that includes the `ApproovInterceptor` (to inject tokens and handle header mutations) and the `ApproovCertificatePinner` (to handle TLS pinning natively).
+2. When the React Native networking module requests an HTTP client, our factory builds one that includes the `ApproovTokenInterceptor` (an application interceptor, to inject tokens and handle header/query mutations) and the `ApproovPinningInterceptor` (a network interceptor that enforces TLS pinning against the peer-presented certificate chain).
 
 ### The Interference: The OkHttpClientFactory Race
 Similar to the swizzling race condition on iOS, there is a fundamental initialization race condition on Android when multiple SDKs (like Datadog, New Relic, or Firebase) try to monitor network traffic.
@@ -98,7 +98,7 @@ Third-party observability SDKs also need to inject their own OkHttp interceptors
 **The Fatal Override:**
 The `OkHttpClientProvider` only holds a **single** factory at a time. The last SDK to call `setOkHttpClientFactory()` wins. 
 
-If a 3rd party SDK initializes *after* Approov (for instance, dynamically from Javascript or later in the native React application lifecycle), their factory completely overwrites Approov's factory. When React Native natively constructs its HTTP client, it uses the 3rd party SDK's factory, resulting in a client that completely lacks the `ApproovInterceptor` and `ApproovCertificatePinner`.
+If a 3rd party SDK initializes *after* Approov (for instance, dynamically from Javascript or later in the native React application lifecycle), their factory completely overwrites Approov's factory. When React Native natively constructs its HTTP client, it uses the 3rd party SDK's factory, resulting in a client that completely lacks the `ApproovTokenInterceptor` and `ApproovPinningInterceptor`.
 
 The result is exactly the same as an iOS bypass: React Native traffic flows normally, but it flows without Approov tokens and completely circumvents dynamic TLS pinning because the active OkHttp instance knows nothing about Approov.
 
@@ -106,11 +106,11 @@ The result is exactly the same as an iOS bypass: React Native traffic flows norm
 Because Android provides no global `+load` equivalent that guarantees absolute first-execution-order natively out of the box, we resolve this factory override problem dynamically and safely using **Diagnostics and Healing**:
 
 1. **Diagnostics (Active Chain Verification):**
-   Because we cannot prevent a 3rd party SDK from overwriting the factory later in the lifecycle, we provide native diagnostic routines so the app can verify its own protection status. This checks the *currently active* `OkHttpClient` singleton inside React Native to verify that the `ApproovInterceptor` and `ApproovCertificatePinner` class instances are genuinely present in the OkHttp execution chain.
+   Because we cannot prevent a 3rd party SDK from overwriting the factory later in the lifecycle, we provide native diagnostic routines so the app can verify its own protection status. This checks the *currently active* `OkHttpClient` singleton inside React Native to verify that the `ApproovTokenInterceptor` and `ApproovPinningInterceptor` class instances are genuinely present in the OkHttp execution chain.
 
 2. **Safe Healing (`updateClientFactory` API):**
    If a bypass is detected (i.e., another SDK stole the factory registration), Approov provides a recovery mechanism.
-   When the healing API is invoked, Approov retrieves the *currently active* custom factory (the one injected by the 3rd party SDK), proxies it to append the `ApproovInterceptor` and `ApproovCertificatePinner` to the output of their builder, and re-registers this combined factory back into the `OkHttpClientProvider`. 
+   When the healing API is invoked, Approov retrieves the *currently active* custom factory (the one injected by the 3rd party SDK), proxies it to append the `ApproovTokenInterceptor` and `ApproovPinningInterceptor` to the output of their builder, and re-registers this combined factory back into the `OkHttpClientProvider`. 
 
 This safely layers Approov directly on top of the foreign SDK's modifications. It ensures that observability metrics and tracing continue to function correctly for the 3rd party, while mathematically guaranteeing that Approov Token injection and TLS Pinning fire natively on every single Android `fetch()` request.
 

@@ -46,15 +46,24 @@ The `<enter-your-config-string-here>` referenced below is a custom string that c
 
 ### Initialize and gate your requests
 
-Call `initialize()` once at startup, and `await` it before making any protected request:
+Call `initialize()` once at startup, and `await` it before making any protected request. `initialize()` returns a promise that **rejects on failure** (for example an invalid config string, or a conflicting re-initialization with a different config), so always handle that error — and do **not** proceed to make protected requests if it fails:
 
 ```Javascript
-await ApproovService.initialize("<enter-your-config-string-here>");
-// only now issue protected requests
+try {
+  await ApproovService.initialize("<enter-your-config-string-here>");
+} catch (error) {
+  // Approov protection is NOT active. Handle as appropriate for your app — surface an
+  // error, retry, or decide whether to continue knowing requests will be unprotected.
+  // Do not silently fall through to making protected requests.
+  console.error("Approov initialization failed", error);
+  return;
+}
+
+// initialization succeeded — only now issue protected requests
 const response = await fetch("https://your.api/endpoint");
 ```
 
-Structure your app so that any screens or logic that make protected calls do not run until initialization has resolved (for example behind a splash/bootstrap step).
+Structure your app so that any screens or logic that make protected calls do not run until initialization has resolved successfully (for example behind a splash/bootstrap step).
 
 ### Optional: the `ApproovProvider` convenience wrapper
 

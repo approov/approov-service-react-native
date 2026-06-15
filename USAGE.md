@@ -202,15 +202,17 @@ If the value of the binding header changes (e.g., the user logs in and gets a ne
 
 ## Use Approov Status as Token
 
-In some cases, you might want to send the Approov fetch status (e.g., `NO_NETWORK`, `MITM_DETECTED`) to your backend when an actual token cannot be obtained. This allows your backend to distinguish between different failure reasons even when the `Approov-Token` would otherwise be empty or missing.
+When an actual token cannot be obtained, the Approov fetch status (e.g., `NO_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`) can be sent to your backend in place of the token. This allows your backend to distinguish between different failure reasons even when the `Approov-Token` would otherwise be empty or missing.
 
-To enable this feature:
-
-```javascript
-ApproovService.setUseApproovStatusIfNoToken(true);
-```
+**This feature is ON by default** in `@approov/approov-service-react-native`. (Note: this intentionally differs from the sibling Approov service layers — okhttp, swift6-urlsession and ios-swift-asynchttpclient — which default it off.)
 
 When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
+
+To disable it (so the header is left empty/omitted instead of carrying the status string):
+
+```javascript
+ApproovService.setUseApproovStatusIfNoToken(false);
+```
 
 ## Using `fetchWithApproov` (Alternative to Swizzling)
 
@@ -259,7 +261,7 @@ The table below covers only the statuses relevant to the network interceptor pat
 | :--- | :--- | :--- |
 | **Success** | Proceed | The request is sent with the `Approov-Token` header populated with the signed JWT. |
 | **No Network / Poor Network / MITM Detected** | Fail (temporary) | `fetch()` rejects with `TypeError: Network request failed`. The request should be retried. |
-| **No Approov Service** | Proceed | The request is sent with an **empty** `Approov-Token` header (or carries the fetch status string if `setUseApproovStatusIfNoToken(true)` is enabled). |
+| **No Approov Service** | Proceed | By default the request carries the fetch status string in the `Approov-Token` header (`setUseApproovStatusIfNoToken` is **on by default**); if disabled with `setUseApproovStatusIfNoToken(false)` the header is left **empty**. |
 | **Unknown URL / Unprotected URL** | Proceed (unmodified) | The request is forwarded as-is with **no** `Approov-Token` header added. The URL is not registered under Approov protection. |
 
 > **Note:** `REJECTION` statuses are only relevant to explicit `precheck()` calls, not to the interceptor path.

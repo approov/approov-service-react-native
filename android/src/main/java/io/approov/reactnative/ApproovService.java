@@ -100,8 +100,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // initialization
     private boolean pendingPrefetch;
 
-    // application config options
-    private boolean useApproovStatusIfNoToken;
+    // application config options. useApproovStatusIfNoToken defaults to true (on): when a token cannot
+    // be obtained and the mutator allows the request to proceed, the Approov fetch status string is
+    // placed in the token header so the backend can observe the failure reason. Note this intentionally
+    // differs from the sibling service layers, which default this off.
+    private boolean useApproovStatusIfNoToken = true;
 
     /**
      * Sets the flag to indicate if the interceptor should proceed on network
@@ -819,7 +822,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 if (!configUnchanged) {
                     isInitialized = false;
                     initialConfig = null;
-                    useApproovStatusIfNoToken = false;
+                    useApproovStatusIfNoToken = true;
                     approovTokenHeader = APPROOV_TOKEN_HEADER;
                     approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
                     approovTokenPrefix = APPROOV_TOKEN_PREFIX;

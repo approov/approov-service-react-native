@@ -111,8 +111,11 @@ static BOOL ApproovIsEnabled(void) {
 // controlled entirely via ApproovServiceMutator
 
 // YES if the status should be used as the token header value if the token is
-// empty
-BOOL useApproovStatusIfNoToken = NO;
+// empty. Defaults to YES (on): when a token cannot be obtained and the mutator
+// allows the request to proceed, the Approov fetch status string is placed in the
+// token header so the backend can observe the failure reason. Note this
+// intentionally differs from the sibling service layers, which default this off.
+BOOL useApproovStatusIfNoToken = YES;
 
 // YES if no logging should be output on unknown (or excluded) URLs
 BOOL suppressLoggingUnknownURL = NO;
@@ -395,7 +398,7 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     if (!configUnchanged) {
       isInitialized = NO;
       initialConfigString = nil;
-      useApproovStatusIfNoToken = NO;
+      useApproovStatusIfNoToken = YES;
       approovTokenHeader = @"Approov-Token";
       approovTraceIDHeader = @"Approov-TraceID";
       approovTokenPrefix = @"";

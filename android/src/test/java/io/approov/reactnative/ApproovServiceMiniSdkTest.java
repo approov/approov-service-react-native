@@ -842,6 +842,8 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void fetchWithApproovProceedsWithoutTokenForNoApproovService() throws Exception {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        // useApproovStatusIfNoToken defaults to ON; disable it to exercise the omit-token path
+        service.setUseApproovStatusIfNoToken(false);
         AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}");
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
@@ -852,6 +854,8 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void fetchWithApproovOmitsEmptyTokenAndTraceHeadersWhenProceedingWithoutArtifacts() throws Exception {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-target-host");
+        // useApproovStatusIfNoToken defaults to ON; disable it to exercise the omit-token path
+        service.setUseApproovStatusIfNoToken(false);
         AttesterProxyController.setNextAttestationDirectiveJson(
             "{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\",\"token\":\"\",\"traceID\":\"\"}}"
         );

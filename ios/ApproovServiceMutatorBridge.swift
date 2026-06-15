@@ -4,13 +4,19 @@ import Approov
 @objc public class ApproovServiceMutatorBridge: NSObject {
     @objc public static let shared = ApproovServiceMutatorBridge()
     
+    // The service mutator decides token/substitution policy. The three off-the-shelf policies are
+    // ApproovServiceMutatorDefault (standard fail-closed), ApproovServiceMutatorAlwaysProceed
+    // (fail-open) and ApproovServiceMutatorRequireAttestation (strict fail-closed). See USAGE.md.
     public var serviceMutator: ApproovServiceMutator
-    
+
+    // The active message signer, or nil when message signing is disabled. Message signing is decoupled
+    // from the mutator: it is an opt-out feature, installed by default and applied AFTER the mutator in
+    // processRequest so the signature can cover any headers the mutator added.
+    public var messageSigner: ApproovDefaultMessageSigning?
+
     private override init() {
-        let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-        let signer = ApproovDefaultMessageSigning()
-        _ = signer.setDefaultFactory(factory)
-        self.serviceMutator = signer
+        self.serviceMutator = ApproovServiceMutatorDefault.shared
+        self.messageSigner = ApproovDefaultMessageSigning.makeDefault()
         super.init()
     }
 
@@ -45,8 +51,14 @@ import Approov
         }
         
         do {
-            let processedRequest = try serviceMutator.handleInterceptorProcessedRequest(urlRequest, changes: changes)
-            
+            var processedRequest = try serviceMutator.handleInterceptorProcessedRequest(urlRequest, changes: changes)
+
+            // Message signing is decoupled from the mutator and applied after it so the signature can
+            // cover any headers the mutator added; it only signs when the request carries a token.
+            if let signer = messageSigner {
+                processedRequest = try signer.processedRequest(processedRequest, changes: changes)
+            }
+
             // Copy back the mutable URLRequest state so custom mutators can change
             // request behavior, not just add or update headers.
             if let url = processedRequest.url {
@@ -96,5 +108,63 @@ import Approov
             }
             return false
         }
+    }
+
+    // MARK: - Off-the-shelf mutator selection and message-signing control (exposed to React)
+
+    /// Selects one of the off-the-shelf service mutators by type identifier ("DEFAULT",
+    /// "ALWAYS_PROCEED", "REQUIRE_ATTESTATION"). An unrecognised type leaves the current mutator
+    /// unchanged.
+    @objc public func setServiceMutator(byType type: String) {
+        switch type {
+        case "DEFAULT":
+            serviceMutator = ApproovServiceMutatorDefault.shared
+        case "ALWAYS_PROCEED":
+            serviceMutator = ApproovServiceMutatorAlwaysProceed.shared
+        case "REQUIRE_ATTESTATION":
+            serviceMutator = ApproovServiceMutatorRequireAttestation.shared
+        default:
+            NSLog("[ApproovServiceMutatorBridge] setServiceMutator: unknown mutator type '%@' (expected DEFAULT, ALWAYS_PROCEED or REQUIRE_ATTESTATION); leaving current mutator unchanged", type)
+        }
+    }
+
+    /// The JS-facing type identifier of the active service mutator: one of "DEFAULT", "ALWAYS_PROCEED",
+    /// "REQUIRE_ATTESTATION", or "CUSTOM".
+    @objc public func getServiceMutatorType() -> String {
+        if serviceMutator is ApproovServiceMutatorAlwaysProceed {
+            return "ALWAYS_PROCEED"
+        }
+        if serviceMutator is ApproovServiceMutatorRequireAttestation {
+            return "REQUIRE_ATTESTATION"
+        }
+        if serviceMutator is ApproovServiceMutatorDefault {
+            return "DEFAULT"
+        }
+        return "CUSTOM"
+    }
+
+    /// Enables or disables message signing (opt-out; on by default). Enabling installs the default
+    /// signer if signing was disabled; disabling removes the signer entirely.
+    @objc public func setMessageSigningEnabled(_ enabled: Bool) {
+        if enabled {
+            if messageSigner == nil {
+                messageSigner = ApproovDefaultMessageSigning.makeDefault()
+            }
+        } else {
+            messageSigner = nil
+        }
+    }
+
+    /// Reports whether message signing is currently enabled.
+    @objc public func isMessageSigningEnabled() -> Bool {
+        return messageSigner != nil
+    }
+
+    /// Adds a header to be covered by the message signature only when present on the request (never
+    /// fails closed when absent), (re)enabling the default signer first if signing was disabled.
+    @objc public func addSignedHeader(_ header: String) {
+        let signer = messageSigner ?? ApproovDefaultMessageSigning.makeDefault()
+        signer.addSignedHeader(header)
+        messageSigner = signer
     }
 }

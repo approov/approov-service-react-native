@@ -153,4 +153,78 @@ public class ApproovServiceMutatorTest {
             )
         );
     }
+
+    // ----- off-the-shelf mutator: ALWAYS_PROCEED (fail-open) -----
+
+    @Test
+    public void alwaysProceedAttachesTokenOnlyOnSuccessAndNeverThrows() throws Exception {
+        ApproovServiceMutator alwaysProceed = ApproovServiceMutatorAlwaysProceed.SHARED;
+        ApproovService service = mock(ApproovService.class);
+
+        assertTrue(alwaysProceed.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.SUCCESS), "example.com"));
+        // every non-success status proceeds token-less and never throws (availability preserved)
+        assertFalse(alwaysProceed.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.MITM_DETECTED), "example.com"));
+        assertFalse(alwaysProceed.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.NO_NETWORK), "example.com"));
+        assertFalse(alwaysProceed.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.REJECTED), "example.com"));
+        assertFalse(alwaysProceed.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.NO_APPROOV_SERVICE), "example.com"));
+    }
+
+    @Test
+    public void alwaysProceedNeverThrowsOnSubstitutionFailures() throws Exception {
+        ApproovServiceMutator alwaysProceed = ApproovServiceMutatorAlwaysProceed.SHARED;
+        ApproovService service = mock(ApproovService.class);
+
+        assertTrue(alwaysProceed.handleInterceptorHeaderSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.SUCCESS), "Authorization"));
+        assertFalse(alwaysProceed.handleInterceptorHeaderSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.REJECTED), "Authorization"));
+        assertFalse(alwaysProceed.handleInterceptorQueryParamSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.NO_NETWORK), "tok"));
+    }
+
+    // ----- off-the-shelf mutator: REQUIRE_ATTESTATION (strict fail-closed) -----
+
+    @Test
+    public void requireAttestationProceedsWithTokenOnSuccessAndTokenlessForUnprotected() throws Exception {
+        ApproovServiceMutator strict = ApproovServiceMutatorRequireAttestation.SHARED;
+        ApproovService service = mock(ApproovService.class);
+
+        assertTrue(strict.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.SUCCESS), "example.com"));
+        assertFalse(strict.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.UNKNOWN_URL), "example.com"));
+        assertFalse(strict.handleInterceptorFetchTokenResult(
+            service, mockResult(Approov.TokenFetchStatus.UNPROTECTED_URL), "example.com"));
+    }
+
+    @Test
+    public void requireAttestationBlocksNoApproovServiceEvenWhenStatusFallbackConfigured() {
+        ApproovServiceMutator strict = ApproovServiceMutatorRequireAttestation.SHARED;
+        ApproovService service = mock(ApproovService.class);
+        // unlike DEFAULT, the strict policy blocks NO_APPROOV_SERVICE regardless of this setting
+        when(service.getUseApproovStatusIfNoToken()).thenReturn(true);
+
+        ApproovNetworkException error = assertThrows(
+            ApproovNetworkException.class,
+            () -> strict.handleInterceptorFetchTokenResult(
+                service, mockResult(Approov.TokenFetchStatus.NO_APPROOV_SERVICE), "example.com"));
+        assertTrue(error.getMessage().contains("NO_APPROOV_SERVICE"));
+    }
+
+    @Test
+    public void requireAttestationThrowsRejectionForRejectedStatus() {
+        ApproovServiceMutator strict = ApproovServiceMutatorRequireAttestation.SHARED;
+        ApproovService service = mock(ApproovService.class);
+
+        ApproovRejectionException error = assertThrows(
+            ApproovRejectionException.class,
+            () -> strict.handleInterceptorFetchTokenResult(
+                service, mockResult(Approov.TokenFetchStatus.REJECTED), "example.com"));
+        assertTrue(error.getMessage().contains("REJECTED"));
+    }
 }

@@ -155,6 +155,49 @@ export declare class ApproovService {
     }>;
   }>;
   static updateClientFactory(wrapExisting: boolean): Promise<boolean>;
+
+  /**
+   * Selects one of the off-the-shelf service mutators (token/substitution decision policies).
+   * Use the {@link ApproovService.Mutator} constants for the type identifier.
+   *
+   * - `DEFAULT`: standard fail-closed policy (installed by default).
+   * - `ALWAYS_PROCEED`: fail-open — always send the request, attaching a token only on success.
+   * - `REQUIRE_ATTESTATION`: strict fail-closed — like DEFAULT but also blocks when the Approov
+   *   service is unreachable.
+   *
+   * See USAGE.md ("Service Mutators") for details.
+   */
+  static setServiceMutator(type: 'DEFAULT' | 'ALWAYS_PROCEED' | 'REQUIRE_ATTESTATION'): void;
+  /**
+   * Returns the type identifier of the active service mutator: one of "DEFAULT", "ALWAYS_PROCEED",
+   * "REQUIRE_ATTESTATION", or "CUSTOM" (a custom mutator installed natively).
+   */
+  static getServiceMutatorType(): Promise<'DEFAULT' | 'ALWAYS_PROCEED' | 'REQUIRE_ATTESTATION' | 'CUSTOM'>;
+  /**
+   * Enables or disables message signing. Message signing is decoupled from the service mutator and is
+   * ON by default. Enabling installs the default signer if signing was disabled; disabling removes it.
+   * See USAGE.md ("Message Signing").
+   */
+  static setMessageSigningEnabled(enabled: boolean): Promise<void>;
+  /**
+   * Returns true if message signing is currently enabled.
+   */
+  static isMessageSigningEnabled(): Promise<boolean>;
+  /**
+   * Adds a header to be covered by the message signature only when it is present on the request (never
+   * fails closed when absent), re-enabling the default signer first if signing was disabled. Intended
+   * to be called at startup. See USAGE.md ("Message Signing").
+   */
+  static addSignedHeader(header: string): void;
+
+  /**
+   * Off-the-shelf service mutator type identifiers for {@link ApproovService.setServiceMutator}.
+   */
+  static Mutator: {
+    DEFAULT: 'DEFAULT';
+    ALWAYS_PROCEED: 'ALWAYS_PROCEED';
+    REQUIRE_ATTESTATION: 'REQUIRE_ATTESTATION';
+  }
 }
 export interface ApproovProviderProps {
   config: string;

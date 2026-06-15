@@ -2,14 +2,19 @@ const { NativeModules } = require('../test-support/react-native');
 const { ApproovService } = require('../index');
 
 function setNativeService(nativeService) {
+  // Log and Mutator are JS-side constant objects, not native methods; preserve them across resets.
   const preservedLogLevels = NativeModules.ApproovService.Log;
+  const preservedMutators = NativeModules.ApproovService.Mutator;
   Object.keys(NativeModules.ApproovService).forEach((key) => {
-    if (key !== 'Log') {
+    if (key !== 'Log' && key !== 'Mutator') {
       delete NativeModules.ApproovService[key];
     }
   });
   if (preservedLogLevels) {
     NativeModules.ApproovService.Log = preservedLogLevels;
+  }
+  if (preservedMutators) {
+    NativeModules.ApproovService.Mutator = preservedMutators;
   }
   Object.assign(NativeModules.ApproovService, nativeService);
 }
@@ -177,5 +182,43 @@ describe('ApproovService JS interface', () => {
       ERROR: 4,
       NONE: 5,
     });
+  });
+
+  test('exposes off-the-shelf mutator type constants', () => {
+    setNativeService({});
+
+    expect(ApproovService.Mutator).toEqual({
+      DEFAULT: 'DEFAULT',
+      ALWAYS_PROCEED: 'ALWAYS_PROCEED',
+      REQUIRE_ATTESTATION: 'REQUIRE_ATTESTATION',
+    });
+  });
+
+  test('mutator selection and message-signing controls forward to the native bridge', async () => {
+    const setServiceMutator = jest.fn();
+    const getServiceMutatorType = jest.fn().mockResolvedValue('ALWAYS_PROCEED');
+    const setMessageSigningEnabled = jest.fn().mockResolvedValue(undefined);
+    const isMessageSigningEnabled = jest.fn().mockResolvedValue(true);
+    const addSignedHeader = jest.fn();
+    setNativeService({
+      setServiceMutator,
+      getServiceMutatorType,
+      setMessageSigningEnabled,
+      isMessageSigningEnabled,
+      addSignedHeader,
+    });
+
+    ApproovService.setServiceMutator(ApproovService.Mutator.ALWAYS_PROCEED);
+    expect(setServiceMutator).toHaveBeenCalledWith('ALWAYS_PROCEED');
+
+    await expect(ApproovService.getServiceMutatorType()).resolves.toBe('ALWAYS_PROCEED');
+
+    await ApproovService.setMessageSigningEnabled(false);
+    expect(setMessageSigningEnabled).toHaveBeenCalledWith(false);
+
+    await expect(ApproovService.isMessageSigningEnabled()).resolves.toBe(true);
+
+    ApproovService.addSignedHeader('X-Custom-Header');
+    expect(addSignedHeader).toHaveBeenCalledWith('X-Custom-Header');
   });
 });

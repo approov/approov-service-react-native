@@ -282,6 +282,18 @@ public extension ApproovServiceMutator {
     }
 }
 
+/**
+ * The standard, off-the-shelf **fail-closed** service mutator (the default policy). It applies the
+ * standard Approov behavior from the protocol extension above: proceed with a token on `success`;
+ * proceed *without* a token when the URL is not Approov-protected (`unknownURL` / `unprotectedURL`, or
+ * `noApproovService` when `setUseApproovStatusIfNoToken(true)` is configured); and block on network
+ * failures (`noNetwork` / `poorNetwork` / `mitmDetected`) and `rejected`.
+ *
+ * Select it from React with `ApproovService.setServiceMutator(ApproovService.Mutator.DEFAULT)`. For the
+ * full list of policies and message-signing configuration see USAGE.md ("Service Mutators" and
+ * "Message Signing") and README.md. Compare with `ApproovServiceMutatorAlwaysProceed` (fail-open) and
+ * `ApproovServiceMutatorRequireAttestation` (strict fail-closed).
+ */
 public struct ApproovServiceMutatorDefault: ApproovServiceMutator, CustomStringConvertible {
     public static let shared = ApproovServiceMutatorDefault()
 
@@ -290,4 +302,93 @@ public struct ApproovServiceMutatorDefault: ApproovServiceMutator, CustomStringC
     }
 
     private init() {}
+}
+
+/**
+ * Off-the-shelf **fail-open** service mutator: the request is *always* sent, whatever the attestation
+ * outcome. An Approov token (and any configured secure-string substitutions) is attached only when
+ * attestation succeeds; for every other status — no/poor network, MITM detection, rejection,
+ * unknown/unprotected URL — the request simply proceeds *without* a token rather than being blocked,
+ * and the interceptor never throws. Availability is therefore never affected by Approov; use this only
+ * when your backend is responsible for enforcing token presence/validity.
+ *
+ * Select it from React with `ApproovService.setServiceMutator(ApproovService.Mutator.ALWAYS_PROCEED)`.
+ * See USAGE.md ("Service Mutators" and "Message Signing") and README.md for details.
+ */
+public struct ApproovServiceMutatorAlwaysProceed: ApproovServiceMutator, CustomStringConvertible {
+    public static let shared = ApproovServiceMutatorAlwaysProceed()
+
+    public var description: String {
+        return "ApproovServiceMutator.ALWAYS_PROCEED"
+    }
+
+    private init() {}
+
+    public func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                                  url: String) throws -> Bool {
+        // attach a token only on success; never throw — proceed token-less for any other status
+        return approovResults.status == .success
+    }
+
+    public func handleInterceptorHeaderSubstitutionResult(_ approovResults: ApproovTokenFetchResult,
+                                                          header: String) throws -> Bool {
+        // substitute only on a successful lookup; never block on a failed/rejected secure string
+        return approovResults.status == .success
+    }
+
+    public func handleInterceptorQueryParamSubstitutionResult(_ approovResults: ApproovTokenFetchResult,
+                                                              queryKey: String) throws -> Bool {
+        return approovResults.status == .success
+    }
+}
+
+/**
+ * Off-the-shelf **strict fail-closed** service mutator. It behaves like the standard
+ * `ApproovServiceMutatorDefault` policy except that it does *not* tolerate `noApproovService`: when the
+ * SDK cannot reach the Approov service for an otherwise-protected request, the request is blocked
+ * rather than sent without a token. Use this for apps that must never let a protected request through
+ * unattested, even when the Approov cloud is unreachable.
+ *
+ * Outcomes: `success` → proceed with a token; `unknownURL` / `unprotectedURL` → proceed *without* a
+ * token (not Approov-protected); `noApproovService` / `noNetwork` / `poorNetwork` / `mitmDetected` →
+ * block (networking error, retryable); `rejected` → block (rejection error); any other status →
+ * permanent error.
+ *
+ * Select it from React with
+ * `ApproovService.setServiceMutator(ApproovService.Mutator.REQUIRE_ATTESTATION)`. See USAGE.md
+ * ("Service Mutators" and "Message Signing") and README.md for details.
+ */
+public struct ApproovServiceMutatorRequireAttestation: ApproovServiceMutator, CustomStringConvertible {
+    public static let shared = ApproovServiceMutatorRequireAttestation()
+
+    public var description: String {
+        return "ApproovServiceMutator.REQUIRE_ATTESTATION"
+    }
+
+    private init() {}
+
+    public func handleInterceptorFetchTokenResult(_ approovResults: ApproovTokenFetchResult,
+                                                  url: String) throws -> Bool {
+        let status = approovResults.status
+        switch status {
+        case .success:
+            return true
+        case .unknownURL, .unprotectedURL:
+            // not an Approov-protected URL — there is no attestation to require; proceed token-less
+            return false
+        case .rejected:
+            let reasons = approovResults.rejectionReasons.components(separatedBy: ",")
+            throw ApproovServiceError.rejectionError(message: "Approov token fetch for \(url): rejected",
+                                                     ARC: approovResults.arc,
+                                                     rejectionReasons: reasons)
+        case .noApproovService, .noNetwork, .poorNetwork, .mitmDetected:
+            // unlike the default policy, noApproovService is treated as a (retryable) failure rather
+            // than a reason to proceed without a token
+            throw ApproovServiceError.networkingError(message: "Approov token fetch for \(url): " +
+                                                      Approov.string(from: status))
+        default:
+            throw ApproovServiceError.permanentError(message: "Approov token fetch for \(url): " +
+                                                     Approov.string(from: status))
+        }
+    }
 }

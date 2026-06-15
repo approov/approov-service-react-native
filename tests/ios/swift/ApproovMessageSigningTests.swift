@@ -295,6 +295,9 @@ private func testMutatorBridgeSignsWithCustomTokenHeaderAndOptionalTrace() throw
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
@@ -318,6 +321,9 @@ private func testMutatorBridgeIntegratesMessageSigningEndToEnd() throws {
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
@@ -407,6 +413,9 @@ private func testInstallSigningCanBeBouncedEndToEnd() throws {
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let request = NSMutableURLRequest(url: targetURL())
@@ -442,6 +451,9 @@ private func testAccountSigningCanBeBouncedEndToEnd() throws {
     let signer = ApproovDefaultMessageSigning().setDefaultFactory(factory)
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = signer
 
     let request = NSMutableURLRequest(url: targetURL())
@@ -472,6 +484,9 @@ private func testSigningFailureFallbackCanBeBouncedEndToEnd() throws {
     ApproovServiceStubState.reset()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let request = NSMutableURLRequest(url: targetURL())
@@ -507,6 +522,9 @@ private func testDigestBodyBehaviorCanBeBouncedEndToEnd() throws {
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let postRequest = NSMutableURLRequest(url: targetURL())
@@ -541,6 +559,9 @@ private func testSingleSignatureApplicationCanBeBouncedEndToEnd() throws {
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
 
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = defaultSigner()
 
     let request = NSMutableURLRequest(url: targetURL())
@@ -576,6 +597,9 @@ private func testSingleSignatureApplicationCanBeBouncedEndToEnd() throws {
 
 private func testMutatorBridgeCopiesBackFullRequestState() {
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = RecordingMutator { request, _ in
         var updated = request
         updated.url = URL(string: "https://api.example.com/rewritten?ok=yes")!
@@ -612,6 +636,9 @@ private func testMutatorBridgeCopiesBackFullRequestState() {
 
 private func testMutatorBridgePreservesHttpBodyStreams() {
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = RecordingMutator { request, _ in
         var updated = request
         updated.httpMethod = "PUT"
@@ -641,6 +668,9 @@ private func testMutatorBridgePreservesHttpBodyStreams() {
 
 private func testMutatorBridgePropagatesCustomFetchTokenErrors() {
     let bridge = ApproovServiceMutatorBridge.shared
+    // message signing is decoupled and on by default; these tests drive signing through the service
+    // mutator (back-compat path), so disable the default signer to avoid double-signing
+    bridge.messageSigner = nil
     bridge.serviceMutator = RecordingMutator(handleFetchToken: { _, _ in
         throw ApproovServiceError.permanentError(message: "custom no service block")
     })
@@ -661,6 +691,80 @@ private func testMutatorBridgePropagatesCustomFetchTokenErrors() {
                 "Permanent mutator errors should expose the general error type")
 }
 
+// MARK: - Decoupled message signing and off-the-shelf mutator selection
+
+private func testDecoupledMessageSignerSignsAfterDefaultMutator() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    // decoupled model: standard decision mutator + a separately installed signer
+    bridge.serviceMutator = ApproovServiceMutatorDefault.shared
+    bridge.messageSigner = defaultSigner()
+
+    let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    assertTrue(request.value(forHTTPHeaderField: "Signature")?.contains("install=:") == true,
+               "The decoupled message signer should sign requests carrying a token")
+}
+
+private func testDisablingMessageSigningSkipsTheSignature() throws {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = ApproovServiceMutatorDefault.shared
+    bridge.setMessageSigningEnabled(false)
+    assertFalse(bridge.isMessageSigningEnabled(), "message signing should report disabled")
+
+    let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
+    request.httpMethod = "POST"
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+
+    bridge.processRequest(request, tokenHeader: "Approov-Token", traceIDHeader: "Approov-TraceID")
+
+    assertFalse(request.value(forHTTPHeaderField: "Signature") != nil,
+                "no Signature header should be added when message signing is disabled")
+}
+
+private func testMessageSigningToggleAndAddSignedHeaderReenable() throws {
+    let bridge = ApproovServiceMutatorBridge.shared
+
+    bridge.setMessageSigningEnabled(true)
+    assertTrue(bridge.isMessageSigningEnabled(), "signing should be enabled after enabling")
+
+    bridge.setMessageSigningEnabled(false)
+    assertFalse(bridge.isMessageSigningEnabled(), "signing should be disabled after disabling")
+
+    bridge.addSignedHeader("X-Custom-Header")
+    assertTrue(bridge.isMessageSigningEnabled(), "addSignedHeader should re-enable the default signer")
+}
+
+private func testSetServiceMutatorByTypeSelectsOffTheShelfPolicies() throws {
+    let bridge = ApproovServiceMutatorBridge.shared
+
+    bridge.setServiceMutator(byType: "ALWAYS_PROCEED")
+    assertEqual("ALWAYS_PROCEED", bridge.getServiceMutatorType(),
+                "setServiceMutator should select the fail-open policy")
+
+    bridge.setServiceMutator(byType: "REQUIRE_ATTESTATION")
+    assertEqual("REQUIRE_ATTESTATION", bridge.getServiceMutatorType(),
+                "setServiceMutator should select the strict policy")
+
+    bridge.setServiceMutator(byType: "DEFAULT")
+    assertEqual("DEFAULT", bridge.getServiceMutatorType(),
+                "setServiceMutator should select the standard policy")
+
+    bridge.setServiceMutator(byType: "NOPE")
+    assertEqual("DEFAULT", bridge.getServiceMutatorType(),
+                "an unknown mutator type should leave the current mutator unchanged")
+}
+
 @main
 struct ApproovMessageSigningTestsRunner {
     static func main() {
@@ -679,6 +783,10 @@ struct ApproovMessageSigningTestsRunner {
             testMutatorBridgeCopiesBackFullRequestState()
             testMutatorBridgePreservesHttpBodyStreams()
             testMutatorBridgePropagatesCustomFetchTokenErrors()
+            try testDecoupledMessageSignerSignsAfterDefaultMutator()
+            try testDisablingMessageSigningSkipsTheSignature()
+            try testMessageSigningToggleAndAddSignedHeaderReenable()
+            try testSetServiceMutatorByTypeSelectsOffTheShelfPolicies()
         } catch {
             fail("Unexpected Swift message-signing test error: \(error)")
         }

@@ -156,6 +156,11 @@ public class ApproovServiceMiniSdkTest {
         when(reactContext.getAssets()).thenReturn(appContext.getAssets());
         service = new ApproovService(reactContext);
         resetServiceState();
+        // message signing is decoupled from the mutator and on by default in production; for these
+        // tests start from a known baseline (signing off, standard decision mutator) and let signing
+        // tests opt in explicitly via setServiceMutator(signer) or setMessageSigner(signer)
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setMessageSigner(null);
         AttesterProxyController.reset();
         AttesterProxyController.loadTokenSigningConfigFile("../core-service-layers-testing/mini-sdk/attester-proxy/token-signing-config.json");
     }
@@ -164,6 +169,7 @@ public class ApproovServiceMiniSdkTest {
     public void tearDown() {
         AttesterProxyController.reset();
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setMessageSigner(null);
         try {
             resetServiceState();
         } catch (Exception ignored) {

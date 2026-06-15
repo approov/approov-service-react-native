@@ -292,8 +292,9 @@ public class ApproovTokenInterceptor implements Interceptor {
             }
         }
 
-        // allow the mutator to perform any final modifications to the request,
-        // including signing
+        // allow the mutator to perform any final modifications to the request, then apply message
+        // signing. Message signing is decoupled from the mutator (it is a separate, on-by-default
+        // concern) and runs AFTER the mutator so the signature can cover any headers the mutator added.
         try {
             ApproovRequestMutations mutations = new ApproovRequestMutations();
             mutations.setTokenHeaderKey(addedTokenHeader);
@@ -301,6 +302,11 @@ public class ApproovTokenInterceptor implements Interceptor {
             mutations.setSubstitutionHeaderKeys(substitutedHeaders);
             mutations.setSubstitutionQueryParamResults(currentURL, substitutedQueryParams);
             request = mutator.handleInterceptorProcessedRequest(approovService, request, mutations);
+
+            ApproovDefaultMessageSigning signer = ApproovService.getMessageSigner();
+            if (signer != null) {
+                request = signer.processedRequest(request, mutations);
+            }
         } catch (ApproovException e) {
             throw new IOException(e);
         }

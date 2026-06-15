@@ -53,6 +53,9 @@ public class ApproovServicePublicApiTest {
     @After
     public void tearDown() {
         networkingModuleStatic.close();
+        // restore production defaults for the global mutator/signer state mutated by some tests
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setMessageSigner(ApproovDefaultMessageSigning.makeDefault());
     }
 
     private ApproovService newService() {
@@ -252,6 +255,70 @@ public class ApproovServicePublicApiTest {
             service.isInterceptorActive(promise);
 
             org.mockito.Mockito.verify(promise).resolve(false);
+        }
+    }
+
+    @Test
+    public void setServiceMutatorSelectsOffTheShelfPoliciesByType() {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
+
+            service.setServiceMutator("ALWAYS_PROCEED");
+            Promise p1 = mock(Promise.class);
+            service.getServiceMutatorType(p1);
+            org.mockito.Mockito.verify(p1).resolve("ALWAYS_PROCEED");
+
+            service.setServiceMutator("REQUIRE_ATTESTATION");
+            Promise p2 = mock(Promise.class);
+            service.getServiceMutatorType(p2);
+            org.mockito.Mockito.verify(p2).resolve("REQUIRE_ATTESTATION");
+
+            service.setServiceMutator("DEFAULT");
+            Promise p3 = mock(Promise.class);
+            service.getServiceMutatorType(p3);
+            org.mockito.Mockito.verify(p3).resolve("DEFAULT");
+
+            // an unknown type leaves the current mutator unchanged
+            service.setServiceMutator("NOPE");
+            Promise p4 = mock(Promise.class);
+            service.getServiceMutatorType(p4);
+            org.mockito.Mockito.verify(p4).resolve("DEFAULT");
+        }
+    }
+
+    @Test
+    public void messageSigningCanBeToggledFromTheBridge() {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
+
+            service.setMessageSigningEnabled(true, mock(Promise.class));
+            Promise enabled = mock(Promise.class);
+            service.isMessageSigningEnabled(enabled);
+            org.mockito.Mockito.verify(enabled).resolve(true);
+
+            service.setMessageSigningEnabled(false, mock(Promise.class));
+            Promise disabled = mock(Promise.class);
+            service.isMessageSigningEnabled(disabled);
+            org.mockito.Mockito.verify(disabled).resolve(false);
+
+            service.setMessageSigningEnabled(true, mock(Promise.class));
+            Promise reEnabled = mock(Promise.class);
+            service.isMessageSigningEnabled(reEnabled);
+            org.mockito.Mockito.verify(reEnabled).resolve(true);
+        }
+    }
+
+    @Test
+    public void addSignedHeaderReenablesSigningWhenDisabled() {
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            ApproovService service = newService();
+
+            service.setMessageSigningEnabled(false, mock(Promise.class));
+            service.addSignedHeader("X-Custom-Header");
+
+            Promise enabled = mock(Promise.class);
+            service.isMessageSigningEnabled(enabled);
+            org.mockito.Mockito.verify(enabled).resolve(true);
         }
     }
 

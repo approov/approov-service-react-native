@@ -92,6 +92,34 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
     }
 
     /**
+     * Builds the default message signer with install (ES256) message signing enabled — the signer that
+     * is installed by default at initialization. Message signing is an opt-out feature: this signer is
+     * applied after the service mutator so the signature can cover any headers the mutator added.
+     *
+     * - Returns: A new `ApproovDefaultMessageSigning` configured with the default factory.
+     */
+    public static func makeDefault() -> ApproovDefaultMessageSigning {
+        return ApproovDefaultMessageSigning().setDefaultFactory(generateDefaultSignatureParametersFactory())
+    }
+
+    /**
+     * Adds a header to be covered by the signature **only when it is present** on the request — when
+     * absent, the request is still signed (without that header) rather than being blocked, so this
+     * never fails closed. Amends the active default factory without redeclaring its configuration,
+     * creating a default factory first if none is set. Intended to be called at startup.
+     *
+     * - Parameter header: The header name to add to the signature.
+     * - Returns: The current instance for method chaining.
+     */
+    @discardableResult
+    public func addSignedHeader(_ header: String) -> ApproovDefaultMessageSigning {
+        let factory = defaultFactory ?? ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+        _ = factory.addOptionalHeaders([header])
+        defaultFactory = factory
+        return self
+    }
+
+    /**
      * Builds the signature parameters for a given request.
      *
      * - Parameters:

@@ -179,11 +179,16 @@ public class ApproovTokenInterceptorTest {
         });
 
         ApproovService.setServiceMutator(mutator);
+        // message signing is decoupled from the mutator and applied separately; disable it for the
+        // token/substitution interceptor tests and enable it explicitly in the signing test
+        ApproovService.setMessageSigner(null);
     }
 
     @After
     public void tearDown() {
+        // restore production defaults so other test classes see the on-by-default signer
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setMessageSigner(ApproovDefaultMessageSigning.makeDefault());
     }
 
     private Request request(String url) {
@@ -399,11 +404,13 @@ public class ApproovTokenInterceptorTest {
     }
 
     @Test
-    public void messageSigningMutatorRunsAfterInterceptorMutationsEndToEnd() throws Exception {
+    public void messageSigningRunsAfterInterceptorMutationsEndToEnd() throws Exception {
+        // message signing is decoupled from the service mutator: it is installed as the message signer
+        // and applied after the mutator hook (here the default RecordingMutator makes no changes)
         RecordingSigningMutator signingMutator = new RecordingSigningMutator();
         signingMutator.setDefaultFactory(new FixedDefaultSignatureParametersFactory());
         signingMutator.setInstallSignatureBase64(derEncodedInstallSignature());
-        ApproovService.setServiceMutator(signingMutator);
+        ApproovService.setMessageSigner(signingMutator);
 
         Request request = new Request.Builder()
             .url("https://api.example.com/reply")

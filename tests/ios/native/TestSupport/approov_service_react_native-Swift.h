@@ -11,6 +11,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)handleInterceptorFetchTokenResult:(id)result
                                       url:(NSString *)url
                              errorPointer:(NSError *_Nullable *_Nullable)errorPointer;
+- (void)setServiceMutatorByType:(NSString *)type;
+- (NSString *)getServiceMutatorType;
+- (void)setMessageSigningEnabled:(BOOL)enabled;
+- (BOOL)isMessageSigningEnabled;
+- (void)addSignedHeader:(NSString *)header;
 
 @end
 

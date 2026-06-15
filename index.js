@@ -151,6 +151,18 @@ ApproovService.Log = {
     NONE: 5
 }
 
+// Off-the-shelf service mutator type identifiers for setServiceMutator(). The service mutator decides
+// token/substitution policy; message signing is controlled separately (setMessageSigningEnabled /
+// addSignedHeader). See USAGE.md ("Service Mutators" and "Message Signing").
+ApproovService.Mutator = {
+    // standard fail-closed policy (installed by default)
+    DEFAULT: 'DEFAULT',
+    // fail-open: always send the request, attaching a token only on successful attestation
+    ALWAYS_PROCEED: 'ALWAYS_PROCEED',
+    // strict fail-closed: like DEFAULT but also blocks when the Approov service is unreachable
+    REQUIRE_ATTESTATION: 'REQUIRE_ATTESTATION'
+}
+
 import { ApproovProvider, useApproov } from './approov-provider'
 import { ApproovMonitor } from './approov-monitor'
 

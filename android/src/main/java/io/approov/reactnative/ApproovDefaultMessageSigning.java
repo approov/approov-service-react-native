@@ -127,6 +127,37 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
+     * Builds the default message signer with install (ES256) message signing enabled — the signer that
+     * is installed by default at initialization. Message signing is an opt-out feature: this signer is
+     * applied after the service mutator so the signature can cover any headers the mutator added.
+     *
+     * @return a new {@code ApproovDefaultMessageSigning} configured with the default factory.
+     */
+    public static ApproovDefaultMessageSigning makeDefault() {
+        return new ApproovDefaultMessageSigning()
+                .setDefaultFactory(generateDefaultSignatureParametersFactory());
+    }
+
+    /**
+     * Adds a header to be covered by the signature <b>only when it is present</b> on the request — when
+     * absent, the request is still signed (without that header) rather than being blocked, so this
+     * never fails closed. Amends the active default factory without redeclaring its configuration,
+     * creating a default factory first if none is set. Intended to be called at startup.
+     *
+     * @param header the header name to add to the signature.
+     * @return The current instance for method chaining.
+     */
+    public ApproovDefaultMessageSigning addSignedHeader(String header) {
+        SignatureParametersFactory factory = defaultFactory;
+        if (factory == null) {
+            factory = generateDefaultSignatureParametersFactory();
+        }
+        factory.addOptionalHeaders(header);
+        defaultFactory = factory;
+        return this;
+    }
+
+    /**
      * Builds the signature parameters for a given request.
      *
      * @param provider The component provider for the request.

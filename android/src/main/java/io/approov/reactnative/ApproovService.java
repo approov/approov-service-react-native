@@ -195,10 +195,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // The mutator instance used to control ApproovService behavior
     private static ApproovServiceMutator serviceMutator;
 
+    // The active message signer, or null when message signing is disabled. Message signing is an
+    // opt-out feature: it is installed by default at class init and applied AFTER the service mutator
+    // (see ApproovTokenInterceptor) so the signature can cover any headers the mutator added. It is
+    // decoupled from the service mutator, which now only decides token/substitution policy.
+    private static ApproovDefaultMessageSigning messageSigner;
+
     static {
-        ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
-        signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-        serviceMutator = signer;
+        // the default decision policy is the standard fail-closed mutator (ApproovServiceMutator.DEFAULT);
+        // message signing is a separate, on-by-default concern. See the off-the-shelf mutators
+        // (ApproovServiceMutatorAlwaysProceed, ApproovServiceMutatorRequireAttestation) and USAGE.md.
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        messageSigner = ApproovDefaultMessageSigning.makeDefault();
     }
 
     /**
@@ -223,6 +231,137 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Off-the-shelf mutator selection and message-signing control (exposed to React).
+    //
+    // The service mutator decides token/substitution policy; message signing is a separate, on-by-
+    // default concern applied after the mutator. The three off-the-shelf policies are
+    // ApproovServiceMutator.DEFAULT (standard fail-closed), ApproovServiceMutatorAlwaysProceed
+    // (fail-open) and ApproovServiceMutatorRequireAttestation (strict fail-closed). See USAGE.md.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Maps a JS-facing mutator type identifier to a concrete off-the-shelf mutator instance.
+     *
+     * @param type one of "DEFAULT", "ALWAYS_PROCEED", "REQUIRE_ATTESTATION"
+     * @return the mutator instance, or null if the type is not recognised
+     */
+    private static ApproovServiceMutator mutatorForType(String type) {
+        if (type == null)
+            return null;
+        switch (type) {
+            case "DEFAULT":
+                return ApproovServiceMutator.DEFAULT;
+            case "ALWAYS_PROCEED":
+                return ApproovServiceMutatorAlwaysProceed.SHARED;
+            case "REQUIRE_ATTESTATION":
+                return ApproovServiceMutatorRequireAttestation.SHARED;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Maps the active service mutator to its JS-facing type identifier.
+     *
+     * @return one of "DEFAULT", "ALWAYS_PROCEED", "REQUIRE_ATTESTATION", or "CUSTOM"
+     */
+    private static String typeForMutator(ApproovServiceMutator mutator) {
+        if (mutator instanceof ApproovServiceMutatorAlwaysProceed)
+            return "ALWAYS_PROCEED";
+        if (mutator instanceof ApproovServiceMutatorRequireAttestation)
+            return "REQUIRE_ATTESTATION";
+        if (mutator == ApproovServiceMutator.DEFAULT)
+            return "DEFAULT";
+        return "CUSTOM";
+    }
+
+    /**
+     * Gets the active message signer, or null when message signing is disabled.
+     *
+     * @return the active ApproovDefaultMessageSigning, or null
+     */
+    public static ApproovDefaultMessageSigning getMessageSigner() {
+        return messageSigner;
+    }
+
+    /**
+     * Installs a custom message signer, replacing the default. Pass null to disable message signing.
+     *
+     * @param signer the message signer to install, or null to disable signing
+     */
+    public static void setMessageSigner(ApproovDefaultMessageSigning signer) {
+        messageSigner = signer;
+    }
+
+    /**
+     * Selects one of the off-the-shelf service mutators by type identifier. Exposed to React.
+     *
+     * @param type one of "DEFAULT", "ALWAYS_PROCEED", "REQUIRE_ATTESTATION"
+     */
+    @ReactMethod
+    public void setServiceMutator(String type) {
+        ApproovServiceMutator mutator = mutatorForType(type);
+        if (mutator == null) {
+            log(LOG_ERROR, TAG, "setServiceMutator: unknown mutator type '" + type
+                    + "' (expected DEFAULT, ALWAYS_PROCEED or REQUIRE_ATTESTATION); leaving current mutator unchanged");
+            return;
+        }
+        setServiceMutator(mutator);
+    }
+
+    /**
+     * Gets the JS-facing type identifier of the active service mutator.
+     *
+     * @param promise resolved with one of "DEFAULT", "ALWAYS_PROCEED", "REQUIRE_ATTESTATION", "CUSTOM"
+     */
+    @ReactMethod
+    public void getServiceMutatorType(Promise promise) {
+        promise.resolve(typeForMutator(serviceMutator));
+    }
+
+    /**
+     * Enables or disables message signing (opt-out; on by default). Enabling installs the default
+     * signer if signing was disabled; disabling removes the signer entirely. Exposed to React.
+     *
+     * @param enabled true to enable signing, false to disable
+     * @param promise resolved when applied
+     */
+    @ReactMethod
+    public void setMessageSigningEnabled(boolean enabled, Promise promise) {
+        if (enabled) {
+            if (messageSigner == null)
+                messageSigner = ApproovDefaultMessageSigning.makeDefault();
+        } else {
+            messageSigner = null;
+        }
+        promise.resolve(null);
+    }
+
+    /**
+     * Reports whether message signing is currently enabled. Exposed to React.
+     *
+     * @param promise resolved with true if message signing is enabled
+     */
+    @ReactMethod
+    public void isMessageSigningEnabled(Promise promise) {
+        promise.resolve(messageSigner != null);
+    }
+
+    /**
+     * Adds a header to be covered by the message signature only when present on the request (never
+     * fails closed when absent), (re)enabling the default signer first if signing was disabled.
+     * Intended to be called at startup. Exposed to React.
+     *
+     * @param header the header name to add to the signature
+     */
+    @ReactMethod
+    public void addSignedHeader(String header) {
+        if (messageSigner == null)
+            messageSigner = ApproovDefaultMessageSigning.makeDefault();
+        messageSigner.addSignedHeader(header);
     }
 
     /**

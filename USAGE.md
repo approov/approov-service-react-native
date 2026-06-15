@@ -164,9 +164,25 @@ It is possible to sign HTTP requests using Approov to ensure message integrity a
 *   **Integrity:** Ensures that the request parameters (headers, body, URL) have not been tampered with during transit.
 *   **Authenticity:** Proves that the request originated from a genuine, attested application instance.
 
-Message signing is enabled automatically by the default `ApproovService` configuration. If your Approov account has message signing enabled, the SDK will automatically add the message signature headers to your outbound requests.
+Message signing is **enabled by default** and is **decoupled from the service mutator** — it is applied as a separate step after the mutator, so it composes with any of the off-the-shelf or custom mutators below. If your Approov account has message signing enabled, the SDK will automatically add the message signature headers to your outbound requests.
 
-For more details on how to configure or override message signing behavior, see the [Approov Service Mutator](#approov-service-mutator) section below.
+You can control message signing directly from JavaScript:
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native'
+
+// Disable message signing (it is on by default)
+await ApproovService.setMessageSigningEnabled(false)
+
+// Query the current state
+const signing = await ApproovService.isMessageSigningEnabled()
+
+// Add a header to be covered by the signature *only when present* on a request (re-enables the
+// default signer if signing was disabled). Call at startup.
+ApproovService.addSignedHeader('X-My-Header')
+```
+
+For advanced, fully custom signing configuration (custom algorithms, per-host factories) see the [Approov Service Mutator](#approov-service-mutator) section below.
 
 ## Token Binding
 
@@ -252,14 +268,34 @@ The table below covers only the statuses relevant to the network interceptor pat
 
 # Approov Service Mutator
 
-The `ApproovServiceMutator` allows you to customize the behavior of the Approov network layer at key points in the request lifecycle. 
+The `ApproovServiceMutator` decides the token/substitution policy of the Approov network layer at key points in the request lifecycle. Message signing is a **separate, on-by-default** concern (see [Message Signing](#message-signing)) applied after the mutator.
 
-**Important Architecture Note:** 
-Because the React Native bridge does not support passing complex executable code or classes, custom mutators must be implemented and registered directly in your platform-native code (Java/Kotlin for Android, Swift/Objective-C for iOS).
+## Off-the-Shelf Mutators (selectable from JavaScript)
 
-## Default Behavior: HTTP Message Signing
+Three ready-made policies are implemented in the platform code and can be selected from JavaScript by type identifier — no native code required:
 
-By default, the Approov Service is configured with a default mutator (`ApproovDefaultMessageSigning`) that **automatically performs HTTP Message Signing**. It fetches the Approov token, adds the `Approov-Token` header to requests, and generates the required message signature headers.
+| Type (`ApproovService.Mutator`) | Policy | Behavior |
+| --- | --- | --- |
+| `DEFAULT` | Standard fail-closed (installed by default) | Token on success; proceed token-less for unprotected URLs (and `NO_APPROOV_SERVICE` when `setUseApproovStatusIfNoToken(true)`); block on network failures and rejection. |
+| `ALWAYS_PROCEED` | Fail-open | Always send the request; attach a token only on success; never throw. Use only when your backend enforces token presence. |
+| `REQUIRE_ATTESTATION` | Strict fail-closed | Like `DEFAULT`, but also blocks when the Approov service is unreachable (`NO_APPROOV_SERVICE`). |
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native'
+
+// fail-open: never block app traffic on attestation problems
+ApproovService.setServiceMutator(ApproovService.Mutator.ALWAYS_PROCEED)
+
+// strict: never let a protected request through unattested
+ApproovService.setServiceMutator(ApproovService.Mutator.REQUIRE_ATTESTATION)
+
+// query the active policy ("DEFAULT" | "ALWAYS_PROCEED" | "REQUIRE_ATTESTATION" | "CUSTOM")
+const active = await ApproovService.getServiceMutatorType()
+```
+
+## Custom Mutators (native only)
+
+**Important Architecture Note:** Because the React Native bridge does not support passing complex executable code or classes, *custom* mutators (beyond the off-the-shelf types above) must be implemented and registered directly in your platform-native code (Java/Kotlin for Android, Swift/Objective-C for iOS). A custom mutator installed natively reports as `"CUSTOM"` from `getServiceMutatorType()`.
 
 If you need to change other networking behaviors, you can do so natively by setting a custom `ApproovServiceMutator`.
 
@@ -398,9 +434,9 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 ### Customizing Mutators with Message Signing
 
-Since `ApproovDefaultMessageSigning` is the default mutator, you must ensure that your custom mutator continues to invoke the message signer. If you want custom logic (like enforcing tokens), you pass the message signer into your custom mutator so they compose together.
+Message signing is now **decoupled** from the mutator and applied as a separate step *after* it, so a custom mutator no longer needs to invoke the signer itself — signing continues to run (on by default) regardless of which mutator is installed, and will cover any headers your mutator adds. The example below shows a custom mutator that enforces tokens; message signing still applies automatically.
 
-Below are examples of how to implement and register a custom mutator that enforces tokens and simultaneously preserves message signing.
+> Note: the older pattern of subclassing `ApproovDefaultMessageSigning` (so the mutator *is* the signer) still works for backward compatibility, but is no longer required. Prefer implementing the decision policy in the mutator and leaving signing to the separate, on-by-default signer (toggle it with `setMessageSigningEnabled`).
 
 ### Android Implementation (Java)
 

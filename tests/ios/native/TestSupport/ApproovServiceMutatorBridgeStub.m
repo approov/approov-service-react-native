@@ -4,6 +4,8 @@
 
 static void (^gProcessRequestHandler)(NSMutableURLRequest *, NSString *, NSString *);
 static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
+static NSString *gServiceMutatorType = nil;
+static BOOL gMessageSigningEnabled = YES;
 
 @implementation ApproovServiceMutatorBridge
 
@@ -60,6 +62,28 @@ static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
     }
     return NO;
   }
+}
+
+// Minimal stubs for the mutator-selection / message-signing controls. The legacy native interceptor
+// tests do not exercise these directly; they exist so ApproovService.m compiles and links.
+- (void)setServiceMutatorByType:(NSString *)type {
+  gServiceMutatorType = [type copy];
+}
+
+- (NSString *)getServiceMutatorType {
+  return gServiceMutatorType != nil ? gServiceMutatorType : @"DEFAULT";
+}
+
+- (void)setMessageSigningEnabled:(BOOL)enabled {
+  gMessageSigningEnabled = enabled;
+}
+
+- (BOOL)isMessageSigningEnabled {
+  return gMessageSigningEnabled;
+}
+
+- (void)addSignedHeader:(NSString *)header {
+  gMessageSigningEnabled = YES;
 }
 
 @end

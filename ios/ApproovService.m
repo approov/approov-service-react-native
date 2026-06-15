@@ -590,6 +590,66 @@ RCT_EXPORT_METHOD(getMaxReswizzleAttempts : (RCTPromiseResolveBlock)
   resolve(@([ApproovRCTInterceptor maxReswizzleAttempts]));
 }
 
+/**
+ * Selects one of the off-the-shelf service mutators by type identifier. The service mutator decides
+ * token/substitution policy; the available types are "DEFAULT" (standard fail-closed),
+ * "ALWAYS_PROCEED" (fail-open) and "REQUIRE_ATTESTATION" (strict fail-closed). See USAGE.md.
+ *
+ * @param type the mutator type identifier
+ */
+RCT_EXPORT_METHOD(setServiceMutator : (NSString *)type) {
+  ApproovLogD(@"setServiceMutator %@", type);
+  [[ApproovServiceMutatorBridge shared] setServiceMutatorByType:type];
+}
+
+/**
+ * Gets the type identifier of the active service mutator.
+ *
+ * @param resolve promise fulfilled with "DEFAULT", "ALWAYS_PROCEED", "REQUIRE_ATTESTATION" or "CUSTOM"
+ * @param reject promise to be fulfilled if an error occurs
+ */
+RCT_EXPORT_METHOD(getServiceMutatorType : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve([[ApproovServiceMutatorBridge shared] getServiceMutatorType]);
+}
+
+/**
+ * Enables or disables message signing (opt-out; on by default). Enabling installs the default signer
+ * if signing was disabled; disabling removes the signer entirely.
+ *
+ * @param enabled YES to enable message signing, NO to disable
+ * @param resolve promise fulfilled when applied
+ * @param reject promise to be fulfilled if an error occurs
+ */
+RCT_EXPORT_METHOD(setMessageSigningEnabled : (BOOL)enabled resolver : (
+    RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  ApproovLogD(@"setMessageSigningEnabled %@", enabled ? @"YES" : @"NO");
+  [[ApproovServiceMutatorBridge shared] setMessageSigningEnabled:enabled];
+  resolve([NSNull null]);
+}
+
+/**
+ * Reports whether message signing is currently enabled.
+ *
+ * @param resolve promise fulfilled with YES if message signing is enabled
+ * @param reject promise to be fulfilled if an error occurs
+ */
+RCT_EXPORT_METHOD(isMessageSigningEnabled : (RCTPromiseResolveBlock)
+                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve(@([[ApproovServiceMutatorBridge shared] isMessageSigningEnabled]));
+}
+
+/**
+ * Adds a header to be covered by the message signature only when present on the request (never fails
+ * closed when absent), (re)enabling the default signer first if signing was disabled.
+ *
+ * @param header the header name to add to the signature
+ */
+RCT_EXPORT_METHOD(addSignedHeader : (NSString *)header) {
+  ApproovLogD(@"addSignedHeader %@", header);
+  [[ApproovServiceMutatorBridge shared] addSignedHeader:header];
+}
+
 RCT_EXPORT_METHOD(setSessionMetadataCollectionEnabled : (BOOL)enabled) {
   ApproovLogD(@"setSessionMetadataCollectionEnabled %@",
               enabled ? @"YES" : @"NO");

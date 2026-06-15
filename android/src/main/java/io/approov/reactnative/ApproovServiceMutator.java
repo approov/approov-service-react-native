@@ -36,7 +36,26 @@ import java.util.regex.Matcher;
  */
 public interface ApproovServiceMutator {
     /**
-     * Default mutator that provides standard behavior with no changes.
+     * The standard, off-the-shelf <b>fail-closed</b> service mutator (the default policy). It applies
+     * the standard Approov behavior defined by the default methods of this interface:
+     * <ul>
+     *   <li>{@code SUCCESS} → proceed with a token.</li>
+     *   <li>{@code UNKNOWN_URL} / {@code UNPROTECTED_URL} → proceed <b>without</b> a token (the URL is
+     *       not Approov-protected).</li>
+     *   <li>{@code NO_APPROOV_SERVICE} → proceed without a token, or attach the status string as the
+     *       token when {@code setUseApproovStatusIfNoToken(true)} is configured.</li>
+     *   <li>{@code NO_NETWORK} / {@code POOR_NETWORK} / {@code MITM_DETECTED} → block with
+     *       {@link ApproovNetworkException} (retryable); {@code REJECTED} → block with
+     *       {@link ApproovRejectionException}; any other status → {@link ApproovFetchStatusException}.</li>
+     * </ul>
+     *
+     * <p>This is the policy installed at startup. Select it from React with
+     * {@code ApproovService.setServiceMutator(ApproovService.Mutator.DEFAULT)}.
+     *
+     * <p>For the full list of policies and message-signing configuration see <b>USAGE.md</b> ("Service
+     * Mutators" and "Message Signing") and <b>README.md</b>. Compare with the fail-open
+     * {@link ApproovServiceMutatorAlwaysProceed} and the strict
+     * {@link ApproovServiceMutatorRequireAttestation}.
      */
     public static final ApproovServiceMutator DEFAULT = new ApproovServiceMutator() {
         @Override

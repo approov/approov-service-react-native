@@ -279,9 +279,20 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             // the request doesn't have an Approov token, so we don't need to sign it
             return request;
         }
-        // generate and add a message signature
+        // generate and add a message signature. buildSignatureParameters fails CLOSED (the
+        // IllegalStateException is rethrown) only when a body digest configured as required cannot be
+        // generated — that must abort the request. Any other failure here (including from a custom
+        // SignatureParametersFactory) fails OPEN: log at error and proceed unsigned.
         OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
-        SignatureParameters params = buildSignatureParameters(provider, changes);
+        SignatureParameters params;
+        try {
+            params = buildSignatureParameters(provider, changes);
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to build signature parameters - proceeding unsigned: " + e);
+            return request;
+        }
         if (params == null) {
             // No sig to be added to the request; return the original request.
             return request;

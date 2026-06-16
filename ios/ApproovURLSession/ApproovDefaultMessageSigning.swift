@@ -161,8 +161,25 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
         if changes.getTokenHeaderKey() != nil {
             // Generate and add a message signature
             let provider = ApproovURLSessionComponentProvider(request: request)
-            guard let params = try buildSignatureParameters(provider: provider, changes: changes) else {
-                // No signature to be added; proceed with the original request
+            // buildSignatureParameters fails CLOSED only when a body digest configured as required
+            // cannot be generated — that must abort the request. Any other failure here (including from
+            // a custom SignatureParametersFactory) fails OPEN: log at error and proceed unsigned.
+            let params: SignatureParameters
+            do {
+                guard let built = try buildSignatureParameters(provider: provider, changes: changes) else {
+                    // No signature to be added; proceed with the original request
+                    return request
+                }
+                params = built
+            } catch {
+                // The required-body-digest failure is the only deliberate fail-closed case here; it is
+                // raised as .permanentError with this exact message (keep in sync with
+                // SignatureParametersFactory.buildSignatureParameters). Everything else fails open.
+                if case let ApproovServiceError.permanentError(message) = error,
+                   message == "Failed to create required body digest" {
+                    throw error
+                }
+                os_log("ApproovService: failed to build signature parameters - proceeding unsigned: %{public}@", type: .error, "\(error)")
                 return request
             }
 

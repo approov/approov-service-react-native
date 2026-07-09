@@ -1,5 +1,8 @@
 # Changelog
 
+## [3.5.15] - 2026-07-01
+- **Gradle 9 Compatibility Fix**: Migrated the Android build from the unmaintained `com.github.johnrengelman.shadow` plugin 8.1.1 to the maintained fork `com.gradleup.shadow` 8.3.11. The old plugin fails on Gradle 9 with `MissingPropertyException: No such property: mode` (Gradle 9 removed `FileCopyDetails.mode`), halting the whole application build. The replacement uses the same `ShadowJar` task class and produces an identical shaded BouncyCastle jar; verified on Gradle 8.8, 8.10.2, and 9.0.0. Minimum supported Gradle remains 8.3 (React Native 0.76+ ships 8.10+), so no consumer action is required beyond updating the package.
+
 ## [3.5.14] - 2026-05-06
 - **SDK Call Guards**: Added `isApproovEnabled` guards to all public methods that call the native Approov SDK without first checking initialization state. On Android: `setDevKey`, `setInstallAttrsInToken`, `getMessageSignature`, `getAccountMessageSignature`, and `getInstallMessageSignature`. On iOS: `setDevKey`, `setInstallAttrsInToken`, `getMessageSignature`, and `getDeviceID`. These methods now safely reject the promise (or throw `ApproovException` for static helpers) instead of crashing when the service layer is uninitialized or running in bypass mode.
 - **Android Request Mutation Logging**: Added an INFO-level `request mutation` log line to the Android OkHttp interceptor that confirms the `Approov-Token` and trace ID headers were actually injected onto the outgoing request. The log uses the same `missing`/`empty`/`present(len=N)` format as the iOS `task mutation` log, closing an observability gap where token fetch was logged but header injection was silent.

@@ -94,14 +94,13 @@ NSString *const PropsExtension = @"plist";
       ApproovLogI(@"read properties file from %@", [propsURL absoluteString]);
     }
   } else {
-    ApproovLogE(@"properties file at %@ not found", [propsURL absoluteString]);
-    [NSException
-         raise:@"ApproovPropsNotFound"
-        format:
-            @"Approov props not found: \
-         Please make sure you have "
-            @"the plist file '%@.%@' available in your app's root directory.",
-            PropsResource, PropsExtension];
+    // The properties file is OPTIONAL, matching the Android layer where a missing
+    // approov.props is tolerated (loadApproovProps returns null). Leaving _props nil
+    // is safe: every consumer nil-guards its key, and -valueForKey: on a nil
+    // dictionary returns nil. This lets a native approov.config-only integration
+    // (no per-request properties) run without shipping an empty approov.plist.
+    ApproovLogI(@"optional properties file %@.%@ not found; using defaults",
+                PropsResource, PropsExtension);
   }
   return self;
 }

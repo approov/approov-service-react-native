@@ -1,5 +1,8 @@
 # Changelog
 
+## [3.5.16] - 2026-07-22
+- **iOS `approov.plist` is now optional (fixes a launch crash)**: When Approov is initialized natively from a bundled `approov.config`, the iOS module no longer raises `ApproovPropsNotFound` at launch if a bundled `approov.plist` is absent. It now logs and runs with default properties, matching the Android layer where a missing `approov.props` is tolerated. This lets an `approov.config`-only native integration run without shipping an empty placeholder `approov.plist`. A present-but-unreadable plist still raises, since that indicates a genuine misconfiguration. (Reported by PropertyGuru.)
+
 ## [3.5.15] - 2026-07-01
 - **Gradle 9 Compatibility Fix**: Migrated the Android build from the unmaintained `com.github.johnrengelman.shadow` plugin 8.1.1 to the maintained fork `com.gradleup.shadow` 8.3.11. The old plugin fails on Gradle 9 with `MissingPropertyException: No such property: mode` (Gradle 9 removed `FileCopyDetails.mode`), halting the whole application build. The replacement uses the same `ShadowJar` task class and produces an identical shaded BouncyCastle jar; verified on Gradle 8.8, 8.10.2, and 9.0.0. Minimum supported Gradle remains 8.3 (React Native 0.76+ ships 8.10+), so no consumer action is required beyond updating the package.
 

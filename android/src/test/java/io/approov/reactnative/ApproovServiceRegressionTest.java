@@ -3,6 +3,8 @@ package io.approov.reactnative;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -315,6 +317,33 @@ public class ApproovServiceRegressionTest {
 
         assertFalse("substitution header should be cleared on a different config",
             service.getSubstitutionHeaders().containsKey("Authorization"));
+    }
+
+    @Test
+    public void initializeWithDifferentConfigResetsCustomServiceMutator() {
+        ApproovService service = newService();
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize("config-one", null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+
+        // Install a custom, non-signing mutator (as an app would via setServiceMutator,
+        // or the JS setServiceMutatorType wrapper).
+        ApproovServiceMutator custom = ApproovServiceMutator.DEFAULT;
+        ApproovService.setServiceMutator(custom);
+        assertSame(custom, ApproovService.getServiceMutator());
+
+        // A genuinely different config must reset the mutator so a custom override does
+        // not persist across an initialization boundary (root TESTING_REQUIREMENTS.md
+        // section 2, "Service Mutator Reset").
+        Promise secondInit = mock(Promise.class);
+        service.initialize("config-two", null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertNotSame("custom mutator must not persist across a config change", custom, afterReset);
+        assertTrue("re-init must restore the default message-signing mutator",
+            afterReset instanceof ApproovDefaultMessageSigning);
     }
 
     @Test

@@ -750,6 +750,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     exclusionURLRegexs = new HashMap<>();
                     suppressLoggingUnknownURL = false;
                     sessionMetadataCollectionEnabled = true;
+                    // Reset any custom service mutator so overrides do not persist across
+                    // an initialization boundary (root TESTING_REQUIREMENTS.md section 2,
+                    // "Service Mutator Reset"). Restore a fresh ApproovDefaultMessageSigning
+                    // — the React Native default performs HTTP message signing — rather than
+                    // the no-signing ApproovServiceMutator.DEFAULT, which would silently
+                    // disable default signing on every re-initialization.
+                    ApproovDefaultMessageSigning defaultMutator = new ApproovDefaultMessageSigning();
+                    defaultMutator.setDefaultFactory(
+                            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+                    serviceMutator = defaultMutator;
                 }
                 initialConfig = config;
                 isInitialized = true;

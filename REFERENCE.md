@@ -262,6 +262,54 @@ Removes an exclusion URL regular expression previously added using addExclusionU
 ApproovService.removeExclusionURLRegex(urlRegex: string);
 ```
 
+## setServiceMutatorType
+Selects the active request-handling policy from JavaScript, replacing any previously installed service mutator, with no native mutator code required. The `mask` is a proceed-bitmask listing which Approov **failure** statuses may proceed rather than block the request; assemble it from `ApproovService.ReturnDecision` bits or pass an `ApproovService.MutatorPreset` value. This is the no-native-code alternative to registering a custom `ApproovServiceMutator`. Behaviour is identical on Android and iOS.
+
+```Javascript
+ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean });
+```
+
+* `mask` (number): A bitwise-OR of `ApproovService.ReturnDecision` flags, or an `ApproovService.MutatorPreset` value. Each failure status **in** the mask proceeds; any failure status **not** in the mask blocks the request, which then surfaces as a failed `fetch()` (`IOException` / `Network request failed` on Android, an `NSError` failure on iOS).
+* `options.sign` (boolean, optional): Defaults to `true`, so the installed policy mutator preserves HTTP Message Signing. Pass `{ sign: false }` to proceed per the mask but send the request unsigned (for apps that sign elsewhere or must not double-sign). Ignored for `MutatorPreset.DEFAULT`.
+
+`SUCCESS` always proceeds with the signed token added, and `UNKNOWN_URL` / `UNPROTECTED_URL` always proceed unmodified (forwarded without a token). These three statuses are never maskable and are not exposed as flags. When a masked failure status proceeds, pair this call with `setUseApproovStatusIfNoToken(true)` to have the fetch-status string written into the token header; otherwise the token header is emitted empty.
+
+`ApproovService.MutatorPreset.DEFAULT` (mask `-1`) restores the built-in default mutator, which performs message signing.
+
+`setServiceMutatorType` uses replace semantics: the new policy wholly replaces any previously installed mutator (last wins), so use this JavaScript API or a native custom mutator, not both. A re-initialization with a *different* config resets the mutator back to the built-in default (re-apply `setServiceMutatorType` afterwards if needed); a same-config re-initialization preserves the installed mutator.
+
+`ApproovService.ReturnDecision` — maskable failure-status bit flags:
+
+| Flag | Value |
+| :--- | :--- |
+| `NO_APPROOV_SERVICE` | `1 << 0` |
+| `BAD_URL` | `1 << 1` |
+| `MITM_DETECTED` | `1 << 2` |
+| `NO_NETWORK` | `1 << 3` |
+| `POOR_NETWORK` | `1 << 4` |
+| `REJECTED` | `1 << 5` |
+| `UNKNOWN_KEY` | `1 << 6` |
+| `INTERNAL_ERROR` | `1 << 7` |
+| `NO_NETWORK_PERMISSION` | `1 << 8` |
+| `MISSING_LIB_DEPENDENCY` | `1 << 9` |
+| `DISABLED` | `1 << 10` |
+
+`ApproovService.MutatorPreset` — named masks:
+
+| Preset | Meaning |
+| :--- | :--- |
+| `DEFAULT` | Restore the built-in default (message-signing) mutator (mask `-1`). |
+| `ALWAYS_PROCEED` | Proceed on every failure status. |
+| `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service is unavailable (`NO_APPROOV_SERVICE`). |
+| `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL`, forwarding non-`https` traffic; development only. |
+
+> [!WARNING]
+> Including `MITM_DETECTED` or `REJECTED` in the mask disables the protection those statuses provide: a man-in-the-middle interception, or a failed/rejected attestation, would no longer block the request. Prefer the named presets, and only put these bits in a production mask deliberately.
+
+On iOS, `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status and are inert (harmless) if included.
+
+This function returns a `Promise` that resolves once the selected policy has been installed.
+
 ## prefetch
 *OBSOLETE:* the prefetch operation is now performed automatically by the platform SDK upon invoking `initialize`.
 

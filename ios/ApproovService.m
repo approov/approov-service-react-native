@@ -429,9 +429,10 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       suppressLoggingUnknownURL = NO;
       // fix(rn/ios): a genuinely different config must also reset the active
       // service mutator back to the built-in message-signing default, matching
-      // the Android mutator-reset fix. Without this a custom mutator installed
-      // via the bridge would silently survive a re-initialization with a
-      // different config.
+      // the Android mutator-reset fix. Without this a PolicyMutator installed
+      // via setServiceMutatorType() would silently survive a re-initialization
+      // with a different config. (Separate concern from the PolicyMutator
+      // feature itself.)
       [[ApproovServiceMutatorBridge shared] resetToDefault];
     }
     initialConfigString = config;
@@ -461,6 +462,43 @@ RCT_EXPORT_METHOD(isInitialized : (RCTPromiseResolveBlock)resolve
 RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
   resolve(@(ApproovIsEnabled()));
+}
+
+/**
+ * Selects the active service mutator natively, replacing any previously
+ * installed mutator. Mirrors the Android setServiceMutatorType(mask, sign) so
+ * the cross-platform JavaScript layer drives identical native behaviour.
+ *
+ * A mask of -1 (ApproovService.MutatorPreset.DEFAULT) restores the built-in
+ * message-signing default. Any other mask installs a PolicyMutator whose
+ * per-status proceed/forward/block policy is driven by the bitmask; the sign
+ * flag controls whether the processed request is HTTP Message Signed.
+ *
+ * @param mask     the proceed bitmask, or -1 to restore the default mutator
+ * @param sign     whether the processed request should be message signed
+ * @param resolve  called on success
+ * @param reject   called on failure
+ */
+RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
+                  sign : (BOOL)sign
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  @try {
+    NSInteger maskValue = (NSInteger)mask;
+    if (maskValue == -1) {
+      // MutatorPreset.DEFAULT: restore the built-in message-signing default.
+      [[ApproovServiceMutatorBridge shared] resetToDefault];
+      ApproovLogI(@"setServiceMutatorType: restored default mutator");
+    } else {
+      [[ApproovServiceMutatorBridge shared] setPolicyMutator:(int32_t)maskValue
+                                                        sign:sign];
+      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@", (long)maskValue,
+                  sign ? @"YES" : @"NO");
+    }
+    resolve(nil);
+  } @catch (NSException *exception) {
+    reject(@"setServiceMutatorType", exception.reason, nil);
+  }
 }
 
 + (id)networkRequestLock {

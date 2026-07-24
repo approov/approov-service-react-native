@@ -11,6 +11,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)handleInterceptorFetchTokenResult:(id)result
                                       url:(NSString *)url
                              errorPointer:(NSError *_Nullable *_Nullable)errorPointer;
+- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign;
+- (void)resetToDefault;
 
 @end
 

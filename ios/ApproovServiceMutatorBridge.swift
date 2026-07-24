@@ -15,6 +15,19 @@ import Approov
     }
 
     /**
+     * Installs a `PolicyMutator` as the active service mutator. Exposed to
+     * Objective-C because the Swift-typed `serviceMutator` property cannot be
+     * assigned directly from Objective-C.
+     *
+     * - Parameters:
+     *   - mask: the proceed bitmask (see `PolicyMutator.BIT_*`).
+     *   - sign: whether the processed request should be HTTP Message Signed.
+     */
+    @objc public func setPolicyMutator(_ mask: Int32, sign: Bool) {
+        self.serviceMutator = PolicyMutator(proceedMask: mask, sign: sign)
+    }
+
+    /**
      * Restores the built-in default service mutator: a freshly configured
      * `ApproovDefaultMessageSigning` signer identical to the one installed at
      * construction time. Exposed to Objective-C because the Swift-typed

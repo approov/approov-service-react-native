@@ -4,10 +4,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TEST_ROOT="$REPO_ROOT/tests/ios/swift"
-BUILD_DIR="${TMPDIR:-/tmp}/approov-swift-message-signing-tests"
+BUILD_DIR="${TMPDIR:-/tmp}/approov-swift-policy-mutator-tests"
 APPROOV_MODULE_DIR="$BUILD_DIR/Approov"
 RAW_SFV_MODULE_DIR="$BUILD_DIR/RawStructuredFieldValues"
-BINARY="$BUILD_DIR/ApproovMessageSigningTests"
+BINARY="$BUILD_DIR/ApproovPolicyMutatorTests"
 
 mkdir -p "$APPROOV_MODULE_DIR"
 mkdir -p "$RAW_SFV_MODULE_DIR"
@@ -47,7 +47,7 @@ xcrun swiftc \
   "$REPO_ROOT/ios/ApproovURLSession/util/sig/ComponentProvider.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/util/sig/SignatureBaseBuilder.swift" \
   "$REPO_ROOT/ios/ApproovURLSession/util/sig/SignatureParameters.swift" \
-  "$TEST_ROOT/ApproovMessageSigningTests.swift" \
+  "$TEST_ROOT/PolicyMutatorTests.swift" \
   -o "$BINARY"
 
 "$BINARY"

@@ -210,6 +210,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Sentinel mask value selecting the built-in signing default rather than a
+     * {@link PolicyMutator}. Passed from JavaScript as {@code MutatorPreset.DEFAULT}
+     * to {@link #setServiceMutatorType(double, boolean, Promise)} to restore the
+     * out-of-box {@link ApproovDefaultMessageSigning} mutator (with message signing).
+     */
+    public static final int MUTATOR_PRESET_DEFAULT = -1;
+
+    /**
      * Sets the ApproovServiceMutator instance to handle configurations.
      *
      * @param mutator is the ApproovServiceMutator to use
@@ -231,6 +239,46 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
+    }
+
+    /**
+     * Selects the active service mutator from JavaScript.
+     *
+     * <p>A {@code mask} equal to {@link #MUTATOR_PRESET_DEFAULT} restores the
+     * built-in {@link ApproovDefaultMessageSigning} mutator (with message
+     * signing), exactly as the static initializer configures it; the {@code sign}
+     * flag is not applicable in that case. Any other value installs a
+     * {@link PolicyMutator} driven by that proceed bitmask (see the
+     * {@code PolicyMutator.BIT_*} constants).
+     *
+     * <p>This call uses replace semantics: the newly built mutator wholly replaces
+     * any previously-installed mutator; it does not wrap or compose with it.
+     *
+     * @param maskDouble the proceed bitmask (bridged as a double), or
+     *                   {@link #MUTATOR_PRESET_DEFAULT} to restore the default
+     * @param sign       {@code true} to HTTP Message Sign the processed request
+     *                   (the default), {@code false} to proceed per the mask but
+     *                   forward the request unsigned; ignored for
+     *                   {@link #MUTATOR_PRESET_DEFAULT}
+     * @param promise    resolved with null on success, rejected on error
+     */
+    @ReactMethod
+    public void setServiceMutatorType(double maskDouble, boolean sign, Promise promise) {
+        try {
+            int mask = (int) maskDouble;
+            if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
+                ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
+                signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+                setServiceMutator(signer);
+            } else {
+                setServiceMutator(new PolicyMutator(mask, sign));
+            }
+            if (currentLogLevel <= LOG_DEBUG)
+                Log.d(TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
+            promise.resolve(null);
+        } catch (Exception e) {
+            promise.reject("setServiceMutatorType", e.getMessage(), e);
+        }
     }
 
     /**

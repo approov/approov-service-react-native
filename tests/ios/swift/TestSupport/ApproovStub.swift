@@ -11,6 +11,8 @@ public enum ApproovTokenFetchStatus {
     case badURL
     case rejected
     case unknownKey
+    case disabled
+    case internalError
 }
 
 public final class ApproovTokenFetchResult {
@@ -50,6 +52,10 @@ public enum Approov {
             return "REJECTED"
         case .unknownKey:
             return "UNKNOWN_KEY"
+        case .disabled:
+            return "DISABLED"
+        case .internalError:
+            return "INTERNAL_ERROR"
         }
     }
 }

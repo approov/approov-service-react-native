@@ -137,6 +137,12 @@ const ApproovService = new Proxy(NativeApproovService || {}, {
         if (prop === 'initialize') {
             return (config, comment = null) => target.initialize(config, comment)
         }
+        if (prop === 'setServiceMutatorType') {
+            // Keep the 1-arg ergonomic JS call; always pass the boolean sign flag
+            // (default true) to native. sign:false proceeds per the mask but
+            // forwards the request unsigned.
+            return (mask, options = {}) => target.setServiceMutatorType(mask, options.sign !== false)
+        }
         return target[prop]
     }
 })
@@ -149,6 +155,30 @@ ApproovService.Log = {
     WARN: 3,
     ERROR: 4,
     NONE: 5
+}
+
+// Maskable FAILURE statuses. Bit values MUST match PolicyMutator.BIT_* (Android) and the iOS
+// equivalents — do not change. SUCCESS/UNKNOWN_URL/UNPROTECTED_URL always proceed and are
+// intentionally NOT exposed as bits.
+ApproovService.ReturnDecision = {
+  NO_APPROOV_SERVICE:     1 << 0,
+  BAD_URL:                1 << 1,
+  MITM_DETECTED:          1 << 2,
+  NO_NETWORK:             1 << 3,
+  POOR_NETWORK:           1 << 4,
+  REJECTED:               1 << 5,
+  UNKNOWN_KEY:            1 << 6,
+  INTERNAL_ERROR:         1 << 7,
+  NO_NETWORK_PERMISSION:  1 << 8,
+  MISSING_LIB_DEPENDENCY: 1 << 9,
+  DISABLED:               1 << 10,
+}
+const _RD = ApproovService.ReturnDecision
+ApproovService.MutatorPreset = {
+  DEFAULT: -1,                                              // restore the built-in signing default
+  ALWAYS_PROCEED: Object.values(_RD).reduce((a, b) => a | b, 0),   // = 2047
+  PROCEED_IF_UNAVAILABLE: _RD.NO_APPROOV_SERVICE,           // UNKNOWN_URL/UNPROTECTED_URL already always proceed
+  PROCEED_DEV_CLEARTEXT: _RD.BAD_URL,                       // forward non-https (Metro dev) traffic
 }
 
 import { ApproovProvider, useApproov } from './approov-provider'

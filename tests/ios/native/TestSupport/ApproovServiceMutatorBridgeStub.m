@@ -62,6 +62,17 @@ static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
   }
 }
 
+// No-op stubs matching the Swift bridge helpers added for setServiceMutatorType.
+// The native ObjC suites do not exercise mutator selection; these selectors only
+// need to exist so ApproovService.m compiles and links against the stub bridge.
+- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign {
+  (void)mask;
+  (void)sign;
+}
+
+- (void)resetToDefault {
+}
+
 @end
 
 void ApproovMutatorBridgeReset(void) {

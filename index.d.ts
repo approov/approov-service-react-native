@@ -63,6 +63,47 @@ export declare class ApproovService {
     ERROR: number;
     NONE: number;
   }
+  /**
+   * Selects the active service mutator natively, replacing any previously
+   * installed mutator.
+   *
+   * Pass a proceed bitmask assembled from `ApproovService.ReturnDecision` bits
+   * (or an `ApproovService.MutatorPreset` value) to control which failure
+   * statuses proceed rather than block. Pass `ApproovService.MutatorPreset.DEFAULT`
+   * to restore the built-in message-signing default.
+   *
+   * The optional `options.sign` flag defaults to `true` (HTTP Message Sign the
+   * processed request). Pass `{ sign: false }` to proceed per the mask but send
+   * the request unsigned. `sign` is ignored for `MutatorPreset.DEFAULT`.
+   */
+  static setServiceMutatorType(mask: number, options?: { sign?: boolean }): Promise<void>;
+  /**
+   * Maskable FAILURE statuses. Bit values match the native PolicyMutator.BIT_*
+   * constants. SUCCESS/UNKNOWN_URL/UNPROTECTED_URL always proceed and are not
+   * exposed as bits.
+   */
+  static ReturnDecision: {
+    NO_APPROOV_SERVICE: number;
+    BAD_URL: number;
+    MITM_DETECTED: number;
+    NO_NETWORK: number;
+    POOR_NETWORK: number;
+    REJECTED: number;
+    UNKNOWN_KEY: number;
+    INTERNAL_ERROR: number;
+    NO_NETWORK_PERMISSION: number;
+    MISSING_LIB_DEPENDENCY: number;
+    DISABLED: number;
+  }
+  /**
+   * Named proceed-bitmask presets for `ApproovService.setServiceMutatorType`.
+   */
+  static MutatorPreset: {
+    DEFAULT: number;
+    ALWAYS_PROCEED: number;
+    PROCEED_IF_UNAVAILABLE: number;
+    PROCEED_DEV_CLEARTEXT: number;
+  }
   static setSuppressLoggingUnknownURL(): void;
   static setTokenHeader(header: string, prefix: string): void;
   static setTraceIDHeader(header: string): void;

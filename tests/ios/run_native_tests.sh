@@ -15,3 +15,8 @@ bash "$REPO_ROOT/tests/ios/run_mini_sdk_native_tests.sh"
 bash "$REPO_ROOT/tests/ios/run_legacy_native_tests.sh"
 
 bash "$REPO_ROOT/tests/ios/run_message_signing_tests.sh"
+
+# Swift PolicyMutator suite: exercises the per-status proceed/forward/block
+# bitmask policy, the sign/unsigned request handling, and the bridge helpers
+# (setPolicyMutator / resetToDefault) added for setServiceMutatorType parity.
+bash "$REPO_ROOT/tests/ios/run_policy_mutator_tests.sh"

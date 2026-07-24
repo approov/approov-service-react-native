@@ -265,6 +265,19 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void setServiceMutatorType(double maskDouble, boolean sign, Promise promise) {
         try {
+            // The mask is bridged from JavaScript as a double. Reject any value that is
+            // not a finite, integral, 32-bit quantity before narrowing to int: a
+            // fractional value (e.g. 1.5), NaN/Infinity, or an out-of-range magnitude
+            // would otherwise be silently truncated or coerced by the (int) cast and
+            // could install a policy other than the one the caller intended. This is
+            // security-relevant: the mask decides which failure statuses may proceed.
+            if (Double.isNaN(maskDouble) || Double.isInfinite(maskDouble)
+                    || maskDouble != Math.floor(maskDouble)
+                    || maskDouble < Integer.MIN_VALUE || maskDouble > Integer.MAX_VALUE) {
+                promise.reject("setServiceMutatorType",
+                        "invalid mutator mask: expected a finite 32-bit integer bitmask, got " + maskDouble);
+                return;
+            }
             int mask = (int) maskDouble;
             if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
                 ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();

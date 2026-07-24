@@ -63,6 +63,10 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
              rejecter:(RCTPromiseRejectBlock)reject;
 - (void)isApproovEnabled:(RCTPromiseResolveBlock)resolve
                 rejecter:(RCTPromiseRejectBlock)reject;
+- (void)setServiceMutatorType:(double)mask
+                         sign:(BOOL)sign
+                     resolver:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation RCTTestNetworkDelegate
@@ -651,6 +655,59 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   [NSURLProtocol unregisterClass:[CaptureProtocol class]];
 }
 
+// Regression for the setServiceMutatorType mask validation (Copilot review, PR #32).
+// The proceed bitmask is bridged from JavaScript as a double; a non-finite, fractional,
+// or out-of-32-bit-range value must be rejected before it is narrowed, so it can never be
+// silently coerced into an unintended (security-relevant) proceed policy. A well-formed
+// mask (including the DEFAULT sentinel -1) must still be accepted. This mirrors the Android
+// ApproovServicePublicApiTest coverage so both platforms enforce identical behaviour.
+static void TestSetServiceMutatorTypeValidatesMask(void) {
+  const double invalidMasks[] = {
+      1.5,           // fractional
+      NAN,           // not a number
+      INFINITY,      // +infinity
+      -INFINITY,     // -infinity
+      2147483648.0,  // 2^31, above the signed 32-bit range
+      -2147483649.0  // -(2^31) - 1, below the signed 32-bit range
+  };
+  for (size_t i = 0; i < sizeof(invalidMasks) / sizeof(invalidMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    __block BOOL didResolve = NO;
+    __block NSString *rejectionCode = nil;
+    [service setServiceMutatorType:invalidMasks[i]
+                              sign:YES
+                          resolver:^(__unused id value) { didResolve = YES; }
+                          rejecter:^(NSString *code, __unused NSString *message,
+                                     __unused NSError *error) { rejectionCode = code; }];
+    AssertTrue(!didResolve,
+               [NSString stringWithFormat:@"invalid mask %g should not resolve",
+                                          invalidMasks[i]]);
+    AssertEqualObjects(@"setServiceMutatorType", rejectionCode,
+               [NSString stringWithFormat:@"invalid mask %g should reject with setServiceMutatorType",
+                                          invalidMasks[i]]);
+  }
+
+  const double validMasks[] = {
+      -1.0,  // MutatorPreset.DEFAULT — restore the built-in signing default
+      0.0,   // block every maskable failure status
+      20.0   // BIT_NO_NETWORK (1 << 3) | BIT_POOR_NETWORK (1 << 4)
+  };
+  for (size_t i = 0; i < sizeof(validMasks) / sizeof(validMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    __block BOOL didResolve = NO;
+    __block NSString *rejectionCode = nil;
+    [service setServiceMutatorType:validMasks[i]
+                              sign:YES
+                          resolver:^(__unused id value) { didResolve = YES; }
+                          rejecter:^(NSString *code, __unused NSString *message,
+                                     __unused NSError *error) { rejectionCode = code; }];
+    AssertTrue(didResolve,
+               [NSString stringWithFormat:@"valid mask %g should resolve", validMasks[i]]);
+    AssertTrue(rejectionCode == nil,
+               [NSString stringWithFormat:@"valid mask %g should not reject", validMasks[i]]);
+  }
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -666,6 +723,7 @@ int main(void) {
       ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
       ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
+      ^{ TestSetServiceMutatorTypeValidatesMask(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

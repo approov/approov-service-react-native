@@ -256,6 +256,55 @@ public class ApproovServicePublicApiTest {
         }
     }
 
+    // Regression for the setServiceMutatorType mask validation (Copilot review, PR #32).
+    // The proceed bitmask is bridged from JavaScript as a double; a non-finite, fractional,
+    // or out-of-32-bit-range value must be rejected before it is narrowed to int, so it can
+    // never be silently coerced into an unintended (security-relevant) proceed policy.
+    @Test
+    public void setServiceMutatorTypeRejectsNonFiniteOrNonIntegralMasks() {
+        double[] invalidMasks = {
+            1.5,                              // fractional
+            Double.NaN,                       // not a number
+            Double.POSITIVE_INFINITY,         // +infinity
+            Double.NEGATIVE_INFINITY,         // -infinity
+            (double) Integer.MAX_VALUE + 1.0, // above the signed 32-bit range
+            (double) Integer.MIN_VALUE - 1.0, // below the signed 32-bit range
+        };
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            for (double mask : invalidMasks) {
+                Promise promise = mock(Promise.class);
+
+                newService().setServiceMutatorType(mask, true, promise);
+
+                org.mockito.Mockito.verify(promise)
+                    .reject(org.mockito.ArgumentMatchers.eq("setServiceMutatorType"), anyString());
+                org.mockito.Mockito.verify(promise, org.mockito.Mockito.never()).resolve(any());
+            }
+        }
+    }
+
+    // The guard must not reject a well-formed mask: the DEFAULT sentinel (-1), an all-block
+    // mask (0), and a composed in-range bitmask all pass validation and resolve.
+    @Test
+    public void setServiceMutatorTypeAcceptsValidIntegralMasks() {
+        double[] validMasks = {
+            -1.0, // MUTATOR_PRESET_DEFAULT — restore the built-in signing default
+            0.0,  // block every maskable failure status
+            (double) (PolicyMutator.BIT_NO_NETWORK | PolicyMutator.BIT_POOR_NETWORK),
+        };
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            for (double mask : validMasks) {
+                Promise promise = mock(Promise.class);
+
+                newService().setServiceMutatorType(mask, true, promise);
+
+                org.mockito.Mockito.verify(promise).resolve(any());
+                org.mockito.Mockito.verify(promise, org.mockito.Mockito.never())
+                    .reject(org.mockito.ArgumentMatchers.eq("setServiceMutatorType"), anyString());
+            }
+        }
+    }
+
     private boolean hasPinHash(CertificatePinner pinner, String expectedHashBase64) throws Exception {
         for (Object pin : pinner.getPins()) {
             Object hash = pin.getClass().getMethod("getHash").invoke(pin);

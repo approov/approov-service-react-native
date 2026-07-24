@@ -484,7 +484,23 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
                   resolver : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
   @try {
-    NSInteger maskValue = (NSInteger)mask;
+    // The mask is bridged from JavaScript as a double. Reject any value that is
+    // not a finite, integral, 32-bit quantity before narrowing: a fractional
+    // value (e.g. 1.5), NaN/Infinity, or an out-of-range magnitude would
+    // otherwise be silently truncated or coerced and could install a policy
+    // other than the one the caller intended. This is security-relevant: the
+    // mask decides which failure statuses may proceed. The in-range check is
+    // evaluated first so the round-trip cast that verifies integrality is only
+    // reached for values already known to be within int32_t range.
+    if (!(mask >= INT32_MIN && mask <= INT32_MAX) || mask != (double)(int32_t)mask) {
+      reject(@"setServiceMutatorType",
+             [NSString stringWithFormat:
+                          @"invalid mutator mask: expected a finite 32-bit integer bitmask, got %g",
+                          mask],
+             nil);
+      return;
+    }
+    int32_t maskValue = (int32_t)mask;
     if (maskValue == -1) {
       // MutatorPreset.DEFAULT: restore the built-in message-signing default.
       [[ApproovServiceMutatorBridge shared] resetToDefault];

@@ -96,7 +96,7 @@ NSString *const PropsExtension = @"plist";
   } else {
     // The properties file is OPTIONAL, matching the Android layer where a missing
     // approov.props is tolerated (loadApproovProps returns null). Leaving _props nil
-    // is safe: every consumer nil-guards its key, and -valueForKey: on a nil
+    // is safe: every consumer uses a non-nil key, and sending -objectForKey: to a nil
     // dictionary returns nil. This lets a native approov.config-only integration
     // (no per-request properties) run without shipping an empty approov.plist.
     ApproovLogI(@"optional properties file %@.%@ not found; using defaults",

@@ -139,9 +139,9 @@ const ApproovService = new Proxy(NativeApproovService || {}, {
         }
         if (prop === 'setServiceMutatorType') {
             // Keep the 1-arg ergonomic JS call; always pass the boolean sign flag
-            // (default true) to native. sign:false proceeds per the mask but
-            // forwards the request unsigned.
-            return (mask, options = {}) => target.setServiceMutatorType(mask, options.sign !== false)
+            // (default true) to native. A null/undefined options argument is treated
+            // as no options. sign:false proceeds per the mask but forwards unsigned.
+            return (mask, options = {}) => target.setServiceMutatorType(mask, (options || {}).sign !== false)
         }
         return target[prop]
     }

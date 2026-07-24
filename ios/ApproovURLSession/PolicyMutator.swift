@@ -210,7 +210,7 @@ public final class PolicyMutator: ApproovServiceMutator, CustomStringConvertible
         case .forward:
             return false
         case .block:
-            throw ApproovServiceError.permanentError(message: "PolicyMutator blocked: \(status)")
+            throw ApproovServiceError.permanentError(message: "PolicyMutator blocked: " + Approov.string(from: status))
         }
     }
 

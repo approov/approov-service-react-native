@@ -304,7 +304,7 @@ ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean })
 | `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL`, forwarding non-`https` traffic; development only. |
 
 > [!WARNING]
-> Including `MITM_DETECTED` or `REJECTED` in the mask disables the protection those statuses provide: a man-in-the-middle interception, or a failed/rejected attestation, would no longer block the request. Prefer the named presets, and only put these bits in a production mask deliberately.
+> Including `MITM_DETECTED` or `REJECTED` in the mask removes Approov's protection for those cases: the request proceeds **without proof of attestation** (no valid Approov token). With `MITM_DETECTED` masked, a request the SDK reports as man-in-the-middle intercepted is still sent; with `REJECTED` masked, a request from an app that failed attestation (for example tampered, repackaged, or running in a compromised environment) is still sent. Prefer the named presets, and only set these bits in a production mask deliberately.
 
 On iOS, `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status and are inert (harmless) if included.
 

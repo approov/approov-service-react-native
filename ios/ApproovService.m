@@ -427,6 +427,12 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       substitutionQueryParams = [[NSMutableSet alloc] init];
       exclusionURLRegexs = [[NSMutableSet alloc] init];
       suppressLoggingUnknownURL = NO;
+      // fix(rn/ios): a genuinely different config must also reset the active
+      // service mutator back to the built-in message-signing default, matching
+      // the Android mutator-reset fix. Without this a custom mutator installed
+      // via the bridge would silently survive a re-initialization with a
+      // different config.
+      [[ApproovServiceMutatorBridge shared] resetToDefault];
     }
     initialConfigString = config;
     isInitialized = YES;

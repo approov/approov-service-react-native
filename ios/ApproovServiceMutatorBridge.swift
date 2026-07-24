@@ -14,6 +14,19 @@ import Approov
         super.init()
     }
 
+    /**
+     * Restores the built-in default service mutator: a freshly configured
+     * `ApproovDefaultMessageSigning` signer identical to the one installed at
+     * construction time. Exposed to Objective-C because the Swift-typed
+     * `serviceMutator` property cannot be assigned directly from Objective-C.
+     */
+    @objc public func resetToDefault() {
+        let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+        let signer = ApproovDefaultMessageSigning()
+        _ = signer.setDefaultFactory(factory)
+        self.serviceMutator = signer
+    }
+
     private func headerValue(forHTTPHeaderField header: String,
                              in request: URLRequest) -> String? {
         if let value = request.value(forHTTPHeaderField: header) {

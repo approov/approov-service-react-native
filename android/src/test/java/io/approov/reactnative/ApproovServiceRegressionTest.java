@@ -88,6 +88,13 @@ public class ApproovServiceRegressionTest {
             java.lang.reflect.Field configField = ApproovService.class.getDeclaredField("initialConfig");
             configField.setAccessible(true);
             configField.set(null, null);
+
+            // Restore the built-in message-signing mutator so a custom mutator installed by one
+            // test (e.g. via ApproovService.setServiceMutator) never leaks into a later test,
+            // even if that test fails an assertion before its own re-initialize step resets it.
+            ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
+            signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+            ApproovService.setServiceMutator(signer);
         } catch (Exception e) {
             throw new RuntimeException("Failed to reset ApproovService static state", e);
         }

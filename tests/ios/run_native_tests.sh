@@ -20,3 +20,9 @@ bash "$REPO_ROOT/tests/ios/run_message_signing_tests.sh"
 # bitmask policy, the sign/unsigned request handling, and the bridge helpers
 # (setPolicyMutator / resetToDefault) added for setServiceMutatorType parity.
 bash "$REPO_ROOT/tests/ios/run_policy_mutator_tests.sh"
+
+# Real-SDK typecheck: every suite above compiles Swift against ApproovStub.swift,
+# so none of them can catch an ApproovTokenFetchStatus case name that does not
+# exist in the shipping SDK. This gate compiles the same sources against the real
+# Approov module instead. It runs last because it may need to download the SDK.
+bash "$REPO_ROOT/tests/ios/run_real_sdk_typecheck.sh"

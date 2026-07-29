@@ -334,9 +334,12 @@ public class ApproovServiceRegressionTest {
         service.initialize("config-one", null, firstInit);
         verify(firstInit, timeout(2000)).resolve(null);
 
-        // Install a custom, non-signing mutator (as an app would via setServiceMutator,
-        // or the JS setServiceMutatorType wrapper).
-        ApproovServiceMutator custom = ApproovServiceMutator.DEFAULT;
+        // Install a PolicyMutator — the mutator the CHANGELOG's scenario actually
+        // installs, via the JS setServiceMutatorType wrapper. Using PolicyMutator here
+        // rather than ApproovServiceMutator.DEFAULT is deliberate: PolicyMutator is the
+        // type that must not survive the boundary, and it is the type an app can install
+        // from JavaScript.
+        ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
         ApproovService.setServiceMutator(custom);
         assertSame(custom, ApproovService.getServiceMutator());
 
@@ -349,8 +352,35 @@ public class ApproovServiceRegressionTest {
 
         ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
         assertNotSame("custom mutator must not persist across a config change", custom, afterReset);
+        // PolicyMutator extends ApproovDefaultMessageSigning, so an "instanceof
+        // ApproovDefaultMessageSigning" assertion alone would pass even if the custom
+        // mutator survived. Assert the negative explicitly.
+        assertFalse("re-init must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
         assertTrue("re-init must restore the default message-signing mutator",
             afterReset instanceof ApproovDefaultMessageSigning);
+    }
+
+    @Test
+    public void initializeWithSameConfigPreservesCustomServiceMutator() {
+        ApproovService service = newService();
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize("config-one", null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+
+        ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
+        ApproovService.setServiceMutator(custom);
+
+        // Counter-test to the reset above: a same-config re-initialization is not an
+        // initialization boundary, so it must leave the custom mutator alone. Without
+        // this, a reset that fired unconditionally would still pass the reset test.
+        Promise secondInit = mock(Promise.class);
+        service.initialize("config-one", null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        assertSame("a same-config re-initialization must not reset the mutator",
+            custom, ApproovService.getServiceMutator());
     }
 
     @Test

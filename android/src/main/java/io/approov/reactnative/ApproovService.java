@@ -200,8 +200,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
 
-    // The mutator instance used to control ApproovService behavior
-    private static ApproovServiceMutator serviceMutator;
+    // The mutator instance used to control ApproovService behavior. Marked volatile because
+    // it is written from setServiceMutator/setServiceMutatorType and from the re-initialization
+    // reset (the latter under synchronized (this)), but read by the interceptor on OkHttp
+    // network threads through the static, unsynchronized getServiceMutator(). The instance
+    // monitor held by the reset does not order those reads, so without volatile a request
+    // racing a config-change re-initialization could keep using a stale custom mutator.
+    private static volatile ApproovServiceMutator serviceMutator;
 
     static {
         ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
@@ -279,6 +284,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 return;
             }
             int mask = (int) maskDouble;
+            // Reject undefined bits. Only PolicyMutator.ALL_BITS name a token-fetch status;
+            // a mask carrying any other bit (e.g. 1 << 11) grants PROCEED to nothing and
+            // would install a policy that silently BLOCKs every failure status. Fail loudly
+            // instead, so a caller's typo cannot masquerade as a deliberate block-all policy.
+            if (mask != MUTATOR_PRESET_DEFAULT && (mask & ~PolicyMutator.ALL_BITS) != 0) {
+                promise.reject("setServiceMutatorType",
+                        "invalid mutator mask: undefined bits set (allowed bits 0-10, mask 0x"
+                                + Integer.toHexString(PolicyMutator.ALL_BITS) + "), got 0x"
+                                + Integer.toHexString(mask));
+                return;
+            }
             if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
                 ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
                 signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());

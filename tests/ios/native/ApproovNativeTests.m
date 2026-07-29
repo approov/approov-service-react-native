@@ -668,7 +668,15 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
       INFINITY,      // +infinity
       -INFINITY,     // -infinity
       2147483648.0,  // 2^31, above the signed 32-bit range
-      -2147483649.0  // -(2^31) - 1, below the signed 32-bit range
+      -2147483649.0, // -(2^31) - 1, below the signed 32-bit range
+      // Undefined bits: only bits 0-10 name a token-fetch status, so a mask carrying any
+      // other bit grants PROCEED to nothing and would install a silent block-everything
+      // policy. Mirrors setServiceMutatorTypeRejectsMasksWithUndefinedBits on Android.
+      2048.0,        // 1 << 11, first bit above BIT_DISABLED
+      1073741824.0,  // 1 << 30, far above the defined range
+      2056.0,        // BIT_NO_NETWORK (1 << 3) plus an undefined bit (1 << 11)
+      2147483647.0,  // INT32_MAX — in range, but mostly undefined bits
+      -2.0           // negative, but not the DEFAULT sentinel
   };
   for (size_t i = 0; i < sizeof(invalidMasks) / sizeof(invalidMasks[0]); i++) {
     ApproovService *service = FreshService();
@@ -688,9 +696,10 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
   }
 
   const double validMasks[] = {
-      -1.0,  // MutatorPreset.DEFAULT — restore the built-in signing default
-      0.0,   // block every maskable failure status
-      20.0   // BIT_NO_NETWORK (1 << 3) | BIT_POOR_NETWORK (1 << 4)
+      -1.0,   // MutatorPreset.DEFAULT — restore the built-in signing default
+      0.0,    // block every maskable failure status
+      20.0,   // BIT_NO_NETWORK (1 << 3) | BIT_POOR_NETWORK (1 << 4)
+      2047.0  // every defined bit (0-10) — the permissive extreme
   };
   for (size_t i = 0; i < sizeof(validMasks) / sizeof(validMasks[0]); i++) {
     ApproovService *service = FreshService();
@@ -706,6 +715,64 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
     AssertTrue(rejectionCode == nil,
                [NSString stringWithFormat:@"valid mask %g should not reject", validMasks[i]]);
   }
+}
+
+// Regression for the mutator reset on re-initialization (charlesoj6205 review, PR #32).
+// ApproovService.m calls -[ApproovServiceMutatorBridge resetToDefault] when initialize()
+// is given a genuinely different config, so a PolicyMutator installed via
+// setServiceMutatorType() cannot survive an initialization boundary. Android has a unit
+// test for this; iOS did not, because the bridge stub used to swallow the call. The stub
+// now records it, so the integration point is asserted here rather than assumed. The
+// same-config counter-case is included so an unconditional reset would fail this test.
+static void TestInitializeResetsServiceMutatorOnConfigChange(void) {
+  ApproovService *service = FreshService();
+
+  __block BOOL firstResolved = NO;
+  [service initialize:@"config-one"
+              comment:nil
+             resolver:^(__unused id value) { firstResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(firstResolved, @"First initialization should resolve");
+
+  // Install a PolicyMutator, as an app would from JavaScript.
+  __block BOOL policyResolved = NO;
+  [service setServiceMutatorType:8.0  // BIT_NO_NETWORK (1 << 3)
+                            sign:NO
+                        resolver:^(__unused id value) { policyResolved = YES; }
+                        rejecter:^(__unused NSString *code, __unused NSString *message,
+                                   __unused NSError *error) {}];
+  AssertTrue(policyResolved, @"setServiceMutatorType should resolve for a valid mask");
+  AssertTrue(ApproovMutatorBridgeSetPolicyMutatorCount() == 1,
+             @"setServiceMutatorType should install a PolicyMutator via the bridge");
+  AssertTrue(ApproovMutatorBridgeLastPolicyMutatorMask() == 8,
+             @"the bridge should receive the mask supplied by the caller");
+  AssertTrue(!ApproovMutatorBridgeLastPolicyMutatorSign(),
+             @"the bridge should receive the sign flag supplied by the caller");
+
+  NSUInteger resetsBeforeSameConfig = ApproovMutatorBridgeResetToDefaultCount();
+
+  // A same-config re-initialization is not an initialization boundary: it must NOT reset.
+  __block BOOL sameConfigResolved = NO;
+  [service initialize:@"config-one"
+              comment:nil
+             resolver:^(__unused id value) { sameConfigResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(sameConfigResolved, @"Same-config re-initialization should resolve");
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsBeforeSameConfig,
+             @"Same-config re-initialization must not reset the service mutator");
+
+  // A genuinely different config must reset the mutator.
+  __block BOOL differentConfigResolved = NO;
+  [service initialize:@"config-two"
+              comment:nil
+             resolver:^(__unused id value) { differentConfigResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(differentConfigResolved, @"Different-config re-initialization should resolve");
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsBeforeSameConfig + 1,
+             @"Different-config re-initialization must reset the service mutator to default");
 }
 
 int main(void) {
@@ -724,6 +791,7 @@ int main(void) {
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
       ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
       ^{ TestSetServiceMutatorTypeValidatesMask(); },
+      ^{ TestInitializeResetsServiceMutatorOnConfigChange(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

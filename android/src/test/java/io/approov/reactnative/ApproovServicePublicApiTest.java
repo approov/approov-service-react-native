@@ -283,14 +283,42 @@ public class ApproovServicePublicApiTest {
         }
     }
 
+    // Regression for the undefined-bit guard (charlesoj6205 review, PR #32). Only bits 0-10
+    // name a token-fetch status. A mask carrying any bit above BIT_DISABLED grants PROCEED to
+    // nothing, so it would install a silent block-everything policy that looks deliberate.
+    // It must be rejected rather than applied.
+    @Test
+    public void setServiceMutatorTypeRejectsMasksWithUndefinedBits() {
+        double[] invalidMasks = {
+            (double) (1 << 11),                                   // first bit above BIT_DISABLED
+            (double) (1 << 30),                                   // far above the defined range
+            (double) (PolicyMutator.BIT_NO_NETWORK | (1 << 11)),  // valid bit plus an undefined one
+            (double) Integer.MAX_VALUE,                           // in 32-bit range, mostly undefined bits
+            -2.0,                                                 // negative, but not the DEFAULT sentinel
+        };
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            for (double mask : invalidMasks) {
+                Promise promise = mock(Promise.class);
+
+                newService().setServiceMutatorType(mask, true, promise);
+
+                org.mockito.Mockito.verify(promise)
+                    .reject(org.mockito.ArgumentMatchers.eq("setServiceMutatorType"), anyString());
+                org.mockito.Mockito.verify(promise, org.mockito.Mockito.never()).resolve(any());
+            }
+        }
+    }
+
     // The guard must not reject a well-formed mask: the DEFAULT sentinel (-1), an all-block
-    // mask (0), and a composed in-range bitmask all pass validation and resolve.
+    // mask (0), a composed in-range bitmask, and the full set of defined bits all pass
+    // validation and resolve.
     @Test
     public void setServiceMutatorTypeAcceptsValidIntegralMasks() {
         double[] validMasks = {
             -1.0, // MUTATOR_PRESET_DEFAULT — restore the built-in signing default
             0.0,  // block every maskable failure status
             (double) (PolicyMutator.BIT_NO_NETWORK | PolicyMutator.BIT_POOR_NETWORK),
+            (double) PolicyMutator.ALL_BITS, // every defined bit — the permissive extreme
         };
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             for (double mask : validMasks) {

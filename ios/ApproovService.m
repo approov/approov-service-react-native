@@ -501,6 +501,23 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
       return;
     }
     int32_t maskValue = (int32_t)mask;
+    // Reject undefined bits. Only bits 0-10 name a token-fetch status (mirrors
+    // PolicyMutator.ALL_BITS in ios/ApproovURLSession/PolicyMutator.swift and
+    // PolicyMutator.ALL_BITS on Android); a mask carrying any other bit (e.g.
+    // 1 << 11) grants PROCEED to nothing and would install a policy that silently
+    // BLOCKs every failure status. Fail loudly instead, so a caller's typo cannot
+    // masquerade as a deliberate block-all policy. Duplicated here rather than read
+    // from the Swift type so the ObjC native test suites, which link a stub bridge,
+    // still compile.
+    const int32_t kApproovPolicyMutatorAllBits = (1 << 11) - 1;  // bits 0-10
+    if (maskValue != -1 && (maskValue & ~kApproovPolicyMutatorAllBits) != 0) {
+      reject(@"setServiceMutatorType",
+             [NSString stringWithFormat:
+                          @"invalid mutator mask: undefined bits set (allowed bits 0-10, mask 0x%x), got 0x%x",
+                          kApproovPolicyMutatorAllBits, maskValue],
+             nil);
+      return;
+    }
     if (maskValue == -1) {
       // MutatorPreset.DEFAULT: restore the built-in message-signing default.
       [[ApproovServiceMutatorBridge shared] resetToDefault];

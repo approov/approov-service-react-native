@@ -5,6 +5,13 @@
 static void (^gProcessRequestHandler)(NSMutableURLRequest *, NSString *, NSString *);
 static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
 
+// Call records for the mutator-selection helpers, so tests can assert that
+// ApproovService.m actually reaches them.
+static NSUInteger gResetToDefaultCount = 0;
+static NSUInteger gSetPolicyMutatorCount = 0;
+static int32_t gLastPolicyMutatorMask = 0;
+static BOOL gLastPolicyMutatorSign = NO;
+
 @implementation ApproovServiceMutatorBridge
 
 + (instancetype)shared {
@@ -62,15 +69,19 @@ static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
   }
 }
 
-// No-op stubs matching the Swift bridge helpers added for setServiceMutatorType.
-// The native ObjC suites do not exercise mutator selection; these selectors only
-// need to exist so ApproovService.m compiles and links against the stub bridge.
+// Recording stubs matching the Swift bridge helpers added for setServiceMutatorType.
+// The real mutator behaviour is covered by the Swift suite; what the ObjC suites need
+// to observe is whether ApproovService.m *calls* these helpers — in particular that a
+// config-change re-initialization triggers the mutator reset. Swallowing the calls
+// silently would leave that integration point untested.
 - (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign {
-  (void)mask;
-  (void)sign;
+  gSetPolicyMutatorCount += 1;
+  gLastPolicyMutatorMask = mask;
+  gLastPolicyMutatorSign = sign;
 }
 
 - (void)resetToDefault {
+  gResetToDefaultCount += 1;
 }
 
 @end
@@ -78,6 +89,26 @@ static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
 void ApproovMutatorBridgeReset(void) {
   gProcessRequestHandler = nil;
   gFetchTokenHandler = nil;
+  gResetToDefaultCount = 0;
+  gSetPolicyMutatorCount = 0;
+  gLastPolicyMutatorMask = 0;
+  gLastPolicyMutatorSign = NO;
+}
+
+NSUInteger ApproovMutatorBridgeResetToDefaultCount(void) {
+  return gResetToDefaultCount;
+}
+
+NSUInteger ApproovMutatorBridgeSetPolicyMutatorCount(void) {
+  return gSetPolicyMutatorCount;
+}
+
+int32_t ApproovMutatorBridgeLastPolicyMutatorMask(void) {
+  return gLastPolicyMutatorMask;
+}
+
+BOOL ApproovMutatorBridgeLastPolicyMutatorSign(void) {
+  return gLastPolicyMutatorSign;
 }
 
 void ApproovMutatorBridgeSetProcessRequestHandler(

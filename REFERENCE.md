@@ -276,6 +276,8 @@ ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean })
 
 `ApproovService.MutatorPreset.DEFAULT` (mask `-1`) restores the built-in default mutator, which performs message signing.
 
+The mask is validated before it is applied. It must be a finite, integral 32-bit value, and it must not set any bit outside the defined `ReturnDecision` flags (bits 0-10, i.e. `0x7ff`) — apart from the `MutatorPreset.DEFAULT` sentinel `-1`. An undefined bit names no Approov status, so it could not grant proceed to anything; a mask carrying one would install a policy that silently blocks every failure status. Such a mask is rejected (the returned promise rejects with code `setServiceMutatorType`) rather than applied, so a typo cannot masquerade as a deliberate block-everything policy.
+
 `setServiceMutatorType` uses replace semantics: the new policy wholly replaces any previously installed mutator (last wins), so use this JavaScript API or a native custom mutator, not both. A re-initialization with a *different* config resets the mutator back to the built-in default (re-apply `setServiceMutatorType` afterwards if needed); a same-config re-initialization preserves the installed mutator.
 
 `ApproovService.ReturnDecision` — maskable failure-status bit flags:

@@ -81,6 +81,19 @@ public class PolicyMutator extends ApproovDefaultMessageSigning {
     public static final int BIT_DISABLED               = 1 << 10;
 
     /**
+     * Every defined mask bit ORed together — the set of bits a caller may legally
+     * supply. A mask containing any bit outside this set names no token-fetch
+     * status, so it cannot grant PROCEED to anything; it would install a policy
+     * that silently BLOCKs every failure status. Callers taking a mask from
+     * outside this class (notably the JavaScript bridge) must reject such masks
+     * rather than install them.
+     */
+    public static final int ALL_BITS =
+            BIT_NO_APPROOV_SERVICE | BIT_BAD_URL | BIT_MITM_DETECTED | BIT_NO_NETWORK
+            | BIT_POOR_NETWORK | BIT_REJECTED | BIT_UNKNOWN_KEY | BIT_INTERNAL_ERROR
+            | BIT_NO_NETWORK_PERMISSION | BIT_MISSING_LIB_DEPENDENCY | BIT_DISABLED;
+
+    /**
      * The outcome of a policy decision for a single token-fetch status.
      */
     enum Decision {

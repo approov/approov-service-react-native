@@ -25,4 +25,10 @@ FOUNDATION_EXPORT void ApproovMutatorBridgeSetFetchTokenHandler(
     BOOL (^_Nullable handler)(id result, NSString *url,
                               NSError *_Nullable *_Nullable errorPointer));
 
+// Call records for the mutator-selection helpers, reset by ApproovMutatorBridgeReset.
+FOUNDATION_EXPORT NSUInteger ApproovMutatorBridgeResetToDefaultCount(void);
+FOUNDATION_EXPORT NSUInteger ApproovMutatorBridgeSetPolicyMutatorCount(void);
+FOUNDATION_EXPORT int32_t ApproovMutatorBridgeLastPolicyMutatorMask(void);
+FOUNDATION_EXPORT BOOL ApproovMutatorBridgeLastPolicyMutatorSign(void);
+
 NS_ASSUME_NONNULL_END

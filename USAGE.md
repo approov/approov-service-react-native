@@ -309,6 +309,8 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 **Reset on re-initialization.** Re-initializing with a *different* config resets the mutator back to the built-in default, so re-apply `setServiceMutatorType` after such a re-init if you still need a custom policy. A same-config re-init preserves the installed mutator.
 
+**Invalid masks are rejected, not applied.** Build the mask from `ReturnDecision` flags or a `MutatorPreset`. A mask that is not a finite 32-bit integer, or that sets a bit outside the defined flags (bits 0-10), rejects the promise instead of installing anything. This matters because an undefined bit names no Approov status: it grants proceed to nothing, so applying it would silently produce a block-everything policy that looks intentional.
+
 > **iOS note:** `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status on iOS, so those two bits are inert there (harmless if included).
 
 **Development-only: let Metro's cleartext bundle through.** Metro serves the dev bundle over cleartext `http://`, which the SDK reports as `BAD_URL`. In development builds you can forward it with the dedicated preset (issue #30):

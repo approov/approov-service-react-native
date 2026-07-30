@@ -788,5 +788,5 @@ If you must log from the client, ensure you have a fallback strategy for when th
 ## Tips
 
 - Keep mutator logic fast and side-effect safe. These native hooks run on the request path and blocking them will hang the network traffic.
-- Use `ApproovServiceMutator.DEFAULT` (Android) or `ApproovServiceMutatorDefault.shared` (iOS) to preserve the existing behavior and layer your changes on top.
+- To preserve the existing behavior and layer your changes on top, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Do **not** base custom mutators on `ApproovServiceMutator.DEFAULT` (Android) — it is a no-op pass-through that performs no message signing.
 - If you override multiple hooks, keep them focused (one concern per hook) for easier testing and maintenance.

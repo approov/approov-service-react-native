@@ -301,6 +301,10 @@ public class ApproovInterceptor implements Interceptor {
             request = mutator.handleInterceptorProcessedRequest(approovService, request, mutations);
         } catch (ApproovException e) {
             throw new IOException(e);
+        } catch (IllegalStateException e) {
+            // strict signing failures (unsupported algorithm, required body digest) must
+            // fail closed as a clean network error rather than an unchecked crash
+            throw new IOException(e);
         }
 
         // proceed with the rest of the chain

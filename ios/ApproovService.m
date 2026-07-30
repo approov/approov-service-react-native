@@ -419,7 +419,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     suppressLoggingUnknownURL = NO;
     if (![[ApproovServiceMutatorBridge shared] isDefaultMutator])
       ApproovLogW(@"initialization is discarding a custom service mutator - re-apply "
-                   "setServiceMutatorType after initialize if a custom policy is still required");
+                   "setServiceMutatorType (or reinstall a native mutator via "
+                   "ApproovServiceMutatorBridge) after initialize if a custom policy is "
+                   "still required");
     [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;

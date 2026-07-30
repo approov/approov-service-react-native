@@ -34,6 +34,8 @@ The optional `comment` parameter is an advanced native SDK feature and most appl
 
 Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
 
+> **The comment participates in the native SDK's already-initialized check.** Once the native SDK has been initialized, a later `initialize()` with the *same* config string is only accepted if the comment is identical to the one used on the first successful call, or starts with `reinit`. Any other comment — including passing `""` where `null` was used before, or vice versa — is reported by the native SDK as "already been initialized with a different configuration" and rejects the promise; the service layer leaves its own state untouched, so the previous configuration keeps working and a retry with the original comment succeeds. This matters because a React Native hot restart or an `ApproovProvider` remount re-runs `initialize()` against a native SDK that is still initialized from the previous JS run. `ApproovProvider` and `ApproovService.initialize()` both default the comment to `null` and forward it unchanged, so the default path is stable across restarts — but do not vary the comment between calls (for example by deriving it at runtime), or every re-initialization after the first will reject.
+
 ## isInitialized
 Returns whether the React Native Approov service layer has been initialized.
 

@@ -501,6 +501,65 @@ public class ApproovInterceptorTest {
     }
 
     @Test
+    public void policyMutatorSkipsMaskedNoApproovServiceHeaderSubstitution() throws Exception {
+        ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, false));
+        Request request = new Request.Builder()
+            .url("https://api.example.com/data")
+            .header("Api-Key", "header-secret")
+            .build();
+        when(chain.request()).thenReturn(request);
+        when(service.getUseApproovStatusIfNoToken()).thenReturn(true);
+        when(service.getSubstitutionHeaders()).thenReturn(new HashMap<String, String>() {{
+            put("Api-Key", "");
+        }});
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            Approov.TokenFetchResult fetchTokenResult = result(
+                Approov.TokenFetchStatus.NO_APPROOV_SERVICE, "", "", "");
+            Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.NO_APPROOV_SERVICE);
+            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
+                .thenReturn(fetchTokenResult);
+            approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
+                .thenReturn(substitutionResult);
+
+            Response response = interceptor.intercept(chain);
+
+            assertEquals("header-secret", response.request().header("Api-Key"));
+            assertEquals("Bearer NO_APPROOV_SERVICE", response.request().header("Approov-Token"));
+            verify(chain).proceed(any());
+        }
+    }
+
+    @Test
+    public void strictSigningFailureSurfacesAsIOExceptionNotUncheckedCrash() throws Exception {
+        // strict fail-closed signing errors (unsupported algorithm, required body
+        // digest) are thrown as IllegalStateException by the signer; the interceptor
+        // must wrap them as IOException so OkHttp reports a clean network error
+        // instead of crashing the dispatcher thread
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public Request handleInterceptorProcessedRequest(ApproovService service, Request request,
+                    ApproovRequestMutations changes) {
+                throw new IllegalStateException("Failed to create required body digest");
+            }
+        });
+        Request request = request("https://api.example.com/data");
+        when(chain.request()).thenReturn(request);
+        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
+                .thenReturn(tokenResult);
+
+            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
+
+            assertTrue(error.getCause() instanceof IllegalStateException);
+            assertTrue(error.getCause().getMessage().contains("required body digest"));
+            verify(chain, never()).proceed(any());
+        }
+    }
+
+    @Test
     public void queryParameterRejectionStopsTheRequest() throws Exception {
         Request request = request("https://api.example.com/data?secret=query-secret");
         when(chain.request()).thenReturn(request);

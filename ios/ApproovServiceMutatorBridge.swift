@@ -28,6 +28,15 @@ import Approov
     }
 
     /**
+     * Indicates whether the currently installed service mutator is the built-in
+     * default signer. Used by the initialization path to warn when a custom
+     * mutator (policy or native) is about to be discarded by a reset.
+     */
+    @objc public var isDefaultMutator: Bool {
+        return type(of: serviceMutator) == ApproovDefaultMessageSigning.self
+    }
+
+    /**
      * Restores the built-in default service mutator: a freshly configured
      * `ApproovDefaultMessageSigning` signer identical to the one installed at
      * construction time. Exposed to Objective-C because the Swift-typed
@@ -128,6 +137,42 @@ import Approov
         
         do {
             return try serviceMutator.handleInterceptorFetchTokenResult(fetchResult, url: url)
+        } catch {
+            if errorPointer != nil {
+                errorPointer?.pointee = error as NSError
+            }
+            return false
+        }
+    }
+
+    @objc public func handleInterceptorHeaderSubstitutionResult(_ result: Any,
+                                                                header: String,
+                                                                errorPointer: NSErrorPointer) -> Bool {
+        guard let fetchResult = result as? ApproovTokenFetchResult else {
+            NSLog("[ApproovServiceMutatorBridge] Invalid result type passed to handleInterceptorHeaderSubstitutionResult")
+            return false
+        }
+
+        do {
+            return try serviceMutator.handleInterceptorHeaderSubstitutionResult(fetchResult, header: header)
+        } catch {
+            if errorPointer != nil {
+                errorPointer?.pointee = error as NSError
+            }
+            return false
+        }
+    }
+
+    @objc public func handleInterceptorQueryParamSubstitutionResult(_ result: Any,
+                                                                    queryKey: String,
+                                                                    errorPointer: NSErrorPointer) -> Bool {
+        guard let fetchResult = result as? ApproovTokenFetchResult else {
+            NSLog("[ApproovServiceMutatorBridge] Invalid result type passed to handleInterceptorQueryParamSubstitutionResult")
+            return false
+        }
+
+        do {
+            return try serviceMutator.handleInterceptorQueryParamSubstitutionResult(fetchResult, queryKey: queryKey)
         } catch {
             if errorPointer != nil {
                 errorPointer?.pointee = error as NSError

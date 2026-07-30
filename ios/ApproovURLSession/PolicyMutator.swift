@@ -227,6 +227,41 @@ public final class PolicyMutator: ApproovServiceMutator, CustomStringConvertible
         }
     }
 
+    private func handleInterceptorSubstitutionResult(_ approovResults: ApproovTokenFetchResult,
+                                                     context: String) throws -> Bool {
+        let status = approovResults.status
+        switch PolicyMutator.decideFor(proceedMask, status) {
+        case .proceed:
+            return status == .success
+        case .forward:
+            return false
+        case .block:
+            throw ApproovServiceError.permanentError(message: "PolicyMutator blocked \(context): " + Approov.string(from: status))
+        }
+    }
+
+    /**
+     * Applies the bitmask policy to interceptor header-substitution results. A
+     * masked failure skips the substitution and lets the request continue without
+     * the secure value; an unmasked failure blocks the request.
+     */
+    public func handleInterceptorHeaderSubstitutionResult(_ approovResults: ApproovTokenFetchResult,
+                                                          header: String) throws -> Bool {
+        return try handleInterceptorSubstitutionResult(approovResults,
+                                                       context: "header substitution for \(header)")
+    }
+
+    /**
+     * Applies the bitmask policy to interceptor query-parameter substitution
+     * results. A masked failure skips the substitution and lets the request
+     * continue without the secure value; an unmasked failure blocks the request.
+     */
+    public func handleInterceptorQueryParamSubstitutionResult(_ approovResults: ApproovTokenFetchResult,
+                                                              queryKey: String) throws -> Bool {
+        return try handleInterceptorSubstitutionResult(approovResults,
+                                                       context: "query parameter substitution for \(queryKey)")
+    }
+
     /**
      * Applies the signing policy to the interceptor-processed request. When this
      * mutator was constructed to sign (the default), the request is signed by the

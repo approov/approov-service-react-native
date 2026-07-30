@@ -277,8 +277,10 @@ await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_
 | :--- | :--- |
 | `DEFAULT` | Restore the built-in default mutator (the standard behaviour described under *Default Behavior* above, including HTTP Message Signing). |
 | `ALWAYS_PROCEED` | Proceed on **every** failure status — includes `MITM_DETECTED` and `REJECTED` (read the warning below). |
-| `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service itself is unavailable (`NO_APPROOV_SERVICE`), e.g. offline. |
-| `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL`, forwarding non-`https` traffic. Development only. |
+| `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service itself is unavailable (`NO_APPROOV_SERVICE`). Note this is not the offline case: a device without connectivity yields `NO_NETWORK`, which this preset blocks — add `ReturnDecision.NO_NETWORK` to the mask if you also want to tolerate offline devices. |
+| `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL` (non-`https` traffic, e.g. Metro dev servers); the request still runs through the Approov pipeline. Development only. |
+
+**What "proceed" sends on a failure status.** On any tolerated failure status nothing Approov-derived is available: there is no Approov token (it is only added on `SUCCESS`), and no substituted secrets or API keys (each substitution requires its own fetch from the Approov service, which just failed). Proceeding therefore never leaks credentials — the request goes out without them. The only difference from the default mutator's behaviour on `NO_APPROOV_SERVICE` (which forwards the raw request untouched) is that a proceeding policy mutator still runs the request pipeline, so HTTP Message Signing with the local install key is still applied (unless `{ sign: false }`).
 
 **Full control: build a raw bitmask.**
 
@@ -307,7 +309,18 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 **Replace semantics (last wins).** `setServiceMutatorType` replaces any previously installed mutator, including a native one. Use the JavaScript API *or* a native custom mutator, not both.
 
-**Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
+**Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. A warning is logged whenever a custom mutator is discarded this way. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
+
+Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Instead, apply it in an effect keyed on `approovReady`, which re-runs after every successful initialization (including React StrictMode double-mounts and Fast Refresh):
+
+```javascript
+const { approovReady } = useApproov();
+useEffect(() => {
+    if (approovReady) {
+        ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_IF_UNAVAILABLE);
+    }
+}, [approovReady]);
+```
 
 **Invalid masks are rejected, not applied.** Build the mask from `ReturnDecision` flags or a `MutatorPreset`. A mask that is not a finite 32-bit integer, or that sets a bit outside the defined flags (bits 0-10), rejects the promise instead of installing anything. This matters because an undefined bit names no Approov status: it grants proceed to nothing, so applying it would silently produce a block-everything policy that looks intentional.
 

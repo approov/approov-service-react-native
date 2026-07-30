@@ -240,6 +240,44 @@ public class PolicyMutator extends ApproovDefaultMessageSigning {
         }
     }
 
+    private boolean handleInterceptorSubstitutionResult(Approov.TokenFetchResult approovResults, String context)
+            throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        switch (decideFor(proceedMask, status)) {
+            case PROCEED:
+                return status == Approov.TokenFetchStatus.SUCCESS;
+            case FORWARD:
+                return false;
+            case BLOCK:
+            default:
+                throw new ApproovFetchStatusException(status, "PolicyMutator blocked " + context + ": " + status);
+        }
+    }
+
+    /**
+     * Applies the bitmask policy to interceptor header-substitution results. A
+     * masked failure skips the substitution and lets the request continue without
+     * the secure value; an unmasked failure blocks the request.
+     */
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean handleInterceptorHeaderSubstitutionResult(ApproovService service,
+            Approov.TokenFetchResult approovResults, String header) throws ApproovException {
+        return handleInterceptorSubstitutionResult(approovResults, "header substitution for " + header);
+    }
+
+    /**
+     * Applies the bitmask policy to interceptor query-parameter substitution
+     * results. A masked failure skips the substitution and lets the request
+     * continue without the secure value; an unmasked failure blocks the request.
+     */
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean handleInterceptorQueryParamSubstitutionResult(ApproovService service,
+            Approov.TokenFetchResult approovResults, String queryKey) throws ApproovException {
+        return handleInterceptorSubstitutionResult(approovResults, "query parameter substitution for " + queryKey);
+    }
+
     /**
      * Applies the signing policy to the interceptor-processed request. When this
      * mutator was constructed to sign (the default), the request is signed by the

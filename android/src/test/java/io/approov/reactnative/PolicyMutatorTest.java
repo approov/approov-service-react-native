@@ -185,6 +185,26 @@ public class PolicyMutatorTest {
         assertTrue(error.getMessage().contains("MITM_DETECTED"));
     }
 
+    @Test
+    public void substitutionHandlersSkipMaskedFailuresAndBlockUnmaskedFailures() throws Exception {
+        ApproovService service = mock(ApproovService.class);
+        PolicyMutator mutator = new PolicyMutator(NO_APPROOV_SERVICE);
+
+        assertTrue(mutator.handleInterceptorHeaderSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.SUCCESS), "Api-Key"));
+        assertFalse(mutator.handleInterceptorHeaderSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.NO_APPROOV_SERVICE), "Api-Key"));
+        assertFalse(mutator.handleInterceptorQueryParamSubstitutionResult(
+            service, mockResult(Approov.TokenFetchStatus.NO_APPROOV_SERVICE), "api_key"));
+
+        ApproovFetchStatusException error = assertThrows(
+            ApproovFetchStatusException.class,
+            () -> mutator.handleInterceptorHeaderSubstitutionResult(
+                service, mockResult(Approov.TokenFetchStatus.NO_NETWORK), "Api-Key"));
+        assertEquals(Approov.TokenFetchStatus.NO_NETWORK, error.getTokenFetchStatus());
+        assertTrue(error.getMessage().contains("PolicyMutator blocked header substitution"));
+    }
+
     // --- signing composition: the sign flag drives the processed-request hook ---
 
     @Test

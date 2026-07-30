@@ -417,6 +417,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     substitutionQueryParams = [[NSMutableSet alloc] init];
     exclusionURLRegexs = [[NSMutableSet alloc] init];
     suppressLoggingUnknownURL = NO;
+    if (![[ApproovServiceMutatorBridge shared] isDefaultMutator])
+      ApproovLogW(@"initialization is discarding a custom service mutator - re-apply "
+                   "setServiceMutatorType after initialize if a custom policy is still required");
     [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
@@ -1657,44 +1660,33 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       status = [result status];
       ApproovLogI(@"substituting header %@: %@", header,
                   [Approov stringFromApproovTokenFetchStatus:status]);
+      NSError *mutatorError = nil;
+      BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorHeaderSubstitutionResult:result
+                                            header:header
+                                      errorPointer:&mutatorError];
+      if (!shouldSubstitute) {
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = [errorType isEqualToString:@"network"]
+                                                ? ApproovInterceptorActionRetry
+                                                : ApproovInterceptorActionFail;
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+        continue;
+      }
+
       if (status == ApproovTokenFetchStatusSuccess) {
         // update the header value with the actual secret
         [updatedRequest setValue:[NSString stringWithFormat:@"%@%@", prefix,
                                                             result.secureString]
               forHTTPHeaderField:header];
-      } else if (status == ApproovTokenFetchStatusRejected) {
-        // the attestation has been rejected so provide additional information
-        // in the message
-        NSString *detail = [NSString
-            stringWithFormat:@"Approov header substitution rejection %@ %@",
-                             result.ARC, result.rejectionReasons];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
-      } else if ((status == ApproovTokenFetchStatusNoNetwork) ||
-                 (status == ApproovTokenFetchStatusPoorNetwork) ||
-                 (status == ApproovTokenFetchStatusMITMDetected)) {
-        // we are unable to get the secure string due to network conditions so
-        NSString *detail = [NSString
-            stringWithFormat:@"Header substitution network error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionRetry
-                  withMessage:detail];
-      } else if (status != ApproovTokenFetchStatusUnknownKey) {
-        // we have failed to get a secure string with a more serious permanent
-        // error
-        NSString *detail = [NSString
-            stringWithFormat:@"Header substitution error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
       }
     }
   }
@@ -1736,45 +1728,33 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       status = [result status];
       ApproovLogI(@"substituting query parameter %@: %@", key,
                   [Approov stringFromApproovTokenFetchStatus:result.status]);
+      NSError *mutatorError = nil;
+      BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorQueryParamSubstitutionResult:result
+                                               queryKey:key
+                                           errorPointer:&mutatorError];
+      if (!shouldSubstitute) {
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = [errorType isEqualToString:@"network"]
+                                                ? ApproovInterceptorActionRetry
+                                                : ApproovInterceptorActionFail;
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+        continue;
+      }
+
       if (status == ApproovTokenFetchStatusSuccess) {
         // update the URL with the actual secret
         url = [url stringByReplacingCharactersInRange:[match rangeAtIndex:1]
                                            withString:result.secureString];
         [updatedRequest setURL:[NSURL URLWithString:url]];
-      } else if (status == ApproovTokenFetchStatusRejected) {
-        // the attestation has been rejected so provide additional information
-        // in the message
-        NSString *detail = [NSString
-            stringWithFormat:
-                @"Approov query parameter substitution rejection %@ %@",
-                result.ARC, result.rejectionReasons];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
-      } else if ((status == ApproovTokenFetchStatusNoNetwork) ||
-                 (status == ApproovTokenFetchStatusPoorNetwork) ||
-                 (status == ApproovTokenFetchStatusMITMDetected)) {
-        // we are unable to get the secure string due to network conditions so
-        NSString *detail = [NSString
-            stringWithFormat:
-                @"Approov query parameter substitution network error: %@",
-                [Approov stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionRetry
-                  withMessage:detail];
-      } else if (status != ApproovTokenFetchStatusUnknownKey) {
-        // we have failed to get a secure string with a more serious permanent
-        // error
-        NSString *detail = [NSString
-            stringWithFormat:@"Approov query parameter substitution error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
       }
     }
   }

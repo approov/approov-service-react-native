@@ -68,6 +68,18 @@ private func proceedDecision(_ mutator: PolicyMutator,
     }
 }
 
+private func headerSubstitutionDecision(_ mutator: PolicyMutator,
+                                        _ status: ApproovTokenFetchStatus,
+                                        _ context: String) -> Bool? {
+    do {
+        return try mutator.handleInterceptorHeaderSubstitutionResult(result(status),
+                                                                    header: "Api-Key")
+    } catch {
+        fail("\(context): \(status) unexpectedly threw (\(error))")
+        return nil
+    }
+}
+
 // Asserts that the mutator BLOCKS the given status: it must throw
 // ApproovServiceError.permanentError (userInfo type "general"), never return
 // false. Returning false would reach the interceptor's Retry/proceed fallback
@@ -159,6 +171,25 @@ private func testMultipleMaskBitsProceedIndependently() {
     assertBlocks(mutator, .rejected, "multi-bit mask")
 }
 
+private func testSubstitutionHandlersSkipMaskedFailuresAndBlockUnmaskedFailures() {
+    let mutator = PolicyMutator(proceedMask: PolicyMutator.BIT_NO_APPROOV_SERVICE)
+    assertTrue(headerSubstitutionDecision(mutator, .success, "substitution success") == true,
+               "SUCCESS should perform the substitution")
+    assertTrue(headerSubstitutionDecision(mutator, .noApproovService, "masked substitution failure") == false,
+               "Masked NO_APPROOV_SERVICE should skip substitution and proceed")
+
+    do {
+        _ = try mutator.handleInterceptorQueryParamSubstitutionResult(result(.noNetwork),
+                                                                     queryKey: "api_key")
+        fail("Unmasked NO_NETWORK substitution failure should block")
+    } catch let ApproovServiceError.permanentError(message) {
+        assertTrue(message.contains("PolicyMutator blocked query parameter substitution"),
+                   "Unmasked substitution failure should include substitution context")
+    } catch {
+        fail("Unmasked substitution failure should throw permanentError, got \(error)")
+    }
+}
+
 private func testSignFalseForwardsRequestUnchanged() throws {
     ApproovServiceStubState.reset()
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
@@ -227,6 +258,29 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
     assertTrue(blockError?.userInfo["type"] as? String == "general",
                "A blocked status must be a general error so Objective-C maps it to Fail")
 
+    // Substitution results use the same mask semantics: masked failures skip
+    // substitution, while unmasked failures surface a hard block.
+    bridge.setPolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, sign: true)
+    var substitutionSkipError: NSError?
+    let shouldSubstitute = bridge.handleInterceptorHeaderSubstitutionResult(
+        result(.noApproovService),
+        header: "Api-Key",
+        errorPointer: &substitutionSkipError)
+    assertFalse(shouldSubstitute,
+                "NO_APPROOV_SERVICE in the mask should skip header substitution through the bridge")
+    assertTrue(substitutionSkipError == nil,
+               "A masked substitution skip should not surface an error")
+
+    var substitutionBlockError: NSError?
+    let blockedSubstitution = bridge.handleInterceptorQueryParamSubstitutionResult(
+        result(.badURL),
+        queryKey: "api_key",
+        errorPointer: &substitutionBlockError)
+    assertFalse(blockedSubstitution,
+                "BAD_URL not in the mask must not substitute through the bridge")
+    assertTrue(substitutionBlockError?.userInfo["type"] as? String == "general",
+               "A blocked substitution status must be a general error")
+
     // resetToDefault restores the built-in signing default.
     bridge.resetToDefault()
     assertTrue(bridge.serviceMutator is ApproovDefaultMessageSigning,
@@ -243,6 +297,7 @@ struct PolicyMutatorTestsRunner {
         testEmptyMaskBlocksEveryFailureStatus()
         testInMaskFailureProceedsOthersBlock()
         testMultipleMaskBitsProceedIndependently()
+        testSubstitutionHandlersSkipMaskedFailuresAndBlockUnmaskedFailures()
         testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail()
 
         do {

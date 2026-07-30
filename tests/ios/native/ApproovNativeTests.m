@@ -665,6 +665,42 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   [NSURLProtocol unregisterClass:[CaptureProtocol class]];
 }
 
+static void TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+  [substitutionHeaders setObject:@"" forKey:@"Api-Key"];
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusSuccess, @"jwt", @"", @"trace", NO));
+  ApproovTestEnqueueSecureStringResult(
+      Result(ApproovTokenFetchStatusNoApproovService, @"", @"", @"", NO));
+
+  __block BOOL sawNoApproovService = NO;
+  ApproovMutatorBridgeSetHeaderSubstitutionHandler(
+      ^BOOL(id result, NSString *header, NSError **errorPointer) {
+        (void)errorPointer;
+        ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+        sawNoApproovService =
+            [header isEqualToString:@"Api-Key"] &&
+            fetchResult.status == ApproovTokenFetchStatusNoApproovService;
+        return NO;
+      });
+
+  NSMutableURLRequest *request = MutableRequest(@"https://example.com/data");
+  [request setValue:@"header-key" forHTTPHeaderField:@"Api-Key"];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertTrue(sawNoApproovService,
+             @"Header substitution should consult the mutator for NO_APPROOV_SERVICE");
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Masked NO_APPROOV_SERVICE substitution should not fail the request");
+  AssertEqualObjects(@"header-key",
+                     [result.request valueForHTTPHeaderField:@"Api-Key"],
+                     @"Masked NO_APPROOV_SERVICE should leave the header placeholder in place");
+  ApproovMutatorBridgeReset();
+  (void)service;
+}
+
 // Regression for the setServiceMutatorType mask validation (Copilot review, PR #32).
 // The proceed bitmask is bridged from JavaScript as a double; a non-finite, fractional,
 // or out-of-32-bit-range value must be rejected before it is narrowed, so it can never be
@@ -798,6 +834,7 @@ int main(void) {
       ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
       ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
+      ^{ TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(); },
       ^{ TestSetServiceMutatorTypeValidatesMask(); },
       ^{ TestInitializeResetsServiceMutatorOnReinitialization(); },
     ];

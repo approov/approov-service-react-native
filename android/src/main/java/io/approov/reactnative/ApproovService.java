@@ -823,6 +823,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 exclusionURLRegexs = new HashMap<>();
                 suppressLoggingUnknownURL = false;
                 sessionMetadataCollectionEnabled = true;
+                if ((serviceMutator != null) && (serviceMutator.getClass() != ApproovDefaultMessageSigning.class))
+                    Log.w(TAG, "initialization is discarding a custom service mutator - re-apply " +
+                            "setServiceMutatorType (or setServiceMutator) after initialize if a " +
+                            "custom policy is still required");
                 serviceMutator = buildDefaultServiceMutator();
                 initialConfig = config;
                 isInitialized = true;

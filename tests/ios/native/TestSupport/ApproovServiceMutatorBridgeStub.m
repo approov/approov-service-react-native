@@ -4,6 +4,8 @@
 
 static void (^gProcessRequestHandler)(NSMutableURLRequest *, NSString *, NSString *);
 static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
+static BOOL (^gHeaderSubstitutionHandler)(id, NSString *, NSError **);
+static BOOL (^gQueryParamSubstitutionHandler)(id, NSString *, NSError **);
 
 // Call records for the mutator-selection helpers, so tests can assert that
 // ApproovService.m actually reaches them.
@@ -11,6 +13,7 @@ static NSUInteger gResetToDefaultCount = 0;
 static NSUInteger gSetPolicyMutatorCount = 0;
 static int32_t gLastPolicyMutatorMask = 0;
 static BOOL gLastPolicyMutatorSign = NO;
+static BOOL gIsDefaultMutator = YES;
 
 @implementation ApproovServiceMutatorBridge
 
@@ -80,6 +83,78 @@ static BOOL gLastPolicyMutatorSign = NO;
   }
 }
 
+- (BOOL)handleInterceptorHeaderSubstitutionResult:(id)result
+                                           header:(NSString *)header
+                                     errorPointer:(NSError **)errorPointer {
+  if (gHeaderSubstitutionHandler != nil) {
+    return gHeaderSubstitutionHandler(result, header, errorPointer);
+  }
+
+  ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+  switch (fetchResult.status) {
+  case ApproovTokenFetchStatusSuccess:
+    return YES;
+  case ApproovTokenFetchStatusNoNetwork:
+  case ApproovTokenFetchStatusPoorNetwork:
+  case ApproovTokenFetchStatusMITMDetected:
+  case ApproovTokenFetchStatusUnknownKey:
+    return NO;
+  case ApproovTokenFetchStatusRejected:
+  default:
+    if (errorPointer != NULL) {
+      *errorPointer = [NSError errorWithDomain:@"io.approov.reactnative.tests"
+                                          code:1
+                                      userInfo:@{
+                                        NSLocalizedDescriptionKey :
+                                            [NSString stringWithFormat:
+                                                          @"Header substitution for "
+                                                          @"%@: %@",
+                                                          header,
+                                                          [Approov stringFromApproovTokenFetchStatus:
+                                                                       fetchResult.status]],
+                                        @"type" : @"general"
+                                      }];
+    }
+    return NO;
+  }
+}
+
+- (BOOL)handleInterceptorQueryParamSubstitutionResult:(id)result
+                                             queryKey:(NSString *)queryKey
+                                         errorPointer:(NSError **)errorPointer {
+  if (gQueryParamSubstitutionHandler != nil) {
+    return gQueryParamSubstitutionHandler(result, queryKey, errorPointer);
+  }
+
+  ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+  switch (fetchResult.status) {
+  case ApproovTokenFetchStatusSuccess:
+    return YES;
+  case ApproovTokenFetchStatusNoNetwork:
+  case ApproovTokenFetchStatusPoorNetwork:
+  case ApproovTokenFetchStatusMITMDetected:
+  case ApproovTokenFetchStatusUnknownKey:
+    return NO;
+  case ApproovTokenFetchStatusRejected:
+  default:
+    if (errorPointer != NULL) {
+      *errorPointer = [NSError errorWithDomain:@"io.approov.reactnative.tests"
+                                          code:1
+                                      userInfo:@{
+                                        NSLocalizedDescriptionKey :
+                                            [NSString stringWithFormat:
+                                                          @"Query parameter substitution "
+                                                          @"for %@: %@",
+                                                          queryKey,
+                                                          [Approov stringFromApproovTokenFetchStatus:
+                                                                       fetchResult.status]],
+                                        @"type" : @"general"
+                                      }];
+    }
+    return NO;
+  }
+}
+
 // Recording stubs matching the Swift bridge helpers added for setServiceMutatorType.
 // The real mutator behaviour is covered by the Swift suite; what the ObjC suites need
 // to observe is whether ApproovService.m *calls* these helpers — in particular that a
@@ -89,10 +164,18 @@ static BOOL gLastPolicyMutatorSign = NO;
   gSetPolicyMutatorCount += 1;
   gLastPolicyMutatorMask = mask;
   gLastPolicyMutatorSign = sign;
+  gIsDefaultMutator = NO;
 }
 
 - (void)resetToDefault {
   gResetToDefaultCount += 1;
+  gIsDefaultMutator = YES;
+}
+
+// mirrors the real bridge: default until a policy mutator is installed,
+// default again after any reset
+- (BOOL)isDefaultMutator {
+  return gIsDefaultMutator;
 }
 
 @end
@@ -100,10 +183,13 @@ static BOOL gLastPolicyMutatorSign = NO;
 void ApproovMutatorBridgeReset(void) {
   gProcessRequestHandler = nil;
   gFetchTokenHandler = nil;
+  gHeaderSubstitutionHandler = nil;
+  gQueryParamSubstitutionHandler = nil;
   gResetToDefaultCount = 0;
   gSetPolicyMutatorCount = 0;
   gLastPolicyMutatorMask = 0;
   gLastPolicyMutatorSign = NO;
+  gIsDefaultMutator = YES;
 }
 
 NSUInteger ApproovMutatorBridgeResetToDefaultCount(void) {
@@ -130,4 +216,14 @@ void ApproovMutatorBridgeSetProcessRequestHandler(
 void ApproovMutatorBridgeSetFetchTokenHandler(
     BOOL (^handler)(id, NSString *, NSError **)) {
   gFetchTokenHandler = [handler copy];
+}
+
+void ApproovMutatorBridgeSetHeaderSubstitutionHandler(
+    BOOL (^handler)(id, NSString *, NSError **)) {
+  gHeaderSubstitutionHandler = [handler copy];
+}
+
+void ApproovMutatorBridgeSetQueryParamSubstitutionHandler(
+    BOOL (^handler)(id, NSString *, NSError **)) {
+  gQueryParamSubstitutionHandler = [handler copy];
 }

@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -274,7 +275,7 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
-    public void initializeWithSameConfigPreservesRuntimeConfiguration() {
+    public void initializeWithSameConfigResetsRuntimeConfiguration() {
         ApproovService service = newService();
         String config = "valid-config";
 
@@ -293,18 +294,19 @@ public class ApproovServiceRegressionTest {
         service.setTokenHeader("X-Custom-Token", "Bearer ");
         service.setBindingHeader("Authorization");
 
-        // Re-initialize with the SAME config (e.g. a provider remount / StrictMode).
+        // Re-initialize with the SAME config. This is forwarded to the native SDK and,
+        // after native success, is treated as a fresh initialization boundary.
         Promise secondInit = mock(Promise.class);
         service.initialize(config, null, secondInit);
         verify(secondInit, timeout(2000)).resolve(null);
 
-        // The runtime configuration must survive the same-config re-initialization.
-        assertTrue("substitution header should be preserved",
+        // The service-layer runtime configuration is reset only after SDK success.
+        assertFalse("substitution header should be cleared on same-config re-init",
             service.getSubstitutionHeaders().containsKey("Authorization"));
-        assertTrue("exclusion URL regex should be preserved",
+        assertFalse("exclusion URL regex should be cleared on same-config re-init",
             service.getExclusionURLRegexs().containsKey("https://example.com/excluded/.*"));
-        assertEquals("token header should be preserved", "X-Custom-Token", service.getTokenHeader());
-        assertEquals("binding header should be preserved", "Authorization", service.getBindingHeader());
+        assertEquals("token header should reset to default", "Approov-Token", service.getTokenHeader());
+        assertNull("binding header should reset to default", service.getBindingHeader());
         assertTrue(service.isApproovEnabled());
     }
 
@@ -362,7 +364,7 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
-    public void initializeWithSameConfigPreservesCustomServiceMutator() {
+    public void initializeWithSameConfigResetsCustomServiceMutator() {
         ApproovService service = newService();
 
         Promise firstInit = mock(Promise.class);
@@ -372,15 +374,41 @@ public class ApproovServiceRegressionTest {
         ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
         ApproovService.setServiceMutator(custom);
 
-        // Counter-test to the reset above: a same-config re-initialization is not an
-        // initialization boundary, so it must leave the custom mutator alone. Without
-        // this, a reset that fired unconditionally would still pass the reset test.
+        // A same-config re-initialization is an initialization boundary and must not
+        // allow custom mutator state to persist.
         Promise secondInit = mock(Promise.class);
         service.initialize("config-one", null, secondInit);
         verify(secondInit, timeout(2000)).resolve(null);
 
-        assertSame("a same-config re-initialization must not reset the mutator",
-            custom, ApproovService.getServiceMutator());
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertNotSame("same-config re-init must reset custom mutators", custom, afterReset);
+        assertFalse("same-config re-init must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
+        assertTrue("same-config re-init must restore the default message-signing mutator",
+            afterReset instanceof ApproovDefaultMessageSigning);
+    }
+
+    @Test
+    public void setServiceMutatorNullRestoresDefaultMessageSigningMutator() {
+        ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false));
+
+        ApproovService.setServiceMutator(null);
+
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertTrue("null reset must restore the default message-signing mutator",
+            afterReset instanceof ApproovDefaultMessageSigning);
+        assertFalse("null reset must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
+    }
+
+    @Test
+    public void setTokenHeaderTreatsNullPrefixAsEmptyString() {
+        ApproovService service = newService();
+
+        service.setTokenHeader("X-Approov-Token", null);
+
+        assertEquals("X-Approov-Token", service.getTokenHeader());
+        assertEquals("", service.getTokenPrefix());
     }
 
     @Test

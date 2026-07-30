@@ -307,7 +307,7 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 **Replace semantics (last wins).** `setServiceMutatorType` replaces any previously installed mutator, including a native one. Use the JavaScript API *or* a native custom mutator, not both.
 
-**Reset on re-initialization.** Re-initializing with a *different* config resets the mutator back to the built-in default, so re-apply `setServiceMutatorType` after such a re-init if you still need a custom policy. A same-config re-init preserves the installed mutator.
+**Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
 
 **Invalid masks are rejected, not applied.** Build the mask from `ReturnDecision` flags or a `MutatorPreset`. A mask that is not a finite 32-bit integer, or that sets a bit outside the defined flags (bits 0-10), rejects the promise instead of installing anything. This matters because an undefined bit names no Approov status: it grants proceed to nothing, so applying it would silently produce a block-everything policy that looks intentional.
 

@@ -105,7 +105,7 @@ export declare class ApproovService {
     PROCEED_DEV_CLEARTEXT: number;
   }
   static setSuppressLoggingUnknownURL(): void;
-  static setTokenHeader(header: string, prefix: string): void;
+  static setTokenHeader(header: string, prefix: string | null): void;
   static setTraceIDHeader(header: string): void;
   static getTraceIDHeader(): Promise<String>;
   static setBindingHeader(header: string): void;

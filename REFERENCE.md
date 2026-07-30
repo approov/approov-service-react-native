@@ -170,10 +170,10 @@ Note that this also suppresses logging generated for domains that match a criter
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## setTokenHeader
-Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass in an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
+Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass `null` or an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
 
 ```Javascript
-ApproovService.setTokenHeader(header: string, prefix: string);
+ApproovService.setTokenHeader(header: string, prefix: string | null);
 ```
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
@@ -278,7 +278,7 @@ ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean })
 
 The mask is validated before it is applied. It must be a finite, integral 32-bit value, and it must not set any bit outside the defined `ReturnDecision` flags (bits 0-10, i.e. `0x7ff`) — apart from the `MutatorPreset.DEFAULT` sentinel `-1`. An undefined bit names no Approov status, so it could not grant proceed to anything; a mask carrying one would install a policy that silently blocks every failure status. Such a mask is rejected (the returned promise rejects with code `setServiceMutatorType`) rather than applied, so a typo cannot masquerade as a deliberate block-everything policy.
 
-`setServiceMutatorType` uses replace semantics: the new policy wholly replaces any previously installed mutator (last wins), so use this JavaScript API or a native custom mutator, not both. A re-initialization with a *different* config resets the mutator back to the built-in default (re-apply `setServiceMutatorType` afterwards if needed); a same-config re-initialization preserves the installed mutator.
+`setServiceMutatorType` uses replace semantics: the new policy wholly replaces any previously installed mutator (last wins), so use this JavaScript API or a native custom mutator, not both. Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
 
 `ApproovService.ReturnDecision` — maskable failure-status bit flags:
 

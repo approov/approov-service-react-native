@@ -323,10 +323,19 @@
              completionHandler:(void (^)(NSURLRequest *))completionHandler {
   // Sign the redirected request
   NSMutableURLRequest *mutableRequest = [request mutableCopy];
-  [[ApproovServiceMutatorBridge shared]
-      processRequest:mutableRequest
-         tokenHeader:[ApproovService sharedTokenHeader]
-       traceIDHeader:[ApproovService sharedTraceIDHeader]];
+  NSError *mutatorError = nil;
+  BOOL mutatorSucceeded =
+      [[ApproovServiceMutatorBridge shared]
+          processRequest:mutableRequest
+             tokenHeader:[ApproovService sharedTokenHeader]
+           traceIDHeader:[ApproovService sharedTraceIDHeader]
+            errorPointer:&mutatorError];
+  if (!mutatorSucceeded) {
+    ApproovLogE(@"failed to process redirected request: %@",
+                mutatorError.localizedDescription);
+    completionHandler(nil);
+    return;
+  }
 
   if ([_originalDelegate respondsToSelector:@selector
                          (URLSession:

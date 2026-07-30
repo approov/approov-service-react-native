@@ -55,6 +55,13 @@ import Approov
     }
     
     @objc public func processRequest(_ request: NSMutableURLRequest, tokenHeader: String?, traceIDHeader: String?) {
+        _ = processRequest(request, tokenHeader: tokenHeader, traceIDHeader: traceIDHeader, errorPointer: nil)
+    }
+
+    @objc public func processRequest(_ request: NSMutableURLRequest,
+                                     tokenHeader: String?,
+                                     traceIDHeader: String?,
+                                     errorPointer: NSErrorPointer) -> Bool {
         let urlRequest = request as URLRequest
         let changes = ApproovRequestMutations()
         if let th = tokenHeader,
@@ -103,8 +110,13 @@ import Approov
             }
             request.timeoutInterval = processedRequest.timeoutInterval
             request.allHTTPHeaderFields = processedRequest.allHTTPHeaderFields
+            return true
         } catch {
             NSLog("[ApproovServiceMutatorBridge] Error processing request: %@", error.localizedDescription)
+            if errorPointer != nil {
+                errorPointer?.pointee = error as NSError
+            }
+            return false
         }
     }
     

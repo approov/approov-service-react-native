@@ -67,6 +67,7 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
                          sign:(BOOL)sign
                      resolver:(RCTPromiseResolveBlock)resolve
                      rejecter:(RCTPromiseRejectBlock)reject;
+- (void)setTokenHeader:(NSString *)header prefix:(NSString *_Nullable)prefix;
 @end
 
 @implementation RCTTestNetworkDelegate
@@ -297,12 +298,9 @@ static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(v
              @"SDK failure after empty bootstrap should preserve the bypass initialized state");
 }
 
-// Regression guard: re-initializing with the SAME config (e.g. an ApproovProvider
-// remount, a React StrictMode double-invoke or Fast Refresh in development) must NOT
-// discard the runtime configuration the app applied after the first initialize() call.
-// Wiping substitution headers and, more seriously, exclusion URL regexes would silently
-// drop request mutations and security-relevant exclusion rules.
-static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
+// Regression guard: re-initializing with the SAME config is forwarded to the
+// platform SDK and, after native success, resets service-layer runtime state.
+static void TestInitializeWithSameConfigResetsRuntimeConfiguration(void) {
   ApproovService *service = FreshService();
 
   __block BOOL firstResolved = NO;
@@ -331,13 +329,25 @@ static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
                         __unused NSError *error) {}];
   AssertTrue(secondResolved, @"Same-config re-initialization should resolve");
 
-  // The runtime configuration must survive the same-config re-initialization.
-  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] != nil,
-             @"Substitution header should be preserved across same-config re-init");
-  AssertTrue([exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
-             @"Exclusion URL regex should be preserved across same-config re-init");
-  AssertEqualObjects(@"X-Custom-Token", approovTokenHeader,
-                     @"Token header should be preserved across same-config re-init");
+  // The runtime configuration resets only after the SDK accepts the
+  // re-initialization.
+  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] == nil,
+             @"Substitution header should be cleared across same-config re-init");
+  AssertTrue(![exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
+             @"Exclusion URL regex should be cleared across same-config re-init");
+  AssertEqualObjects(@"Approov-Token", approovTokenHeader,
+                     @"Token header should reset across same-config re-init");
+}
+
+static void TestSetTokenHeaderTreatsNilPrefixAsEmptyString(void) {
+  ApproovService *service = FreshService();
+
+  [service setTokenHeader:@"X-Approov-Token" prefix:nil];
+
+  AssertEqualObjects(@"X-Approov-Token", approovTokenHeader,
+                     @"Token header should update");
+  AssertEqualObjects(@"", approovTokenPrefix,
+                     @"Nil token prefix should be stored as an empty string");
 }
 
 
@@ -717,14 +727,11 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
   }
 }
 
-// Regression for the mutator reset on re-initialization (charlesoj6205 review, PR #32).
-// ApproovService.m calls -[ApproovServiceMutatorBridge resetToDefault] when initialize()
-// is given a genuinely different config, so a PolicyMutator installed via
-// setServiceMutatorType() cannot survive an initialization boundary. Android has a unit
-// test for this; iOS did not, because the bridge stub used to swallow the call. The stub
-// now records it, so the integration point is asserted here rather than assumed. The
-// same-config counter-case is included so an unconditional reset would fail this test.
-static void TestInitializeResetsServiceMutatorOnConfigChange(void) {
+// Regression for the mutator reset on any successful re-initialization.
+// ApproovService.m calls -[ApproovServiceMutatorBridge resetToDefault] only after
+// the native SDK accepts the initialization. The bridge stub records the call so
+// this integration point is asserted here rather than assumed.
+static void TestInitializeResetsServiceMutatorOnReinitialization(void) {
   ApproovService *service = FreshService();
 
   __block BOOL firstResolved = NO;
@@ -750,18 +757,18 @@ static void TestInitializeResetsServiceMutatorOnConfigChange(void) {
   AssertTrue(!ApproovMutatorBridgeLastPolicyMutatorSign(),
              @"the bridge should receive the sign flag supplied by the caller");
 
-  NSUInteger resetsBeforeSameConfig = ApproovMutatorBridgeResetToDefaultCount();
+  NSUInteger resetsAfterFirstInit = ApproovMutatorBridgeResetToDefaultCount();
 
-  // A same-config re-initialization is not an initialization boundary: it must NOT reset.
+  // A same-config re-initialization is an initialization boundary and must reset.
   __block BOOL sameConfigResolved = NO;
   [service initialize:@"config-one"
               comment:nil
              resolver:^(__unused id value) { sameConfigResolved = YES; }
              rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {}];
+	                       __unused NSError *error) {}];
   AssertTrue(sameConfigResolved, @"Same-config re-initialization should resolve");
-  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsBeforeSameConfig,
-             @"Same-config re-initialization must not reset the service mutator");
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 1,
+             @"Same-config re-initialization must reset the service mutator");
 
   // A genuinely different config must reset the mutator.
   __block BOOL differentConfigResolved = NO;
@@ -769,9 +776,9 @@ static void TestInitializeResetsServiceMutatorOnConfigChange(void) {
               comment:nil
              resolver:^(__unused id value) { differentConfigResolved = YES; }
              rejecter:^(__unused NSString *code, __unused NSString *message,
-                        __unused NSError *error) {}];
+	                       __unused NSError *error) {}];
   AssertTrue(differentConfigResolved, @"Different-config re-initialization should resolve");
-  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsBeforeSameConfig + 1,
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 2,
              @"Different-config re-initialization must reset the service mutator to default");
 }
 
@@ -782,7 +789,8 @@ int main(void) {
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
       ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
-      ^{ TestInitializeWithSameConfigPreservesRuntimeConfiguration(); },
+      ^{ TestInitializeWithSameConfigResetsRuntimeConfiguration(); },
+      ^{ TestSetTokenHeaderTreatsNilPrefixAsEmptyString(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },
@@ -791,7 +799,7 @@ int main(void) {
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
       ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
       ^{ TestSetServiceMutatorTypeValidatesMask(); },
-      ^{ TestInitializeResetsServiceMutatorOnConfigChange(); },
+      ^{ TestInitializeResetsServiceMutatorOnReinitialization(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

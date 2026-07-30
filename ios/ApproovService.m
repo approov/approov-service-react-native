@@ -364,16 +364,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // Detect a re-initialization with the identical config already in force. Re-initializing
-    // with the same config (e.g. an ApproovProvider remount, a React StrictMode double-invoke
-    // or Fast Refresh in development) must NOT discard the runtime configuration the app set
-    // up after the first initialize() call — substitution headers, exclusion URL regexes and
-    // token/binding header settings. Wiping those silently would drop request mutations and,
-    // more seriously, exclusion rules that are security relevant. Only a genuinely different
-    // config resets the service-layer state.
-    BOOL configUnchanged = isInitialized && initialConfigString != nil &&
-        [initialConfigString isEqualToString:config];
-
     // Initialize the platform SDK if not in bypass mode (empty config).
     // State is only modified after the SDK confirms success, preserving the
     // current operating mode (protected or bypass) on any failure.
@@ -409,32 +399,25 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
-    // configuration is only reset when the config actually changes; a same-config
-    // re-initialization preserves any configuration applied after the first call.
+    // SDK succeeded (or bypass) — now commit a fresh service-layer state.
+    // Same-config re-initialization is an initialization boundary too: it is
+    // forwarded to the SDK first, then runtime configuration and custom mutators
+    // are reset only after native success.
     if (!initializationResult) {
       ApproovLogD(@"native SDK already initialized");
     }
-    if (!configUnchanged) {
-      isInitialized = NO;
-      initialConfigString = nil;
-      useApproovStatusIfNoToken = NO;
-      approovTokenHeader = @"Approov-Token";
-      approovTraceIDHeader = @"Approov-TraceID";
-      approovTokenPrefix = @"";
-      bindingHeader = @"";
-      substitutionHeaders = [[NSMutableDictionary alloc] init];
-      substitutionQueryParams = [[NSMutableSet alloc] init];
-      exclusionURLRegexs = [[NSMutableSet alloc] init];
-      suppressLoggingUnknownURL = NO;
-      // fix(rn/ios): a genuinely different config must also reset the active
-      // service mutator back to the built-in message-signing default, matching
-      // the Android mutator-reset fix. Without this a PolicyMutator installed
-      // via setServiceMutatorType() would silently survive a re-initialization
-      // with a different config. (Separate concern from the PolicyMutator
-      // feature itself.)
-      [[ApproovServiceMutatorBridge shared] resetToDefault];
-    }
+    isInitialized = NO;
+    initialConfigString = nil;
+    useApproovStatusIfNoToken = NO;
+    approovTokenHeader = @"Approov-Token";
+    approovTraceIDHeader = @"Approov-TraceID";
+    approovTokenPrefix = @"";
+    bindingHeader = @"";
+    substitutionHeaders = [[NSMutableDictionary alloc] init];
+    substitutionQueryParams = [[NSMutableSet alloc] init];
+    exclusionURLRegexs = [[NSMutableSet alloc] init];
+    suppressLoggingUnknownURL = NO;
+    [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
     @synchronized(earliestNetworkRequestTimeLock) {
@@ -755,7 +738,7 @@ RCT_EXPORT_METHOD(setTokenHeader : (NSString *)header prefix : (NSString *)
     approovTokenHeader = header;
   }
   @synchronized(approovTokenPrefix) {
-    approovTokenPrefix = prefix;
+    approovTokenPrefix = prefix ?: @"";
   }
   ApproovLogI(@"setTokenHeader %@, %@", header, prefix);
 }
@@ -2196,10 +2179,20 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
         // Apply mutator post-processing (e.g. message signing) to mirror the
         // swizzled interception pipeline.
         NSMutableURLRequest *finalRequest = [result.request mutableCopy];
-        [[ApproovServiceMutatorBridge shared]
-            processRequest:finalRequest
-               tokenHeader:[ApproovService sharedTokenHeader]
-             traceIDHeader:[ApproovService sharedTraceIDHeader]];
+        NSError *mutatorError = nil;
+        BOOL mutatorSucceeded =
+            [[ApproovServiceMutatorBridge shared]
+                processRequest:finalRequest
+                   tokenHeader:[ApproovService sharedTokenHeader]
+                 traceIDHeader:[ApproovService sharedTraceIDHeader]
+                  errorPointer:&mutatorError];
+        if (!mutatorSucceeded) {
+          reject(@"approov_error",
+                 mutatorError.localizedDescription ?:
+                     @"Approov request failed during mutator processing",
+                 mutatorError);
+          return;
+        }
 
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate

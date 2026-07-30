@@ -161,6 +161,23 @@ private final class ProceedOnSelectedStatusesMutator: ApproovServiceMutator {
     }
 }
 
+private final class UnsupportedAlgorithmFactory: SignatureParametersFactory {
+    override init() {
+        super.init()
+        _ = setBaseParameters(SignatureParameters()
+            .addComponentIdentifier(ApproovURLSessionComponentProvider.DC_METHOD)
+            .addComponentIdentifier(ApproovURLSessionComponentProvider.DC_TARGET_URI))
+            .setAddApproovTokenHeader(true)
+    }
+
+    override func buildSignatureParameters(provider: ApproovURLSessionComponentProvider,
+                                           changes: ApproovRequestMutations) throws -> SignatureParameters {
+        let params = try super.buildSignatureParameters(provider: provider, changes: changes)
+        params.setAlg("unsupported-alg")
+        return params
+    }
+}
+
 private func bouncedReply(for request: URLRequest) throws -> [String: Any] {
     let semaphore = DispatchSemaphore(value: 0)
     var reply: [String: Any]?
@@ -502,6 +519,81 @@ private func testSigningFailureFallbackCanBeBouncedEndToEnd() throws {
                "Signing fallback should still attempt to sign the request")
 }
 
+private func testAccountSigningUnavailableFallsOpenThroughBridge() {
+    ApproovServiceStubState.reset()
+
+    let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+    _ = factory.setUseAccountMessageSigning()
+    let signer = ApproovDefaultMessageSigning().setDefaultFactory(factory)
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = signer
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+    request.setValue("trace-123", forHTTPHeaderField: "Approov-TraceID")
+
+    var error: NSError?
+    let succeeded = bridge.processRequest(request,
+                                          tokenHeader: "Approov-Token",
+                                          traceIDHeader: "Approov-TraceID",
+                                          errorPointer: &error)
+
+    assertTrue(succeeded, "Unavailable account signing should proceed unsigned")
+    assertNil(error?.localizedDescription, "Unavailable account signing should not report a strict error")
+    assertNil(request.value(forHTTPHeaderField: "Signature"),
+              "Unavailable account signing should not add a Signature header")
+    assertNil(request.value(forHTTPHeaderField: "Signature-Input"),
+              "Unavailable account signing should not add a Signature-Input header")
+    assertTrue(ApproovServiceStubState.lastAccountMessage?.contains("\"approov-token\"") == true,
+               "Account signing should still attempt to sign the request")
+}
+
+private func testUnsupportedSigningAlgorithmPropagatesThroughBridge() {
+    ApproovServiceStubState.reset()
+
+    let signer = ApproovDefaultMessageSigning().setDefaultFactory(UnsupportedAlgorithmFactory())
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = signer
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+
+    var error: NSError?
+    let succeeded = bridge.processRequest(request,
+                                          tokenHeader: "Approov-Token",
+                                          traceIDHeader: "Approov-TraceID",
+                                          errorPointer: &error)
+
+    assertFalse(succeeded, "Unsupported signing algorithms should fail closed")
+    assertTrue(error?.localizedDescription.contains("Unsupported algorithm identifier") == true,
+               "Strict signing error should be reported to Objective-C")
+}
+
+private func testRequiredBodyDigestFailurePropagatesThroughBridge() throws {
+    ApproovServiceStubState.reset()
+
+    let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+    _ = try factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, required: true)
+    let signer = ApproovDefaultMessageSigning().setDefaultFactory(factory)
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = signer
+
+    let request = NSMutableURLRequest(url: targetURL())
+    request.httpMethod = "POST"
+    request.setValue("Bearer jwt-token", forHTTPHeaderField: "Approov-Token")
+
+    var error: NSError?
+    let succeeded = bridge.processRequest(request,
+                                          tokenHeader: "Approov-Token",
+                                          traceIDHeader: "Approov-TraceID",
+                                          errorPointer: &error)
+
+    assertFalse(succeeded, "Required body digest failures should fail closed")
+    assertTrue(error?.localizedDescription.contains("Failed to create required body digest") == true,
+               "Required digest failure should be reported to Objective-C")
+}
+
 private func testDigestBodyBehaviorCanBeBouncedEndToEnd() throws {
     ApproovServiceStubState.reset()
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
@@ -674,6 +766,9 @@ struct ApproovMessageSigningTestsRunner {
             try testInstallSigningCanBeBouncedEndToEnd()
             try testAccountSigningCanBeBouncedEndToEnd()
             try testSigningFailureFallbackCanBeBouncedEndToEnd()
+            testAccountSigningUnavailableFallsOpenThroughBridge()
+            testUnsupportedSigningAlgorithmPropagatesThroughBridge()
+            try testRequiredBodyDigestFailurePropagatesThroughBridge()
             try testDigestBodyBehaviorCanBeBouncedEndToEnd()
             try testSingleSignatureApplicationCanBeBouncedEndToEnd()
             testMutatorBridgeCopiesBackFullRequestState()

@@ -8,6 +8,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)processRequest:(NSMutableURLRequest *)request
            tokenHeader:(NSString *_Nullable)tokenHeader
          traceIDHeader:(NSString *_Nullable)traceIDHeader;
+- (BOOL)processRequest:(NSMutableURLRequest *)request
+           tokenHeader:(NSString *_Nullable)tokenHeader
+         traceIDHeader:(NSString *_Nullable)traceIDHeader
+          errorPointer:(NSError *_Nullable *_Nullable)errorPointer;
 - (BOOL)handleInterceptorFetchTokenResult:(id)result
                                       url:(NSString *)url
                              errorPointer:(NSError *_Nullable *_Nullable)errorPointer;

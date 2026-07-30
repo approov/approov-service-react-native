@@ -209,9 +209,19 @@ public class ApproovService extends ReactContextBaseJavaModule {
     private static volatile ApproovServiceMutator serviceMutator;
 
     static {
+        serviceMutator = buildDefaultServiceMutator();
+    }
+
+    /**
+     * Builds the React Native default service mutator, including HTTP Message
+     * Signing.
+     *
+     * @return a freshly configured default signing mutator
+     */
+    private static ApproovDefaultMessageSigning buildDefaultServiceMutator() {
         ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
         signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-        serviceMutator = signer;
+        return signer;
     }
 
     /**
@@ -229,7 +239,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
-            mutator = ApproovServiceMutator.DEFAULT;
+            mutator = buildDefaultServiceMutator();
         }
         serviceMutator = mutator;
         if (currentLogLevel <= LOG_DEBUG) {
@@ -296,9 +306,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 return;
             }
             if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
-                ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
-                signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-                setServiceMutator(signer);
+                setServiceMutator(null);
             } else {
                 setServiceMutator(new PolicyMutator(mask, sign));
             }
@@ -752,11 +760,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Initializes the ApproovService with an account configuration and comment.
-     * Resets service-layer state if the configuration changes. A same-config
-     * re-initialization preserves any configuration applied after the first setup.
+     * Service-layer state is only reset after the platform SDK confirms success.
      * The platform SDK returns true on first initialization or false if it is
      * already initialized with the same configuration (treated as success). Any other
-     * failure — such as a different-config conflict — throws and is surfaced as a
+     * failure, such as a different-config conflict, throws and is surfaced as a
      * rejected promise.
      *
      * @param config  the configuration string, or empty string for bypass mode
@@ -779,16 +786,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
-        // Detect whether this is a re-initialization with the identical config that is
-        // already in force. Re-initializing with the same config (e.g. an ApproovProvider
-        // remount, a React StrictMode double-invoke or Fast Refresh in development) must
-        // NOT discard the runtime configuration the app set up after the first initialize()
-        // call — substitution headers, exclusion URL regexes and token/binding header
-        // settings. Wiping those silently would drop request mutations and, more seriously,
-        // exclusion rules that are security relevant. Only a genuinely different config
-        // resets the service-layer state.
-        boolean configUnchanged = isInitialized && config.equals(initialConfig);
-
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.
@@ -799,10 +796,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
             }
-            // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
-            // configuration is only reset when the config actually changes; a same-config
-            // re-initialization preserves any configuration applied after the first call.
-            //
+            // SDK succeeded (or bypass) — now commit a fresh service-layer state.
+            // Same-config re-initialization is an initialization boundary too: it is
+            // forwarded to the SDK first, then runtime configuration and custom
+            // mutators are reset only after native success.
             // The reset and commit are performed under the instance monitor so the
             // transition is atomic relative to the interceptor, which reads isInitialized,
             // isApproovEnabled and the header/substitution/exclusion state through
@@ -814,30 +811,19 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // outside the lock so its network work never blocks those getters. iOS performs
             // the equivalent reset inside @synchronized(initializerLock).
             synchronized (this) {
-                if (!configUnchanged) {
-                    isInitialized = false;
-                    initialConfig = null;
-                    useApproovStatusIfNoToken = false;
-                    approovTokenHeader = APPROOV_TOKEN_HEADER;
-                    approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-                    approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-                    bindingHeader = null;
-                    substitutionHeaders = new HashMap<>();
-                    substitutionQueryParams = new HashMap<>();
-                    exclusionURLRegexs = new HashMap<>();
-                    suppressLoggingUnknownURL = false;
-                    sessionMetadataCollectionEnabled = true;
-                    // Reset any custom service mutator so overrides do not persist across
-                    // an initialization boundary (root TESTING_REQUIREMENTS.md section 2,
-                    // "Service Mutator Reset"). Restore a fresh ApproovDefaultMessageSigning
-                    // — the React Native default performs HTTP message signing — rather than
-                    // the no-signing ApproovServiceMutator.DEFAULT, which would silently
-                    // disable default signing on every re-initialization.
-                    ApproovDefaultMessageSigning defaultMutator = new ApproovDefaultMessageSigning();
-                    defaultMutator.setDefaultFactory(
-                            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-                    serviceMutator = defaultMutator;
-                }
+                isInitialized = false;
+                initialConfig = null;
+                useApproovStatusIfNoToken = false;
+                approovTokenHeader = APPROOV_TOKEN_HEADER;
+                approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                bindingHeader = null;
+                substitutionHeaders = new HashMap<>();
+                substitutionQueryParams = new HashMap<>();
+                exclusionURLRegexs = new HashMap<>();
+                suppressLoggingUnknownURL = false;
+                sessionMetadataCollectionEnabled = true;
+                serviceMutator = buildDefaultServiceMutator();
                 initialConfig = config;
                 isInitialized = true;
             }
@@ -1153,7 +1139,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public synchronized void setTokenHeader(String header, String prefix) {
         log(LOG_DEBUG, TAG, "setTokenHeader " + header + ", " + prefix);
         approovTokenHeader = header;
-        approovTokenPrefix = prefix;
+        approovTokenPrefix = (prefix == null) ? APPROOV_TOKEN_PREFIX : prefix;
     }
 
     /**

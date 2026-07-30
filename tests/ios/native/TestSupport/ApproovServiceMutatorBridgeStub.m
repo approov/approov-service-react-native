@@ -26,9 +26,20 @@ static BOOL gLastPolicyMutatorSign = NO;
 - (void)processRequest:(NSMutableURLRequest *)request
            tokenHeader:(NSString *)tokenHeader
          traceIDHeader:(NSString *)traceIDHeader {
+  [self processRequest:request
+           tokenHeader:tokenHeader
+         traceIDHeader:traceIDHeader
+          errorPointer:nil];
+}
+
+- (BOOL)processRequest:(NSMutableURLRequest *)request
+           tokenHeader:(NSString *)tokenHeader
+         traceIDHeader:(NSString *)traceIDHeader
+          errorPointer:(NSError **)errorPointer {
   if (gProcessRequestHandler != nil) {
     gProcessRequestHandler(request, tokenHeader, traceIDHeader);
   }
+  return YES;
 }
 
 - (BOOL)handleInterceptorFetchTokenResult:(id)result

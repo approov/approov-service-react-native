@@ -311,16 +311,20 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 **Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. A warning is logged whenever a custom mutator is discarded this way. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
 
-Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Instead, apply it in an effect keyed on `approovReady`, which re-runs after every successful initialization (including React StrictMode double-mounts and Fast Refresh):
+Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it afterwards, keyed on `approovInitCount`:
 
 ```javascript
-const { approovReady } = useApproov();
+const { approovReady, approovInitCount } = useApproov();
 useEffect(() => {
     if (approovReady) {
         ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_IF_UNAVAILABLE);
     }
-}, [approovReady]);
+}, [approovReady, approovInitCount]);
 ```
+
+`approovReady` alone is not enough: it latches `true` on the first success and never changes again, so an effect keyed only on it will not re-run when a later re-initialization resets the mutator. `approovInitCount` increments on every successful initialization, so the effect re-runs and the policy is re-applied.
+
+If you call `ApproovService.initialize()` yourself rather than through `ApproovProvider` (*Option 2* above), the counter does not apply — re-apply `setServiceMutatorType` after each of those calls.
 
 **Invalid masks are rejected, not applied.** Build the mask from `ReturnDecision` flags or a `MutatorPreset`. A mask that is not a finite 32-bit integer, or that sets a bit outside the defined flags (bits 0-10), rejects the promise instead of installing anything. This matters because an undefined bit names no Approov status: it grants proceed to nothing, so applying it would silently produce a block-everything policy that looks intentional.
 

@@ -811,6 +811,18 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // outside the lock so its network work never blocks those getters. iOS performs
             // the equivalent reset inside @synchronized(initializerLock).
             synchronized (this) {
+                // Warn about runtime configuration that is about to be discarded. Token
+                // binding ceasing to apply is the security-relevant one, so it is called
+                // out separately from the rest.
+                if (bindingHeader != null)
+                    Log.w(TAG, "initialization is discarding the binding header - re-apply " +
+                            "setBindingHeader after initialize or tokens will no longer be " +
+                            "bound to that header value");
+                if (!substitutionHeaders.isEmpty() || !substitutionQueryParams.isEmpty()
+                        || !exclusionURLRegexs.isEmpty())
+                    Log.w(TAG, "initialization is discarding runtime configuration " +
+                            "(substitution headers/query params and exclusion regexes) - " +
+                            "re-apply it after initialize if it is still required");
                 isInitialized = false;
                 initialConfig = null;
                 useApproovStatusIfNoToken = false;

@@ -216,6 +216,16 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     /**
      * Logs a message-signing failure that should not abort the request.
      *
+     * <p>Fail-open/fail-closed rule for message signing: a failure to obtain or
+     * encode a signature proceeds with the request unsigned via this helper —
+     * signature unavailability, base64 and ASN.1/DER decode failures, and header
+     * serialization failures all take this path, because they mean the signature
+     * could not be produced, not that the request is untrustworthy. Exactly two
+     * cases fail closed and abort the request by throwing: an unsupported
+     * signature algorithm, and a required body digest that cannot be created.
+     * Both indicate the caller asked for a guarantee that cannot be honoured, so
+     * sending the request unsigned would silently weaken it.
+     *
      * @param request The original request to forward unsigned.
      * @param reason  The reason signing was skipped.
      * @param cause   Optional failure cause.

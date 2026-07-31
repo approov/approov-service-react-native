@@ -26,9 +26,15 @@ const { ApproovService } = NativeModules
 const ApproovContext = React.createContext()
 
 const ApproovProvider = ({ config, comment = null, onInit, children }) => {
+  // approovInitCount increments on every successful initialization. approovReady
+  // latches true on the first success and never changes again, so an effect keyed
+  // only on it cannot observe a later re-initialization - and every successful
+  // initialization is a reset boundary that discards the service mutator and the
+  // rest of the runtime configuration.
   const [status, setStatus] = useState({
     approovReady: false,
     approovError: null,
+    approovInitCount: 0,
   })
 
   useEffect(() => {
@@ -43,7 +49,13 @@ const ApproovProvider = ({ config, comment = null, onInit, children }) => {
         await ApproovService.initialize(config, comment)
         if (!isMounted) return
 
-        setStatus({ approovReady: true, approovError: null })
+        // updater form: two in-flight initializeApproov() closures would otherwise
+        // clobber each other's count
+        setStatus((previous) => ({
+          approovReady: true,
+          approovError: null,
+          approovInitCount: previous.approovInitCount + 1,
+        }))
         if (ApproovService.logMessage) {
           ApproovService.logMessage("React Native: ApproovService.initialize() promise resolved successfully.", 2 /* INFO */);
         }
@@ -52,7 +64,11 @@ const ApproovProvider = ({ config, comment = null, onInit, children }) => {
 
         // This is a runtime error so set in context so program can notify user
         // Most common cause is a missing config string.
-        setStatus({ approovReady: false, approovError: error })
+        setStatus((previous) => ({
+          approovReady: false,
+          approovError: error,
+          approovInitCount: previous.approovInitCount,
+        }))
         if (ApproovService.logMessage) {
           const details = (error && error.message) ? error.message : String(error)
           ApproovService.logMessage("React Native: ApproovService.initialize() promise rejected: " + details, 4 /* ERROR */);

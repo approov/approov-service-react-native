@@ -209,6 +209,13 @@ export declare const ApproovProvider: React.FC<ApproovProviderProps>;
 export declare function useApproov(): {
   approovReady: boolean;
   approovError: any;
+  /**
+   * Increments on every successful initialization. Key an effect on this rather
+   * than on `approovReady` when work must be repeated after each initialization
+   * (for example re-applying `setServiceMutatorType`), because `approovReady`
+   * latches `true` on the first success and never changes again.
+   */
+  approovInitCount: number;
 };
 
 export { ApproovMonitor };

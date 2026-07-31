@@ -406,6 +406,18 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     if (!initializationResult) {
       ApproovLogD(@"native SDK already initialized");
     }
+    // Warn about runtime configuration that is about to be discarded. Token binding
+    // ceasing to apply is the security-relevant one, so it is called out separately
+    // from the rest.
+    if ((bindingHeader != nil) && (bindingHeader.length != 0))
+      ApproovLogW(@"initialization is discarding the binding header - re-apply "
+                   "setBindingHeader after initialize or tokens will no longer be bound "
+                   "to that header value");
+    if ((substitutionHeaders.count != 0) || (substitutionQueryParams.count != 0) ||
+        (exclusionURLRegexs.count != 0))
+      ApproovLogW(@"initialization is discarding runtime configuration (substitution "
+                   "headers/query params and exclusion regexes) - re-apply it after "
+                   "initialize if it is still required");
     isInitialized = NO;
     initialConfigString = nil;
     useApproovStatusIfNoToken = NO;

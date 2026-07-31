@@ -67,6 +67,24 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
         return "ApproovDefaultMessageSigning"
     }
 
+    /// Logs a message-signing failure that should not abort the request, and
+    /// returns the request unsigned.
+    ///
+    /// Fail-open/fail-closed rule for message signing: a failure to obtain or
+    /// encode a signature proceeds unsigned through this helper — signature
+    /// unavailability, base64 and ASN.1/DER decode failures, and header
+    /// serialization failures all take this path, because they mean the signature
+    /// could not be produced, not that the request is untrustworthy. Exactly two
+    /// cases fail closed and abort the request by throwing: an unsupported
+    /// signature algorithm, and a required body digest that cannot be created.
+    /// Both indicate the caller asked for a guarantee that cannot be honoured, so
+    /// sending the request unsigned would silently weaken it.
+    ///
+    /// - Parameters:
+    ///   - request: the original request to forward unsigned.
+    ///   - reason: the reason signing was skipped.
+    ///   - error: the optional underlying failure.
+    /// - Returns: the original, unsigned request.
     private func proceedUnsigned(_ request: URLRequest, reason: StaticString, _ error: Error? = nil) -> URLRequest {
         if let error {
             os_log(reason, type: .error, String(describing: error))

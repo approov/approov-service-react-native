@@ -54,11 +54,58 @@ describe('ApproovProvider', () => {
 
     expect(order).toEqual(['onInit', 'initialize:cfg:reinit:test']);
     expect(nativeService.initialize).toHaveBeenCalledWith('cfg', 'reinit:test');
-    expect(latestState).toEqual({ approovReady: true, approovError: null });
+    expect(latestState).toEqual({
+      approovReady: true,
+      approovError: null,
+      approovInitCount: 1,
+    });
     expect(nativeService.logMessage).toHaveBeenCalledWith(
       expect.stringContaining('promise resolved successfully'),
       2
     );
+  });
+
+  test('approovInitCount increments per successful initialization so effects re-run', async () => {
+    // approovReady latches true on the first success, so an effect keyed only on it
+    // cannot observe a later re-initialization - and every successful initialization
+    // is a reset boundary that discards the service mutator. approovInitCount is the
+    // signal that actually changes, so a re-mount produces a distinct value.
+    const nativeService = {
+      initialize: jest.fn().mockResolvedValue(undefined),
+      logMessage: jest.fn(),
+    };
+    setNativeService(nativeService);
+
+    // An effect keyed on [approovReady, approovInitCount] must fire for the
+    // initialization, carrying a count that distinguishes it from the initial
+    // pre-initialization state.
+    const effectFirings = [];
+    function CaptureState() {
+      const { approovReady, approovInitCount } = useApproov();
+      React.useEffect(() => {
+        effectFirings.push({ approovReady, approovInitCount });
+      }, [approovReady, approovInitCount]);
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        React.createElement(
+          ApproovProvider,
+          { config: 'cfg' },
+          React.createElement(CaptureState)
+        )
+      );
+    });
+
+    expect(nativeService.initialize).toHaveBeenCalledTimes(1);
+    // fires once before initialization completes and once after, with the count
+    // incremented - the transition an effect keyed on approovReady alone also sees,
+    // but here it is the count that carries the "which initialization" information
+    expect(effectFirings).toEqual([
+      { approovReady: false, approovInitCount: 0 },
+      { approovReady: true, approovInitCount: 1 },
+    ]);
   });
 
   test('passes a null initialization comment by default', async () => {
@@ -101,7 +148,11 @@ describe('ApproovProvider', () => {
       );
     });
 
-    expect(latestState).toEqual({ approovReady: false, approovError: error });
+    expect(latestState).toEqual({
+      approovReady: false,
+      approovError: error,
+      approovInitCount: 0,
+    });
     expect(nativeService.logMessage).toHaveBeenCalledWith(
       expect.stringContaining('promise rejected: missing config'),
       4

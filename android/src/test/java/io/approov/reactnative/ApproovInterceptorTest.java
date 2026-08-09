@@ -474,7 +474,7 @@ public class ApproovInterceptorTest {
     }
 
     @Test
-    public void headerSubstitutionNetworkFailureRetries() throws Exception {
+    public void headerSubstitutionNetworkFailureSkipsTheSubstitutionButStillProceeds() throws Exception {
         Request request = new Request.Builder()
             .url("https://api.example.com/data")
             .header("Api-Key", "Bearer header-secret")
@@ -492,13 +492,11 @@ public class ApproovInterceptorTest {
             approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
                 .thenReturn(substitutionResult);
 
-            // A network failure during secure-string substitution must be retryable
-            // (thrown as an IOException with an ApproovNetworkException cause), not
-            // proceed without the secret. Matches the token-fetch path and the
-            // okhttp/urlsession reference layers.
-            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
-            assertTrue(error.getCause() instanceof ApproovNetworkException);
-            verify(chain, never()).proceed(any());
+            Response response = interceptor.intercept(chain);
+
+            assertEquals("Bearer header-secret", response.request().header("Api-Key"));
+            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
+            verify(chain).proceed(any());
         }
     }
 

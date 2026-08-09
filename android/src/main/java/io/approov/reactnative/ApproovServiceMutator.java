@@ -271,11 +271,7 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                // Retry on a transient network failure rather than proceeding without the
-                // substituted secret. Matches the token-fetch path and the okhttp/urlsession
-                // reference layers (the interceptor maps ApproovNetworkException to a retry).
-                throw new ApproovNetworkException(status,
-                        "Header substitution for " + header + ": " + status.toString());
+                return false;
             case UNKNOWN_KEY:
                 return false;
             default:
@@ -316,11 +312,7 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                // Retry on a transient network failure rather than proceeding without the
-                // substituted secret. Matches the token-fetch path and the okhttp/urlsession
-                // reference layers (the interceptor maps ApproovNetworkException to a retry).
-                throw new ApproovNetworkException(status,
-                        "Query parameter substitution for " + queryKey + ": " + status.toString());
+                return false;
             case UNKNOWN_KEY:
                 return false;
             default:

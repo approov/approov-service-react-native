@@ -276,7 +276,7 @@ await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_
 | Preset | Effect |
 | :--- | :--- |
 | `DEFAULT` | Restore the built-in default mutator (the standard behaviour described under *Default Behavior* above, including HTTP Message Signing). |
-| `ALWAYS_PROCEED` | Proceed on **every** failure status — includes `MITM_DETECTED` and `REJECTED` (read the warning below). |
+| `ALWAYS_PROCEED` | Proceed on every **maskable** failure status — includes `MITM_DETECTED` and `REJECTED` (read the warning below). Note: `UNTRUSTED_NETWORK` (and, on iOS, `notInitialized`/`badKey`/`badPayload`) are non-maskable and always block, even under this preset. |
 | `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service itself is unavailable (`NO_APPROOV_SERVICE`). Note this is not the offline case: a device without connectivity yields `NO_NETWORK`, which this preset blocks — add `ReturnDecision.NO_NETWORK` to the mask if you also want to tolerate offline devices. |
 | `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL` (non-`https` traffic, e.g. Metro dev servers); the request still runs through the Approov pipeline. Development only. |
 

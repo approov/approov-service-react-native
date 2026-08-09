@@ -239,7 +239,11 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
-            return false
+            // Retry on a transient network failure rather than proceeding without the
+            // substituted secret. Matches the token-fetch path and the okhttp/urlsession
+            // reference layers; the interceptor maps this networking error to a retry.
+            throw ApproovServiceError.networkingError(message: "Header substitution for \(header): " +
+                                              Approov.string(from: status))
         case .unknownKey:
             return false
         default:
@@ -263,7 +267,11 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
-            return false
+            // Retry on a transient network failure rather than proceeding without the
+            // substituted secret. Matches the token-fetch path and the okhttp/urlsession
+            // reference layers; the interceptor maps this networking error to a retry.
+            throw ApproovServiceError.networkingError(message: "Query parameter substitution for \(queryKey): " +
+                                              Approov.string(from: status))
         case .unknownKey:
             return false
         default:

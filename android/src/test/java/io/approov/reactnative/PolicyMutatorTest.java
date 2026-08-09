@@ -131,6 +131,23 @@ public class PolicyMutatorTest {
             PolicyMutator.decideFor(mask, Approov.TokenFetchStatus.UNPROTECTED_URL));
     }
 
+    @Test
+    public void decideForFullMaskStillBlocksNonMaskableStatuses() {
+        // UNTRUSTED_NETWORK has no proceed bit and is permanently non-maskable: even a
+        // full mask (ALL_BITS) must BLOCK it, so ALWAYS_PROCEED does NOT proceed on every
+        // failure status. This matches the okhttp/urlsession reference layers, whose
+        // default token-fetch handling blocks (default: throw / .ShouldFail) any status
+        // not explicitly allowed. (iOS additionally has notInitialized/badKey/badPayload,
+        // which are likewise non-maskable-blocking on that platform.)
+        int fullMask = NO_APPROOV_SERVICE | BAD_URL | MITM_DETECTED | NO_NETWORK | POOR_NETWORK
+            | REJECTED | UNKNOWN_KEY | INTERNAL_ERROR | NO_NETWORK_PERMISSION
+            | MISSING_LIB_DEPENDENCY | DISABLED;
+
+        assertEquals("UNTRUSTED_NETWORK must BLOCK even with a full mask",
+            PolicyMutator.Decision.BLOCK,
+            PolicyMutator.decideFor(fullMask, Approov.TokenFetchStatus.UNTRUSTED_NETWORK));
+    }
+
     // --- pure static helper: bitFor ---
 
     @Test

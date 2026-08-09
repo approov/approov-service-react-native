@@ -274,7 +274,7 @@ ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean })
 * `mask` (number): A bitwise-OR of `ApproovService.ReturnDecision` flags, or an `ApproovService.MutatorPreset` value. Each failure status **in** the mask proceeds; any failure status **not** in the mask blocks the request, which then surfaces as a failed `fetch()` (`IOException` / `Network request failed` on Android, an `NSError` failure on iOS).
 * `options.sign` (boolean, optional): Defaults to `true`, so the installed policy mutator preserves HTTP Message Signing. Pass `{ sign: false }` to proceed per the mask but send the request unsigned (for apps that sign elsewhere or must not double-sign). Ignored for `MutatorPreset.DEFAULT`.
 
-`SUCCESS` always proceeds with the signed token added, and `UNKNOWN_URL` / `UNPROTECTED_URL` always proceed unmodified (forwarded without a token). These three statuses are never maskable and are not exposed as flags. When a masked failure status proceeds, pair this call with `setUseApproovStatusIfNoToken(true)` to have the fetch-status string written into the token header; otherwise the token header is emitted empty.
+`SUCCESS` always proceeds with the signed token added, and `UNKNOWN_URL` / `UNPROTECTED_URL` always proceed unmodified (forwarded without a token). These three statuses are never maskable and are not exposed as flags. In the other direction, `UNTRUSTED_NETWORK` (and, on iOS, `notInitialized`/`badKey`/`badPayload`) have no proceed bit and are permanently non-maskable-blocking: they always block, even under `ALWAYS_PROCEED`. This matches the okhttp / urlsession service layers, whose default token-fetch handling blocks any status it does not explicitly allow. When a masked failure status proceeds, pair this call with `setUseApproovStatusIfNoToken(true)` to have the fetch-status string written into the token header; otherwise the token header is emitted empty.
 
 `ApproovService.MutatorPreset.DEFAULT` (mask `-1`) restores the built-in default mutator, which performs message signing.
 
@@ -303,7 +303,7 @@ The mask is validated before it is applied. It must be a finite, integral 32-bit
 | Preset | Meaning |
 | :--- | :--- |
 | `DEFAULT` | Restore the built-in default (message-signing) mutator (mask `-1`). |
-| `ALWAYS_PROCEED` | Proceed on every failure status. |
+| `ALWAYS_PROCEED` | Proceed on every *maskable* failure status. `UNTRUSTED_NETWORK` (and, on iOS, `notInitialized`/`badKey`/`badPayload`) have no bit and are permanently non-maskable, so they always **block** even under this preset — matching the okhttp / urlsession service layers. |
 | `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service is unavailable (`NO_APPROOV_SERVICE`). |
 | `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL`, forwarding non-`https` traffic; development only. |
 

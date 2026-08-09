@@ -4,13 +4,24 @@ import Approov
 @objc public class ApproovServiceMutatorBridge: NSObject {
     @objc public static let shared = ApproovServiceMutatorBridge()
     
-    public var serviceMutator: ApproovServiceMutator
-    
+    private let mutatorLock = NSLock()
+    private var _serviceMutator: ApproovServiceMutator
+
+    // Thread-safe accessor: the mutator is read on URLSession/network threads and
+    // written from the RN bridge thread (setPolicyMutator/resetToDefault) and the
+    // init reset. Mirrors the `volatile` guard the Android side uses for its
+    // serviceMutator field. Callers grab the current reference under the lock and
+    // then invoke it outside the lock (the mutator instance is immutable).
+    public var serviceMutator: ApproovServiceMutator {
+        get { mutatorLock.lock(); defer { mutatorLock.unlock() }; return _serviceMutator }
+        set { mutatorLock.lock(); defer { mutatorLock.unlock() }; _serviceMutator = newValue }
+    }
+
     private override init() {
         let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
         let signer = ApproovDefaultMessageSigning()
         _ = signer.setDefaultFactory(factory)
-        self.serviceMutator = signer
+        _serviceMutator = signer
         super.init()
     }
 

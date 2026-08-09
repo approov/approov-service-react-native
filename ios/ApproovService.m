@@ -120,8 +120,12 @@ NSString *initialConfigString = nil;
 BOOL pendingPrefetch = NO;
 
 static BOOL ApproovIsEnabled(void) {
-  return isInitialized && initialConfigString != nil &&
-         [initialConfigString length] != 0;
+  // Read under initializerLock so the request path never observes a torn/partial
+  // state while a re-initialization is committing the config under the same lock.
+  @synchronized(initializerLock) {
+    return isInitialized && initialConfigString != nil &&
+           [initialConfigString length] != 0;
+  }
 }
 
 // proceedOnNetworkFail has been removed; network failure handling is now
@@ -418,8 +422,12 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       ApproovLogW(@"initialization is discarding runtime configuration (substitution "
                    "headers/query params and exclusion regexes) - re-apply it after "
                    "initialize if it is still required");
-    isInitialized = NO;
-    initialConfigString = nil;
+    // Do NOT clear isInitialized/initialConfigString here. This reset runs only
+    // after the SDK confirmed (re)initialization above, so the service stays
+    // initialized throughout. Clearing them would open a transient window where a
+    // concurrent request observes the service as disabled and forwards WITHOUT an
+    // Approov token (fail-open). The new config + isInitialized=YES are committed at
+    // the end of this critical section under the same initializerLock.
     useApproovStatusIfNoToken = NO;
     approovTokenHeader = @"Approov-Token";
     approovTraceIDHeader = @"Approov-TraceID";

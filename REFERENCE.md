@@ -476,6 +476,23 @@ Important limitations:
 * On iOS, a pre-request baseline with zero sessions is normal.
 * On iOS, this method only reports on sessions that Approov successfully intercepted and registered. A completely bypassed request may not appear in this metadata and must be diagnosed from native logs.
 
+## getSessionDiagnostics
+(iOS-focused) Returns detailed diagnostics about the `NSURLSession` instances Approov has observed, for debugging interception and pinning coverage. On Android, where interception is interceptor-based rather than session-based, it resolves to a minimal object.
+
+```Javascript
+ApproovService.getSessionDiagnostics();
+```
+
+Returns a `Promise` resolving to an object summarising observed sessions:
+* `enabled` (boolean), `message` (string): overall state.
+* `totalSessions`, `totalRequests`, `registeredSessionCount`, `unregisteredSessionCount`, `nilDelegateSessionCount`, `policySkippedSessionCount`, `taskObservedWithoutSessionCreationCount` (numbers): session/request counters.
+* `registeredSessions` / `unregisteredSessions` (arrays): per-session detail — delegate class/image/bundle, `createdAt`, `requestCount`, `registeredForPinning`, auth-challenge/pinned/blocked counts, and last-observed task metadata. See `index.d.ts` for the full field list.
+
+Use it alongside `getPinningDiagnostics` when investigating why requests are, or are not, being intercepted and pinned on iOS.
+
+## approovInitCount
+`approovInitCount: number` is a field on the object returned by the `useApproov()` hook (it is not a static method). It is a monotonically increasing counter, incremented each time the service layer completes an `initialize()` — including a same-config re-initialization. Every (re-)initialization resets runtime configuration and any custom service mutator back to defaults, so a change in `approovInitCount` is the signal to re-apply your customizations (`setServiceMutatorType`, `setBindingHeader`, substitution/exclusion configuration, etc.). Track it in an effect and re-apply when it changes.
+
 ## updateClientFactory
 Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.
 

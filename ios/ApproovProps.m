@@ -99,7 +99,12 @@ NSString *const PropsExtension = @"plist";
     // is safe: every consumer uses a non-nil key, and sending -objectForKey: to a nil
     // dictionary returns nil. This lets a native approov.config-only integration
     // (no per-request properties) run without shipping an empty approov.plist.
-    ApproovLogI(@"optional properties file %@.%@ not found; using defaults",
+    // WARN (not INFO): expected for approov.config-only integrations, but a build that
+    // accidentally drops a previously-shipped plist would otherwise lose token binding
+    // (binding.name) and a custom token header (token.name) silently (fail-open).
+    ApproovLogW(@"optional properties file %@.%@ not found; using defaults - any "
+                 "token.name / binding.name it would supply are NOT applied (set them "
+                 "via setTokenHeader / setBindingHeader if required)",
                 PropsResource, PropsExtension);
   }
   return self;

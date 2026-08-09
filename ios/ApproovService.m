@@ -98,6 +98,12 @@ static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
 // lock object used during initialization
 static id initializerLock = nil;
 
+// lock guarding the mutable runtime-configuration fields (token/trace/prefix headers,
+// binding header, substitution + exclusion collections). A dedicated stable object is
+// used instead of @synchronized on the field values themselves, which would change the
+// monitor whenever a field is reassigned and break mutual exclusion.
+static id configLock = nil;
+
 // keeps track of whether Approov is initialized
 BOOL isInitialized = NO;
 
@@ -205,6 +211,7 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 + (void)initialize {
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
+    configLock = [NSObject new];
     earliestNetworkRequestTimeLock = [NSObject new];
   }
 }
@@ -429,13 +436,15 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     // Approov token (fail-open). The new config + isInitialized=YES are committed at
     // the end of this critical section under the same initializerLock.
     useApproovStatusIfNoToken = NO;
-    approovTokenHeader = @"Approov-Token";
-    approovTraceIDHeader = @"Approov-TraceID";
-    approovTokenPrefix = @"";
-    bindingHeader = @"";
-    substitutionHeaders = [[NSMutableDictionary alloc] init];
-    substitutionQueryParams = [[NSMutableSet alloc] init];
-    exclusionURLRegexs = [[NSMutableSet alloc] init];
+    @synchronized(configLock) {
+      approovTokenHeader = @"Approov-Token";
+      approovTraceIDHeader = @"Approov-TraceID";
+      approovTokenPrefix = @"";
+      bindingHeader = @"";
+      substitutionHeaders = [[NSMutableDictionary alloc] init];
+      substitutionQueryParams = [[NSMutableSet alloc] init];
+      exclusionURLRegexs = [[NSMutableSet alloc] init];
+    }
     suppressLoggingUnknownURL = NO;
     if (![[ApproovServiceMutatorBridge shared] isDefaultMutator])
       ApproovLogW(@"initialization is discarding a custom service mutator - re-apply "
@@ -759,17 +768,17 @@ RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
  */
 RCT_EXPORT_METHOD(setTokenHeader : (NSString *)header prefix : (NSString *)
                       prefix) {
-  @synchronized(approovTokenHeader) {
+  @synchronized(configLock) {
     approovTokenHeader = header;
   }
-  @synchronized(approovTokenPrefix) {
+  @synchronized(configLock) {
     approovTokenPrefix = prefix ?: @"";
   }
   ApproovLogI(@"setTokenHeader %@, %@", header, prefix);
 }
 
 RCT_EXPORT_METHOD(setTraceIDHeader : (NSString *)header) {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     approovTraceIDHeader = header;
   }
   ApproovLogI(@"setTraceIDHeader %@", header);
@@ -777,7 +786,7 @@ RCT_EXPORT_METHOD(setTraceIDHeader : (NSString *)header) {
 
 RCT_EXPORT_METHOD(getTraceIDHeader : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     resolve(approovTraceIDHeader);
   }
 }
@@ -792,7 +801,7 @@ RCT_EXPORT_METHOD(getTraceIDHeader : (RCTPromiseResolveBlock)
  * @param header is the header to use for Approov token binding
  */
 RCT_EXPORT_METHOD(setBindingHeader : (NSString *)header) {
-  @synchronized(bindingHeader) {
+  @synchronized(configLock) {
     bindingHeader = header;
   }
   ApproovLogI(@"setBindingHeader %@", header);
@@ -811,7 +820,7 @@ RCT_EXPORT_METHOD(setBindingHeader : (NSString *)header) {
  */
 RCT_EXPORT_METHOD(addSubstitutionHeader : (NSString *)
                       header requiredPrefix : (NSString *)requiredPrefix) {
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     [substitutionHeaders setValue:requiredPrefix forKey:header];
   }
   ApproovLogI(@"addSubstitutionHeader %@, %@", header, requiredPrefix);
@@ -823,7 +832,7 @@ RCT_EXPORT_METHOD(addSubstitutionHeader : (NSString *)
  * @param header is the header to be removed for substitution
  */
 RCT_EXPORT_METHOD(removeSubstitutionHeader : (NSString *)header) {
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     [substitutionHeaders removeObjectForKey:header];
   }
   ApproovLogI(@"removeSubstitutionHeader %@", header);
@@ -839,7 +848,7 @@ RCT_EXPORT_METHOD(removeSubstitutionHeader : (NSString *)header) {
  * @param key is the query parameter key name to be added for substitution
  */
 RCT_EXPORT_METHOD(addSubstitutionQueryParam : (NSString *)key) {
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     [substitutionQueryParams addObject:key];
   }
   ApproovLogI(@"addSubstitutionQueryParam %@", key);
@@ -852,7 +861,7 @@ RCT_EXPORT_METHOD(addSubstitutionQueryParam : (NSString *)key) {
  * @param key is the query parameter key name to be removed for substitution
  */
 RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     [substitutionQueryParams removeObject:key];
   }
   ApproovLogI(@"removeSubstitutionQueryParam %@", key);
@@ -879,7 +888,7 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
  * to exclude them
  */
 RCT_EXPORT_METHOD(addExclusionURLRegex : (NSString *)urlRegex) {
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     [exclusionURLRegexs addObject:urlRegex];
   }
   ApproovLogI(@"addExclusionURLRegex %@", urlRegex);
@@ -893,7 +902,7 @@ RCT_EXPORT_METHOD(addExclusionURLRegex : (NSString *)urlRegex) {
  * to exclude them
  */
 RCT_EXPORT_METHOD(removeExclusionURLRegex : (NSString *)urlRegex) {
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     [exclusionURLRegexs removeObject:urlRegex];
   }
   ApproovLogI(@"removeExclusionURLRegex %@", urlRegex);
@@ -1479,7 +1488,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // obtain a copy of the exclusion URL regular expressions in a thread safe way
   NSSet<NSString *> *exclusionURLs;
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     exclusionURLs = [[NSSet alloc] initWithSet:exclusionURLRegexs copyItems:NO];
   }
 
@@ -1508,7 +1517,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   // update the data hash based on any token binding header
-  @synchronized(bindingHeader) {
+  @synchronized(configLock) {
     if (![bindingHeader isEqualToString:@""]) {
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
       if (headerValue != nil) {
@@ -1599,11 +1608,11 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     if ((result.token != nil && result.token.length > 0) ||
         useApproovStatusIfNoToken) {
       NSString *tokenHeader;
-      @synchronized(approovTokenHeader) {
+      @synchronized(configLock) {
         tokenHeader = approovTokenHeader;
       }
       NSString *tokenPrefix;
-      @synchronized(approovTokenPrefix) {
+      @synchronized(configLock) {
         tokenPrefix = approovTokenPrefix;
       }
       NSString *value = @"";
@@ -1621,7 +1630,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
 
     NSString *traceIDHeader;
-    @synchronized(approovTraceIDHeader) {
+    @synchronized(configLock) {
       traceIDHeader = approovTraceIDHeader;
     }
     NSString *traceID = [result traceID];
@@ -1636,11 +1645,11 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     ApproovLogD(@"Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
     if (useApproovStatusIfNoToken) {
       NSString *tokenHeader;
-      @synchronized(approovTokenHeader) {
+      @synchronized(configLock) {
         tokenHeader = approovTokenHeader;
       }
       NSString *tokenPrefix;
-      @synchronized(approovTokenPrefix) {
+      @synchronized(configLock) {
         tokenPrefix = approovTokenPrefix;
       }
       NSString *value = [NSString
@@ -1663,7 +1672,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // obtain a copy of the substitution headers in a thread safe way
   NSDictionary<NSString *, NSString *> *subsHeaders;
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     subsHeaders = [[NSDictionary alloc] initWithDictionary:substitutionHeaders
                                                  copyItems:NO];
   }
@@ -1715,7 +1724,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // obtain a copy of the substitution query parameter in a thread safe way
   NSSet<NSString *> *subsQueryParams;
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     subsQueryParams = [[NSSet alloc] initWithSet:substitutionQueryParams
                                        copyItems:NO];
   }
@@ -2037,13 +2046,13 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 }
 
 + (NSString *)sharedTokenHeader {
-  @synchronized(approovTokenHeader) {
+  @synchronized(configLock) {
     return approovTokenHeader;
   }
 }
 
 + (NSString *)sharedTraceIDHeader {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     return approovTraceIDHeader;
   }
 }

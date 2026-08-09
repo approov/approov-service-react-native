@@ -21,6 +21,13 @@ export declare class ApproovService {
    */
   static isApproovEnabled(): Promise<boolean>;
   /**
+   * Returns whether native networking interception is currently active for the
+   * platform's HTTP library (Android: the ApproovInterceptor is present in the
+   * active OkHttpClient; iOS: NSURLSession swizzling is active). If this resolves
+   * to false, Approov is not currently intercepting or protecting requests.
+   */
+  static isInterceptorActive(): Promise<boolean>;
+  /**
    * Secure fetch-compatible API for sensitive requests.
    *
    * Note: this is a subset of full React Native fetch/NetworkingModule behavior.
@@ -41,7 +48,7 @@ export declare class ApproovService {
    * re-swizzle its network interception hooks on iOS if it detects they have been
    * hijacked or overwritten by another SDK at runtime.
    *
-   * @param attempts the maximum number of recovery attempts (default is 3).
+   * @param attempts the maximum number of recovery attempts (default is 0).
    */
   static setMaxReswizzleAttempts(attempts: number): void;
 

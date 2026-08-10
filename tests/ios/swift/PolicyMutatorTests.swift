@@ -147,6 +147,22 @@ private func testEmptyMaskBlocksEveryFailureStatus() {
     assertBlocks(mutator, .noNetwork, "empty mask")
 }
 
+private func testFullMaskStillBlocksNonMaskableIOSStatuses() {
+    // notInitialized, badKey and badPayload are iOS-only statuses with no proceed
+    // bit (they fall through PolicyMutator.bitFor's default), so they must BLOCK
+    // even under a full mask (ALL_BITS / ALWAYS_PROCEED). This is the iOS
+    // counterpart to the Android fail-closed guarantee and confirms the documented
+    // behaviour that ALWAYS_PROCEED does not proceed on literally every status.
+    let mutator = PolicyMutator(proceedMask: PolicyMutator.ALL_BITS)
+    assertBlocks(mutator, .notInitialized, "full mask")
+    assertBlocks(mutator, .badKey, "full mask")
+    assertBlocks(mutator, .badPayload, "full mask")
+    // A maskable failure status does proceed under the full mask, confirming the
+    // blocks above are specific to the non-maskable statuses.
+    assertTrue(proceedDecision(mutator, .mitmDetected, "full mask") == true,
+               "A maskable failure status must PROCEED under ALL_BITS")
+}
+
 private func testInMaskFailureProceedsOthersBlock() {
     let mutator = PolicyMutator(proceedMask: PolicyMutator.BIT_MITM_DETECTED)
     assertTrue(proceedDecision(mutator, .mitmDetected, "single-bit mask") == true,
@@ -295,6 +311,7 @@ struct PolicyMutatorTestsRunner {
         testCanonicalBitValuesMatchCrossPlatformContract()
         testBaselineIsNonMaskable()
         testEmptyMaskBlocksEveryFailureStatus()
+        testFullMaskStillBlocksNonMaskableIOSStatuses()
         testInMaskFailureProceedsOthersBlock()
         testMultipleMaskBitsProceedIndependently()
         testSubstitutionHandlersSkipMaskedFailuresAndBlockUnmaskedFailures()

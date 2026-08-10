@@ -13,6 +13,14 @@ public enum ApproovTokenFetchStatus {
     case unknownKey
     case disabled
     case internalError
+    // iOS-only statuses that exist in the real Approov SDK. They have no proceed
+    // bit in PolicyMutator (they fall through bitFor's default), so the stub must
+    // define them for the non-maskable-blocking test to compile and exercise that
+    // path. Keeping the stub faithful to the shipping enum guards against a test
+    // silently binding to a status the real SDK's enum does not match.
+    case notInitialized
+    case badKey
+    case badPayload
 }
 
 public final class ApproovTokenFetchResult {
@@ -56,6 +64,12 @@ public enum Approov {
             return "DISABLED"
         case .internalError:
             return "INTERNAL_ERROR"
+        case .notInitialized:
+            return "NOT_INITIALIZED"
+        case .badKey:
+            return "BAD_KEY"
+        case .badPayload:
+            return "BAD_PAYLOAD"
         }
     }
 }

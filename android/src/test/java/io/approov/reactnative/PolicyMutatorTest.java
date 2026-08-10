@@ -132,20 +132,23 @@ public class PolicyMutatorTest {
     }
 
     @Test
-    public void decideForFullMaskStillBlocksNonMaskableStatuses() {
-        // UNTRUSTED_NETWORK has no proceed bit and is permanently non-maskable: even a
-        // full mask (ALL_BITS) must BLOCK it, so ALWAYS_PROCEED does NOT proceed on every
-        // failure status. This matches the okhttp/urlsession reference layers, whose
-        // default token-fetch handling blocks (default: throw / .ShouldFail) any status
-        // not explicitly allowed. (iOS additionally has notInitialized/badKey/badPayload,
-        // which are likewise non-maskable-blocking on that platform.)
+    public void decideForFullMaskFailsClosedForStatusWithoutBit() {
+        // A status with no proceed bit blocks even under a full mask (ALL_BITS): decideFor's
+        // default branch grants PROCEED only when bitFor(status) is set in the mask, so an
+        // unrecognised status routes to BLOCK. This is the fail-closed guarantee that keeps
+        // ALWAYS_PROCEED from proceeding on something the policy does not recognise, and it is
+        // what will block UNTRUSTED_NETWORK once that status is added to the SDK (3.7.0): with
+        // no bit assigned it takes the same default path. We assert it with a null status
+        // because a not-yet-defined enum constant cannot be named against the SDK this layer
+        // compiles against (3.5.3). Matches okhttp/urlsession, whose default token-fetch
+        // handling blocks (default: throw / .ShouldFail) any status not explicitly allowed.
         int fullMask = NO_APPROOV_SERVICE | BAD_URL | MITM_DETECTED | NO_NETWORK | POOR_NETWORK
             | REJECTED | UNKNOWN_KEY | INTERNAL_ERROR | NO_NETWORK_PERMISSION
             | MISSING_LIB_DEPENDENCY | DISABLED;
 
-        assertEquals("UNTRUSTED_NETWORK must BLOCK even with a full mask",
+        assertEquals("a status with no proceed bit must BLOCK even with a full mask",
             PolicyMutator.Decision.BLOCK,
-            PolicyMutator.decideFor(fullMask, Approov.TokenFetchStatus.UNTRUSTED_NETWORK));
+            PolicyMutator.decideFor(fullMask, null));
     }
 
     // --- pure static helper: bitFor ---

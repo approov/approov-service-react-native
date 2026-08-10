@@ -137,11 +137,11 @@ public class PolicyMutatorTest {
         // default branch grants PROCEED only when bitFor(status) is set in the mask, so an
         // unrecognised status routes to BLOCK. This is the fail-closed guarantee that keeps
         // ALWAYS_PROCEED from proceeding on something the policy does not recognise, and it is
-        // what will block UNTRUSTED_NETWORK once that status is added to the SDK (3.7.0): with
-        // no bit assigned it takes the same default path. We assert it with a null status
-        // because a not-yet-defined enum constant cannot be named against the SDK this layer
-        // compiles against (3.5.3). Matches okhttp/urlsession, whose default token-fetch
-        // handling blocks (default: throw / .ShouldFail) any status not explicitly allowed.
+        // what will block any status a later SDK adds without a bit: it takes the same default
+        // path. We assert it with a null status because a status not defined by the SDK this
+        // layer compiles against (3.5.3) cannot be named here. Matches okhttp/urlsession, whose
+        // default token-fetch handling blocks (default: throw / .ShouldFail) any status not
+        // explicitly allowed.
         int fullMask = NO_APPROOV_SERVICE | BAD_URL | MITM_DETECTED | NO_NETWORK | POOR_NETWORK
             | REJECTED | UNKNOWN_KEY | INTERNAL_ERROR | NO_NETWORK_PERMISSION
             | MISSING_LIB_DEPENDENCY | DISABLED;

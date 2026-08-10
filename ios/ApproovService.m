@@ -1479,7 +1479,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"Approov disabled, forwarding: %@", url);
+    ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed

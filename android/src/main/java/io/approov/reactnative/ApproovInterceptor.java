@@ -140,7 +140,9 @@ public class ApproovInterceptor implements Interceptor {
         }
 
         if (!approovService.isApproovEnabled()) {
-            Log.d(TAG, "approov disabled, forwarded: " + url);
+            // INFO (was DEBUG): bypass mode is security-relevant and should be visible in
+            // production logs, matching the iOS layer. Message kept identical across platforms.
+            Log.i(TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
             return chain.proceed(request);
         }
 

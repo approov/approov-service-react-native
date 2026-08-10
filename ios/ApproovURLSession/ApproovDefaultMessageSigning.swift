@@ -185,8 +185,8 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                 sigId = "install"
                 guard let base64Signature = ApproovService.getInstallMessageSignature(message),
                       let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    os_log("ApproovService: install message signature unavailable, skipping signing", type: .error)
-                    return request
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: install message signature unavailable or undecodable, skipping signing")
                 }
                 // The backend verifier expects the raw IEEE-P1363 r||s form.
                 do {
@@ -200,8 +200,8 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                 sigId = "account"
                 guard let base64Signature = ApproovService.getAccountMessageSignature(message),
                       let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    os_log("ApproovService: account message signature unavailable, skipping signing", type: .error)
-                    return request
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: account message signature unavailable or undecodable, skipping signing")
                 }
                 signature = decodedSignature
             default:

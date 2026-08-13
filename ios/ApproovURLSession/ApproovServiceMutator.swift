@@ -92,7 +92,16 @@ public protocol ApproovServiceMutator {
 
     /**
      * Decides whether certificate pinning should be applied to a request or not.
-     * Called at the start of the ApproovService pinning processing.
+     *
+     * NOT CURRENTLY CALLED. The iOS pin check runs unconditionally in ApproovPinningDelegate, and
+     * the Objective-C to Swift bridge exposes no pinning entry point, so implementing this has no
+     * effect: pinning is applied to every request whatever the return value. Android is in the same
+     * position for a different reason (pins are a client-level OkHttp CertificatePinner with no
+     * request in scope), and the two platforms are deliberately kept consistent rather than fixing
+     * one of them alone. It will be honoured on both platforms once Android pinning moves into a
+     * network interceptor.
+     *
+     * See https://github.com/approov/approov-service-react-native/issues/35
      */
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool
 }
@@ -277,6 +286,8 @@ public extension ApproovServiceMutator {
         return request
     }
 
+    // Not consulted by the layer: see the protocol declaration above and
+    // https://github.com/approov/approov-service-react-native/issues/35
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
         return true
     }

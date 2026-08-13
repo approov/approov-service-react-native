@@ -512,9 +512,18 @@ class EnforceTokenMutator: ApproovServiceMutator {
     func handleFetchCustomJWTResult(_ approovResults: ApproovTokenFetchResult) throws {}
     func handleInterceptorHeaderSubstitutionResult(_ approovResults: ApproovTokenFetchResult, header: String) throws -> Bool { return true }
     func handleInterceptorQueryParamSubstitutionResult(_ approovResults: ApproovTokenFetchResult, queryKey: String) throws -> Bool { return true }
-    func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool { return true }
+    func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool { return true } // not consulted, see note below
 }
 ```
+
+> **`handlePinningShouldProcessRequest` is not currently honoured on either platform.** It is part of
+> the interface, so you must implement it, but the layer never calls it and Approov pinning is applied
+> to every request whatever you return. On Android the pins are a client-level OkHttp
+> `CertificatePinner` with no request in scope; on iOS the pin check runs unconditionally in
+> `ApproovPinningDelegate`. Both platforms will honour it together once Android pinning moves into a
+> network interceptor — iOS will not be changed on its own, so that behaviour stays common across
+> platforms. Progress:
+> [approov-service-react-native#35](https://github.com/approov/approov-service-react-native/issues/35).
 
 Register your mutator in `AppDelegate.swift` or `AppDelegate.mm`:
 
@@ -610,6 +619,8 @@ public class PolicyDrivenMutator implements ApproovServiceMutator {
         return req.newBuilder().header("X-Client-Platform", "android").build();
     }
     
+    // NOTE: not currently honoured — the layer never calls this, so pinning is still applied to
+    // every request. See https://github.com/approov/approov-service-react-native/issues/35
     @Override
     public boolean handlePinningShouldProcessRequest(Request request) {
         String host = request.url().host();
@@ -666,6 +677,8 @@ class PolicyDrivenMutator: ApproovServiceMutator {
         return req
     }
 
+    // NOTE: not currently honoured — the layer never calls this, so pinning is still applied to
+    // every request. See https://github.com/approov/approov-service-react-native/issues/35
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
         guard let host = request.url?.host else { return true }
         return !skipPinningHosts.contains(host)

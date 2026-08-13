@@ -342,10 +342,20 @@ public interface ApproovServiceMutator {
 
     /**
      * Decides whether certificate pinning should be applied to a request or not.
-     * Called at the start of the ApproovService pinning processing.
+     *
+     * <p><b>NOT CURRENTLY CALLED.</b> This React Native layer applies pins through a client-level
+     * OkHttp {@code CertificatePinner} (see {@code ApproovClientBuilder}), which is consumed inside
+     * the TLS handshake and has no request in scope, so a per-request decision cannot be made.
+     * Overriding this method therefore has no effect: pinning is applied to every request whatever
+     * the return value. The same is true on iOS, where the pin check runs unconditionally in
+     * {@code ApproovPinningDelegate}; the two platforms are deliberately kept consistent rather
+     * than fixing one of them alone. It will be honoured on both platforms once Android pinning
+     * moves into a network interceptor, as {@code approov-service-okhttp} already does.
+     *
+     * <p>See https://github.com/approov/approov-service-react-native/issues/35
      *
      * @param request the request being processed
-     * @return true if pinning should be applied, false to skip it
+     * @return true if pinning should be applied, false to skip it (currently ignored)
      */
     default boolean handlePinningShouldProcessRequest(Request request) {
         // By default do not skip pinning for any requests

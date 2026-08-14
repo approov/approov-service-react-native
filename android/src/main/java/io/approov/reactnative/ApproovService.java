@@ -200,14 +200,37 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
 
-    // The mutator instance used to control ApproovService behavior
-    private static ApproovServiceMutator serviceMutator;
+    // The mutator instance used to control ApproovService behavior. Marked volatile because
+    // it is written from setServiceMutator/setServiceMutatorType and from the re-initialization
+    // reset (the latter under synchronized (this)), but read by the interceptor on OkHttp
+    // network threads through the static, unsynchronized getServiceMutator(). The instance
+    // monitor held by the reset does not order those reads, so without volatile a request
+    // racing a config-change re-initialization could keep using a stale custom mutator.
+    private static volatile ApproovServiceMutator serviceMutator;
 
     static {
+        serviceMutator = buildDefaultServiceMutator();
+    }
+
+    /**
+     * Builds the React Native default service mutator, including HTTP Message
+     * Signing.
+     *
+     * @return a freshly configured default signing mutator
+     */
+    private static ApproovDefaultMessageSigning buildDefaultServiceMutator() {
         ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
         signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-        serviceMutator = signer;
+        return signer;
     }
+
+    /**
+     * Sentinel mask value selecting the built-in signing default rather than a
+     * {@link PolicyMutator}. Passed from JavaScript as {@code MutatorPreset.DEFAULT}
+     * to {@link #setServiceMutatorType(double, boolean, Promise)} to restore the
+     * out-of-box {@link ApproovDefaultMessageSigning} mutator (with message signing).
+     */
+    public static final int MUTATOR_PRESET_DEFAULT = -1;
 
     /**
      * Sets the ApproovServiceMutator instance to handle configurations.
@@ -216,7 +239,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
-            mutator = ApproovServiceMutator.DEFAULT;
+            mutator = buildDefaultServiceMutator();
         }
         serviceMutator = mutator;
         if (currentLogLevel <= LOG_DEBUG) {
@@ -231,6 +254,68 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     public static ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
+    }
+
+    /**
+     * Selects the active service mutator from JavaScript.
+     *
+     * <p>A {@code mask} equal to {@link #MUTATOR_PRESET_DEFAULT} restores the
+     * built-in {@link ApproovDefaultMessageSigning} mutator (with message
+     * signing), exactly as the static initializer configures it; the {@code sign}
+     * flag is not applicable in that case. Any other value installs a
+     * {@link PolicyMutator} driven by that proceed bitmask (see the
+     * {@code PolicyMutator.BIT_*} constants).
+     *
+     * <p>This call uses replace semantics: the newly built mutator wholly replaces
+     * any previously-installed mutator; it does not wrap or compose with it.
+     *
+     * @param maskDouble the proceed bitmask (bridged as a double), or
+     *                   {@link #MUTATOR_PRESET_DEFAULT} to restore the default
+     * @param sign       {@code true} to HTTP Message Sign the processed request
+     *                   (the default), {@code false} to proceed per the mask but
+     *                   forward the request unsigned; ignored for
+     *                   {@link #MUTATOR_PRESET_DEFAULT}
+     * @param promise    resolved with null on success, rejected on error
+     */
+    @ReactMethod
+    public void setServiceMutatorType(double maskDouble, boolean sign, Promise promise) {
+        try {
+            // The mask is bridged from JavaScript as a double. Reject any value that is
+            // not a finite, integral, 32-bit quantity before narrowing to int: a
+            // fractional value (e.g. 1.5), NaN/Infinity, or an out-of-range magnitude
+            // would otherwise be silently truncated or coerced by the (int) cast and
+            // could install a policy other than the one the caller intended. This is
+            // security-relevant: the mask decides which failure statuses may proceed.
+            if (Double.isNaN(maskDouble) || Double.isInfinite(maskDouble)
+                    || maskDouble != Math.floor(maskDouble)
+                    || maskDouble < Integer.MIN_VALUE || maskDouble > Integer.MAX_VALUE) {
+                promise.reject("setServiceMutatorType",
+                        "invalid mutator mask: expected a finite 32-bit integer bitmask, got " + maskDouble);
+                return;
+            }
+            int mask = (int) maskDouble;
+            // Reject undefined bits. Only PolicyMutator.ALL_BITS name a token-fetch status;
+            // a mask carrying any other bit (e.g. 1 << 11) grants PROCEED to nothing and
+            // would install a policy that silently BLOCKs every failure status. Fail loudly
+            // instead, so a caller's typo cannot masquerade as a deliberate block-all policy.
+            if (mask != MUTATOR_PRESET_DEFAULT && (mask & ~PolicyMutator.ALL_BITS) != 0) {
+                promise.reject("setServiceMutatorType",
+                        "invalid mutator mask: undefined bits set (allowed bits 0-10, mask 0x"
+                                + Integer.toHexString(PolicyMutator.ALL_BITS) + "), got 0x"
+                                + Integer.toHexString(mask));
+                return;
+            }
+            if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
+                setServiceMutator(null);
+            } else {
+                setServiceMutator(new PolicyMutator(mask, sign));
+            }
+            if (currentLogLevel <= LOG_DEBUG)
+                Log.d(TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
+            promise.resolve(null);
+        } catch (Exception e) {
+            promise.reject("setServiceMutatorType", e.getMessage(), e);
+        }
     }
 
     /**
@@ -675,11 +760,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     /**
      * Initializes the ApproovService with an account configuration and comment.
-     * Resets service-layer state if the configuration changes. A same-config
-     * re-initialization preserves any configuration applied after the first setup.
+     * Service-layer state is only reset after the platform SDK confirms success.
      * The platform SDK returns true on first initialization or false if it is
      * already initialized with the same configuration (treated as success). Any other
-     * failure — such as a different-config conflict — throws and is surfaced as a
+     * failure, such as a different-config conflict, throws and is surfaced as a
      * rejected promise.
      *
      * @param config  the configuration string, or empty string for bypass mode
@@ -702,16 +786,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
             return;
         }
 
-        // Detect whether this is a re-initialization with the identical config that is
-        // already in force. Re-initializing with the same config (e.g. an ApproovProvider
-        // remount, a React StrictMode double-invoke or Fast Refresh in development) must
-        // NOT discard the runtime configuration the app set up after the first initialize()
-        // call — substitution headers, exclusion URL regexes and token/binding header
-        // settings. Wiping those silently would drop request mutations and, more seriously,
-        // exclusion rules that are security relevant. Only a genuinely different config
-        // resets the service-layer state.
-        boolean configUnchanged = isInitialized && config.equals(initialConfig);
-
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.
@@ -722,10 +796,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     log(LOG_DEBUG, TAG, "Approov SDK already initialized");
                 }
             }
-            // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
-            // configuration is only reset when the config actually changes; a same-config
-            // re-initialization preserves any configuration applied after the first call.
-            //
+            // SDK succeeded (or bypass) — now commit a fresh service-layer state.
+            // Same-config re-initialization is an initialization boundary too: it is
+            // forwarded to the SDK first, then runtime configuration and custom
+            // mutators are reset only after native success.
             // The reset and commit are performed under the instance monitor so the
             // transition is atomic relative to the interceptor, which reads isInitialized,
             // isApproovEnabled and the header/substitution/exclusion state through
@@ -737,20 +811,35 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // outside the lock so its network work never blocks those getters. iOS performs
             // the equivalent reset inside @synchronized(initializerLock).
             synchronized (this) {
-                if (!configUnchanged) {
-                    isInitialized = false;
-                    initialConfig = null;
-                    useApproovStatusIfNoToken = false;
-                    approovTokenHeader = APPROOV_TOKEN_HEADER;
-                    approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-                    approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-                    bindingHeader = null;
-                    substitutionHeaders = new HashMap<>();
-                    substitutionQueryParams = new HashMap<>();
-                    exclusionURLRegexs = new HashMap<>();
-                    suppressLoggingUnknownURL = false;
-                    sessionMetadataCollectionEnabled = true;
-                }
+                // Warn about runtime configuration that is about to be discarded. Token
+                // binding ceasing to apply is the security-relevant one, so it is called
+                // out separately from the rest.
+                if (bindingHeader != null)
+                    Log.w(TAG, "initialization is discarding the binding header - re-apply " +
+                            "setBindingHeader after initialize or tokens will no longer be " +
+                            "bound to that header value");
+                if (!substitutionHeaders.isEmpty() || !substitutionQueryParams.isEmpty()
+                        || !exclusionURLRegexs.isEmpty())
+                    Log.w(TAG, "initialization is discarding runtime configuration " +
+                            "(substitution headers/query params and exclusion regexes) - " +
+                            "re-apply it after initialize if it is still required");
+                isInitialized = false;
+                initialConfig = null;
+                useApproovStatusIfNoToken = false;
+                approovTokenHeader = APPROOV_TOKEN_HEADER;
+                approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+                approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+                bindingHeader = null;
+                substitutionHeaders = new HashMap<>();
+                substitutionQueryParams = new HashMap<>();
+                exclusionURLRegexs = new HashMap<>();
+                suppressLoggingUnknownURL = false;
+                sessionMetadataCollectionEnabled = true;
+                if ((serviceMutator != null) && (serviceMutator.getClass() != ApproovDefaultMessageSigning.class))
+                    Log.w(TAG, "initialization is discarding a custom service mutator - re-apply " +
+                            "setServiceMutatorType (or setServiceMutator) after initialize if a " +
+                            "custom policy is still required");
+                serviceMutator = buildDefaultServiceMutator();
                 initialConfig = config;
                 isInitialized = true;
             }
@@ -1066,7 +1155,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public synchronized void setTokenHeader(String header, String prefix) {
         log(LOG_DEBUG, TAG, "setTokenHeader " + header + ", " + prefix);
         approovTokenHeader = header;
-        approovTokenPrefix = prefix;
+        approovTokenPrefix = (prefix == null) ? APPROOV_TOKEN_PREFIX : prefix;
     }
 
     /**

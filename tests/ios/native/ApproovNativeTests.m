@@ -63,6 +63,11 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
              rejecter:(RCTPromiseRejectBlock)reject;
 - (void)isApproovEnabled:(RCTPromiseResolveBlock)resolve
                 rejecter:(RCTPromiseRejectBlock)reject;
+- (void)setServiceMutatorType:(double)mask
+                         sign:(BOOL)sign
+                     resolver:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject;
+- (void)setTokenHeader:(NSString *)header prefix:(NSString *_Nullable)prefix;
 @end
 
 @implementation RCTTestNetworkDelegate
@@ -293,12 +298,9 @@ static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(v
              @"SDK failure after empty bootstrap should preserve the bypass initialized state");
 }
 
-// Regression guard: re-initializing with the SAME config (e.g. an ApproovProvider
-// remount, a React StrictMode double-invoke or Fast Refresh in development) must NOT
-// discard the runtime configuration the app applied after the first initialize() call.
-// Wiping substitution headers and, more seriously, exclusion URL regexes would silently
-// drop request mutations and security-relevant exclusion rules.
-static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
+// Regression guard: re-initializing with the SAME config is forwarded to the
+// platform SDK and, after native success, resets service-layer runtime state.
+static void TestInitializeWithSameConfigResetsRuntimeConfiguration(void) {
   ApproovService *service = FreshService();
 
   __block BOOL firstResolved = NO;
@@ -327,13 +329,25 @@ static void TestInitializeWithSameConfigPreservesRuntimeConfiguration(void) {
                         __unused NSError *error) {}];
   AssertTrue(secondResolved, @"Same-config re-initialization should resolve");
 
-  // The runtime configuration must survive the same-config re-initialization.
-  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] != nil,
-             @"Substitution header should be preserved across same-config re-init");
-  AssertTrue([exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
-             @"Exclusion URL regex should be preserved across same-config re-init");
-  AssertEqualObjects(@"X-Custom-Token", approovTokenHeader,
-                     @"Token header should be preserved across same-config re-init");
+  // The runtime configuration resets only after the SDK accepts the
+  // re-initialization.
+  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] == nil,
+             @"Substitution header should be cleared across same-config re-init");
+  AssertTrue(![exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
+             @"Exclusion URL regex should be cleared across same-config re-init");
+  AssertEqualObjects(@"Approov-Token", approovTokenHeader,
+                     @"Token header should reset across same-config re-init");
+}
+
+static void TestSetTokenHeaderTreatsNilPrefixAsEmptyString(void) {
+  ApproovService *service = FreshService();
+
+  [service setTokenHeader:@"X-Approov-Token" prefix:nil];
+
+  AssertEqualObjects(@"X-Approov-Token", approovTokenHeader,
+                     @"Token header should update");
+  AssertEqualObjects(@"", approovTokenPrefix,
+                     @"Nil token prefix should be stored as an empty string");
 }
 
 
@@ -651,6 +665,159 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   [NSURLProtocol unregisterClass:[CaptureProtocol class]];
 }
 
+static void TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(void) {
+  ApproovService *service = FreshService();
+  isInitialized = YES;
+  [substitutionHeaders setObject:@"" forKey:@"Api-Key"];
+
+  ApproovTestEnqueueTokenResult(
+      Result(ApproovTokenFetchStatusSuccess, @"jwt", @"", @"trace", NO));
+  ApproovTestEnqueueSecureStringResult(
+      Result(ApproovTokenFetchStatusNoApproovService, @"", @"", @"", NO));
+
+  __block BOOL sawNoApproovService = NO;
+  ApproovMutatorBridgeSetHeaderSubstitutionHandler(
+      ^BOOL(id result, NSString *header, NSError **errorPointer) {
+        (void)errorPointer;
+        ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+        sawNoApproovService =
+            [header isEqualToString:@"Api-Key"] &&
+            fetchResult.status == ApproovTokenFetchStatusNoApproovService;
+        return NO;
+      });
+
+  NSMutableURLRequest *request = MutableRequest(@"https://example.com/data");
+  [request setValue:@"header-key" forHTTPHeaderField:@"Api-Key"];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertTrue(sawNoApproovService,
+             @"Header substitution should consult the mutator for NO_APPROOV_SERVICE");
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Masked NO_APPROOV_SERVICE substitution should not fail the request");
+  AssertEqualObjects(@"header-key",
+                     [result.request valueForHTTPHeaderField:@"Api-Key"],
+                     @"Masked NO_APPROOV_SERVICE should leave the header placeholder in place");
+  ApproovMutatorBridgeReset();
+  (void)service;
+}
+
+// Regression for the setServiceMutatorType mask validation (Copilot review, PR #32).
+// The proceed bitmask is bridged from JavaScript as a double; a non-finite, fractional,
+// or out-of-32-bit-range value must be rejected before it is narrowed, so it can never be
+// silently coerced into an unintended (security-relevant) proceed policy. A well-formed
+// mask (including the DEFAULT sentinel -1) must still be accepted. This mirrors the Android
+// ApproovServicePublicApiTest coverage so both platforms enforce identical behaviour.
+static void TestSetServiceMutatorTypeValidatesMask(void) {
+  const double invalidMasks[] = {
+      1.5,           // fractional
+      NAN,           // not a number
+      INFINITY,      // +infinity
+      -INFINITY,     // -infinity
+      2147483648.0,  // 2^31, above the signed 32-bit range
+      -2147483649.0, // -(2^31) - 1, below the signed 32-bit range
+      // Undefined bits: only bits 0-10 name a token-fetch status, so a mask carrying any
+      // other bit grants PROCEED to nothing and would install a silent block-everything
+      // policy. Mirrors setServiceMutatorTypeRejectsMasksWithUndefinedBits on Android.
+      2048.0,        // 1 << 11, first bit above BIT_DISABLED
+      1073741824.0,  // 1 << 30, far above the defined range
+      2056.0,        // BIT_NO_NETWORK (1 << 3) plus an undefined bit (1 << 11)
+      2147483647.0,  // INT32_MAX — in range, but mostly undefined bits
+      -2.0           // negative, but not the DEFAULT sentinel
+  };
+  for (size_t i = 0; i < sizeof(invalidMasks) / sizeof(invalidMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    __block BOOL didResolve = NO;
+    __block NSString *rejectionCode = nil;
+    [service setServiceMutatorType:invalidMasks[i]
+                              sign:YES
+                          resolver:^(__unused id value) { didResolve = YES; }
+                          rejecter:^(NSString *code, __unused NSString *message,
+                                     __unused NSError *error) { rejectionCode = code; }];
+    AssertTrue(!didResolve,
+               [NSString stringWithFormat:@"invalid mask %g should not resolve",
+                                          invalidMasks[i]]);
+    AssertEqualObjects(@"setServiceMutatorType", rejectionCode,
+               [NSString stringWithFormat:@"invalid mask %g should reject with setServiceMutatorType",
+                                          invalidMasks[i]]);
+  }
+
+  const double validMasks[] = {
+      -1.0,   // MutatorPreset.DEFAULT — restore the built-in signing default
+      0.0,    // block every maskable failure status
+      20.0,   // BIT_NO_NETWORK (1 << 3) | BIT_POOR_NETWORK (1 << 4)
+      2047.0  // every defined bit (0-10) — the permissive extreme
+  };
+  for (size_t i = 0; i < sizeof(validMasks) / sizeof(validMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    __block BOOL didResolve = NO;
+    __block NSString *rejectionCode = nil;
+    [service setServiceMutatorType:validMasks[i]
+                              sign:YES
+                          resolver:^(__unused id value) { didResolve = YES; }
+                          rejecter:^(NSString *code, __unused NSString *message,
+                                     __unused NSError *error) { rejectionCode = code; }];
+    AssertTrue(didResolve,
+               [NSString stringWithFormat:@"valid mask %g should resolve", validMasks[i]]);
+    AssertTrue(rejectionCode == nil,
+               [NSString stringWithFormat:@"valid mask %g should not reject", validMasks[i]]);
+  }
+}
+
+// Regression for the mutator reset on any successful re-initialization.
+// ApproovService.m calls -[ApproovServiceMutatorBridge resetToDefault] only after
+// the native SDK accepts the initialization. The bridge stub records the call so
+// this integration point is asserted here rather than assumed.
+static void TestInitializeResetsServiceMutatorOnReinitialization(void) {
+  ApproovService *service = FreshService();
+
+  __block BOOL firstResolved = NO;
+  [service initialize:@"config-one"
+              comment:nil
+             resolver:^(__unused id value) { firstResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+                        __unused NSError *error) {}];
+  AssertTrue(firstResolved, @"First initialization should resolve");
+
+  // Install a PolicyMutator, as an app would from JavaScript.
+  __block BOOL policyResolved = NO;
+  [service setServiceMutatorType:8.0  // BIT_NO_NETWORK (1 << 3)
+                            sign:NO
+                        resolver:^(__unused id value) { policyResolved = YES; }
+                        rejecter:^(__unused NSString *code, __unused NSString *message,
+                                   __unused NSError *error) {}];
+  AssertTrue(policyResolved, @"setServiceMutatorType should resolve for a valid mask");
+  AssertTrue(ApproovMutatorBridgeSetPolicyMutatorCount() == 1,
+             @"setServiceMutatorType should install a PolicyMutator via the bridge");
+  AssertTrue(ApproovMutatorBridgeLastPolicyMutatorMask() == 8,
+             @"the bridge should receive the mask supplied by the caller");
+  AssertTrue(!ApproovMutatorBridgeLastPolicyMutatorSign(),
+             @"the bridge should receive the sign flag supplied by the caller");
+
+  NSUInteger resetsAfterFirstInit = ApproovMutatorBridgeResetToDefaultCount();
+
+  // A same-config re-initialization is an initialization boundary and must reset.
+  __block BOOL sameConfigResolved = NO;
+  [service initialize:@"config-one"
+              comment:nil
+             resolver:^(__unused id value) { sameConfigResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+	                       __unused NSError *error) {}];
+  AssertTrue(sameConfigResolved, @"Same-config re-initialization should resolve");
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 1,
+             @"Same-config re-initialization must reset the service mutator");
+
+  // A genuinely different config must reset the mutator.
+  __block BOOL differentConfigResolved = NO;
+  [service initialize:@"config-two"
+              comment:nil
+             resolver:^(__unused id value) { differentConfigResolved = YES; }
+             rejecter:^(__unused NSString *code, __unused NSString *message,
+	                       __unused NSError *error) {}];
+  AssertTrue(differentConfigResolved, @"Different-config re-initialization should resolve");
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 2,
+             @"Different-config re-initialization must reset the service mutator to default");
+}
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -658,7 +825,8 @@ int main(void) {
       ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
       ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
       ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
-      ^{ TestInitializeWithSameConfigPreservesRuntimeConfiguration(); },
+      ^{ TestInitializeWithSameConfigResetsRuntimeConfiguration(); },
+      ^{ TestSetTokenHeaderTreatsNilPrefixAsEmptyString(); },
       ^{ TestMockStatusCompletionHandlersFire(); },
       ^{ TestMockErrorCompletionHandlersFire(); },
       ^{ TestMockUploadCompletionHandlersFire(); },
@@ -666,6 +834,9 @@ int main(void) {
       ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
       ^{ TestFetchWithApproovRejectsInvalidURLs(); },
       ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
+      ^{ TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(); },
+      ^{ TestSetServiceMutatorTypeValidatesMask(); },
+      ^{ TestInitializeResetsServiceMutatorOnReinitialization(); },
     ];
 
     for (void (^testBlock)(void) in tests) {

@@ -214,6 +214,33 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
+     * Logs a message-signing failure that should not abort the request.
+     *
+     * <p>Fail-open/fail-closed rule for message signing: a failure to obtain or
+     * encode a signature proceeds with the request unsigned via this helper —
+     * signature unavailability, base64 and ASN.1/DER decode failures, and header
+     * serialization failures all take this path, because they mean the signature
+     * could not be produced, not that the request is untrustworthy. Exactly two
+     * cases fail closed and abort the request by throwing: an unsupported
+     * signature algorithm, and a required body digest that cannot be created.
+     * Both indicate the caller asked for a guarantee that cannot be honoured, so
+     * sending the request unsigned would silently weaken it.
+     *
+     * @param request The original request to forward unsigned.
+     * @param reason  The reason signing was skipped.
+     * @param cause   Optional failure cause.
+     * @return The original request.
+     */
+    private Request proceedUnsigned(Request request, String reason, Throwable cause) {
+        if (cause == null) {
+            Log.e(TAG, reason);
+        } else {
+            Log.e(TAG, reason, cause);
+        }
+        return request;
+    }
+
+    /**
      * Adds message signature to requests that have passed through the Approov
      * interceptor. The request is only modified to include message signature
      * headers if an ApproovToken has been added to the request and if there is
@@ -258,7 +285,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
 
         // Apply the params to get the message
         SignatureBaseBuilder baseBuilder = new SignatureBaseBuilder(params, provider);
-        String message = baseBuilder.createSignatureBase();
+        String message;
+        try {
+            message = baseBuilder.createSignatureBase();
+        } catch (RuntimeException e) {
+            return proceedUnsigned(request, "Failed to create signature base - skipping message signing", e);
+        }
         // WARNING never log the message as it contains an Approov token which provides
         // access to your API.
 
@@ -272,14 +304,19 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 try {
                     base64 = getInstallMessageSignature(message);
                 } catch (ApproovException e) {
-                    Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
-                    return request;
+                    return proceedUnsigned(request,
+                            "Failed to get InstallMessageSignature - skipping message signing", e);
                 }
-                if (base64.isEmpty()) {
-                    Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
-                    return request;
+                if (base64 == null || base64.isEmpty()) {
+                    return proceedUnsigned(request,
+                            "InstallMessageSignature is unavailable - skipping message signing", null);
                 }
-                signature = decodeBase64(base64);
+                try {
+                    signature = decodeBase64(base64);
+                } catch (RuntimeException e) {
+                    return proceedUnsigned(request,
+                            "Failed to decode InstallMessageSignature base64 - skipping message signing", e);
+                }
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
                     ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
@@ -294,24 +331,46 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                         throw new IllegalStateException("Not an ASN1Sequence");
                     }
                 } catch (Exception e) {
-                    throw new IllegalStateException("Failed to decode ASN.1 DER ES256 signature", e);
+                    return proceedUnsigned(request,
+                            "Failed to decode ASN.1 DER ES256 signature - skipping message signing", e);
                 }
                 break;
             }
             case ALG_HS256: {
                 sigId = "account";
-                String base64 = getAccountMessageSignature(message);
-                signature = decodeBase64(base64);
+                String base64;
+                try {
+                    base64 = getAccountMessageSignature(message);
+                } catch (ApproovException e) {
+                    return proceedUnsigned(request,
+                            "Failed to get AccountMessageSignature - skipping message signing", e);
+                }
+                if (base64 == null || base64.isEmpty()) {
+                    return proceedUnsigned(request,
+                            "AccountMessageSignature is unavailable - skipping message signing", null);
+                }
+                try {
+                    signature = decodeBase64(base64);
+                } catch (RuntimeException e) {
+                    return proceedUnsigned(request,
+                            "Failed to decode AccountMessageSignature base64 - skipping message signing", e);
+                }
                 break;
             }
             default:
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        String sigHeader = Dictionary.valueOf(Map.of(
-                sigId, ByteSequenceItem.valueOf(signature))).serialize();
-        String sigInputHeader = Dictionary.valueOf(Map.of(
-                sigId, params.toComponentValue())).serialize();
+        String sigHeader;
+        String sigInputHeader;
+        try {
+            sigHeader = Dictionary.valueOf(Map.of(
+                    sigId, ByteSequenceItem.valueOf(signature))).serialize();
+            sigInputHeader = Dictionary.valueOf(Map.of(
+                    sigId, params.toComponentValue())).serialize();
+        } catch (RuntimeException e) {
+            return proceedUnsigned(request, "Failed to serialize signature headers - skipping message signing", e);
+        }
 
         // Debugging - log the message and signature-related headers
         // WARNING never log the message in production code as it contains the Approov
@@ -334,8 +393,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 String digestHeader = Dictionary.valueOf(Map.of(
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
                 signedBuilder.header("Signature-Base-Digest", digestHeader);
-            } catch (NoSuchAlgorithmException e) {
-                Log.d(TAG, "Failed to get digest algorithm - no debug entry " + e);
+            } catch (RuntimeException | NoSuchAlgorithmException e) {
+                Log.e(TAG, "Failed to add debug signature base digest", e);
             }
         } else {
             signedBuilder.removeHeader("Signature-Base-Digest");

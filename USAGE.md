@@ -196,6 +196,20 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
 
+> ⚠️ **The status string differs between platforms.** Android emits the SDK enum name, iOS emits the
+> SDK's human-readable description:
+>
+> | Condition | Android | iOS |
+> |---|---|---|
+> | MITM detected on the Approov channel | `MITM_DETECTED` | `MITM detected` |
+>
+> Android uses `TokenFetchStatus.toString()` (the enum name, matching the okhttp and retrofit
+> layers); iOS uses `stringFromApproovTokenFetchStatus`, which returns prose. A backend that matches
+> the Android spelling exactly will therefore **not** match traffic from iOS. Until this is
+> normalised, either match case-insensitively ignoring separators, or map both forms at the backend.
+> Verified on device/simulator: an iOS request that proceeded under a `MITM_DETECTED` policy arrived
+> with `approov-token: MITM detected`.
+
 ## Using `fetchWithApproov` (Alternative to Swizzling)
 
 By default, the `@approov/approov-service-react-native` package uses **swizzling (iOS)** and **OkHttpClient factory overrides (Android)** to automatically intercept all React Native `fetch()` calls and inject Approov tokens.
@@ -255,7 +269,88 @@ The table below covers only the statuses relevant to the network interceptor pat
 The `ApproovServiceMutator` allows you to customize the behavior of the Approov network layer at key points in the request lifecycle. 
 
 **Important Architecture Note:** 
-Because the React Native bridge does not support passing complex executable code or classes, custom mutators must be implemented and registered directly in your platform-native code (Java/Kotlin for Android, Swift/Objective-C for iOS).
+Because the React Native bridge does not support passing complex executable code or classes, a **fully custom** mutator must be implemented and registered directly in your platform-native code (Java/Kotlin for Android, Swift/Objective-C for iOS). For the common case — choosing which failure statuses proceed or block, with or without message signing — you can instead select a policy entirely from JavaScript with **no native code**; see [Selecting a request policy from JavaScript (no native code)](#selecting-a-request-policy-from-javascript-no-native-code) below.
+
+### Selecting a request policy from JavaScript (no native code)
+
+For the common case — choosing which Approov **failure** statuses are allowed to proceed, and whether the outbound request is still signed — you do not need to write a native mutator. `ApproovService.setServiceMutatorType(mask, options?)` installs the matching policy mutator natively from a single JavaScript call, so the whole decision lives in your app's JS/TypeScript. Drop down to a [native `ApproovServiceMutator`](#customizing-request-handling-with-native-mutators) only when you need fully custom per-request logic (host scoping, custom headers, and so on). Behaviour is identical on Android and iOS.
+
+**Most apps: use a named preset.**
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+await ApproovService.initialize('<config>');
+// proceed even if the Approov service is unavailable (e.g. offline), still signed:
+await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_IF_UNAVAILABLE);
+```
+
+`ApproovService.MutatorPreset` values:
+
+| Preset | Effect |
+| :--- | :--- |
+| `DEFAULT` | Restore the built-in default mutator (the standard behaviour described under *Default Behavior* above, including HTTP Message Signing). |
+| `ALWAYS_PROCEED` | Proceed on every **maskable** failure status — includes `MITM_DETECTED` and `REJECTED` (read the warning below). Note: any status with no proceed bit still blocks even under this preset; on iOS this applies to `notInitialized`/`badKey`/`badPayload`. |
+| `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service itself is unavailable (`NO_APPROOV_SERVICE`). Note this is not the offline case: a device without connectivity yields `NO_NETWORK`, which this preset blocks — add `ReturnDecision.NO_NETWORK` to the mask if you also want to tolerate offline devices. |
+| `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL` (non-`https` traffic, e.g. Metro dev servers); the request still runs through the Approov pipeline. Development only. |
+
+**What "proceed" sends on a failure status.** On any tolerated failure status nothing Approov-derived is available: there is no Approov token (it is only added on `SUCCESS`), and no substituted secrets or API keys (each substitution requires its own fetch from the Approov service, which just failed). Proceeding therefore never leaks credentials — the request goes out without them. The only difference from the default mutator's behaviour on `NO_APPROOV_SERVICE` (which forwards the raw request untouched) is that a proceeding policy mutator still runs the request pipeline, so HTTP Message Signing with the local install key is still applied (unless `{ sign: false }`).
+
+**Full control: build a raw bitmask.**
+
+For any other policy, OR together the individual `ApproovService.ReturnDecision` flags. The mask lists exactly which failure statuses may proceed; any failure status not in the mask blocks the request.
+
+```javascript
+const RD = ApproovService.ReturnDecision;
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE | RD.BAD_URL);
+// unsigned variant:
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { sign: false });
+```
+
+`ApproovService.ReturnDecision` exposes one bit flag per maskable failure status: `NO_APPROOV_SERVICE`, `BAD_URL`, `MITM_DETECTED`, `NO_NETWORK`, `POOR_NETWORK`, `REJECTED`, `UNKNOWN_KEY`, `INTERNAL_ERROR`, `NO_NETWORK_PERMISSION`, `MISSING_LIB_DEPENDENCY`, and `DISABLED`. Only these **failure** statuses are maskable. `SUCCESS` always proceeds (with the signed token added), and `UNKNOWN_URL` / `UNPROTECTED_URL` always proceed unmodified (forwarded without a token); those three are never maskable and are not exposed as flags.
+
+> ⚠️ **Security warning.** The mask decides which failures the app will *tolerate*. Putting **`MITM_DETECTED`** or **`REJECTED`** in the mask removes Approov's protection for those cases: the request proceeds **without proof of attestation** (no valid Approov token). Masking `MITM_DETECTED` lets a request the SDK reports as man-in-the-middle intercepted go out anyway; masking `REJECTED` lets a request from an app that failed attestation (tampered, repackaged, or running in a compromised environment) go out anyway. Most apps should use the named presets. Reach for the raw `ReturnDecision` bitmask only deliberately, and **never** ship `MITM_DETECTED` or `REJECTED` in a production mask unless you fully intend to accept that risk.
+
+**Reporting the status to your backend.** When a failure status is in the mask, the request proceeds. If you also enable `ApproovService.setUseApproovStatusIfNoToken(true)`, the fetch-status string is written into the token header so the backend can see why no real token was sent; otherwise the token header is emitted empty. **The exact string differs per platform** — see [Use Approov Status as Token](#use-approov-status-as-token) — so match on it loosely or normalise it at your backend.
+
+```javascript
+ApproovService.setUseApproovStatusIfNoToken(true);
+```
+
+**A blocked request surfaces as a failed fetch.** A failure status that is *not* in the mask blocks the request: it fails as a rejected `fetch()` — an `IOException` / `Network request failed` on Android, and an `NSError` failure on iOS. The outcome is identical on both platforms.
+
+**Signing.** `options.sign` defaults to `true`, so the installed policy mutator preserves HTTP Message Signing. Pass `{ sign: false }` to proceed per the mask but send the request **unsigned** — for apps that sign elsewhere or must not double-sign. `sign` is ignored for `MutatorPreset.DEFAULT`, which always restores the signing default.
+
+**Replace semantics (last wins).** `setServiceMutatorType` replaces any previously installed mutator, including a native one. Use the JavaScript API *or* a native custom mutator, not both.
+
+**Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. A warning is logged whenever a custom mutator is discarded this way. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
+
+Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it afterwards, keyed on `approovInitCount`:
+
+```javascript
+const { approovReady, approovInitCount } = useApproov();
+useEffect(() => {
+    if (approovReady) {
+        ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_IF_UNAVAILABLE);
+    }
+}, [approovReady, approovInitCount]);
+```
+
+`approovReady` alone is not enough: it latches `true` on the first success and never changes again, so an effect keyed only on it will not re-run when a later re-initialization resets the mutator. `approovInitCount` increments on every successful initialization, so the effect re-runs and the policy is re-applied.
+
+If you call `ApproovService.initialize()` yourself rather than through `ApproovProvider` (*Option 2* above), the counter does not apply — re-apply `setServiceMutatorType` after each of those calls.
+
+**Invalid masks are rejected, not applied.** Build the mask from `ReturnDecision` flags or a `MutatorPreset`. A mask that is not a finite 32-bit integer, or that sets a bit outside the defined flags (bits 0-10), rejects the promise instead of installing anything. This matters because an undefined bit names no Approov status: it grants proceed to nothing, so applying it would silently produce a block-everything policy that looks intentional.
+
+> **iOS note:** `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status on iOS, so those two bits are inert there (harmless if included).
+
+**Development-only: let Metro's cleartext bundle through.** Metro serves the dev bundle over cleartext `http://`, which the SDK reports as `BAD_URL`. In development builds you can forward it with the dedicated preset (issue #30):
+
+```javascript
+if (__DEV__) await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_DEV_CLEARTEXT);
+```
+
+Guard it with `__DEV__` so it can never take effect in a release build.
 
 ## Default Behavior: HTTP Message Signing
 
@@ -281,7 +376,7 @@ To send the failure reason in the token header when the request is allowed to co
 ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
-With that setting enabled, the service layer places the failure status string into the configured token header, for example `Approov-Token: MITM_DETECTED` or `Approov-Token: NO_APPROOV_SERVICE`.
+With that setting enabled, the service layer places the failure status string into the configured token header. **The format is not the same on both platforms:** Android sends the SDK enum name (`Approov-Token: MITM_DETECTED`), while iOS sends the SDK's human-readable description (`Approov-Token: MITM detected`). See [Use Approov Status as Token](#use-approov-status-as-token).
 
 
 ### Android Implementation (Java)
@@ -724,5 +819,5 @@ If you must log from the client, ensure you have a fallback strategy for when th
 ## Tips
 
 - Keep mutator logic fast and side-effect safe. These native hooks run on the request path and blocking them will hang the network traffic.
-- Use `ApproovServiceMutator.DEFAULT` (Android) or `ApproovServiceMutatorDefault.shared` (iOS) to preserve the existing behavior and layer your changes on top.
+- To preserve the existing behavior and layer your changes on top, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Do **not** base custom mutators on `ApproovServiceMutator.DEFAULT` (Android) — it is a no-op pass-through that performs no message signing.
 - If you override multiple hooks, keep them focused (one concern per hook) for easier testing and maintenance.

@@ -4,7 +4,19 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TEST_ROOT="$REPO_ROOT/tests/ios/native-mini-sdk"
-MINI_SDK_ROOT="$REPO_ROOT/../core-service-layers-testing/mini-sdk/ios"
+MINI_SDK_ROOT=""
+for candidate in \
+  "$REPO_ROOT/../../core-service-layers-testing/mini-sdk/ios" \
+  "$REPO_ROOT/../core-service-layers-testing/mini-sdk/ios"; do
+  if [ -d "$candidate" ]; then
+    MINI_SDK_ROOT="$(cd "$candidate" && pwd)"
+    break
+  fi
+done
+if [ -z "$MINI_SDK_ROOT" ]; then
+  echo "core-service-layers-testing mini-sdk not found" >&2
+  exit 1
+fi
 BUILD_DIR="${TMPDIR:-/tmp}/approov-native-mini-sdk-tests"
 APP_DIR="$BUILD_DIR/ApproovNativeMiniSDKTests.app"
 CONTENTS_DIR="$APP_DIR/Contents"

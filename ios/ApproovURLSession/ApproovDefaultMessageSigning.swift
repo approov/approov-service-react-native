@@ -67,6 +67,33 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
         return "ApproovDefaultMessageSigning"
     }
 
+    /// Logs a message-signing failure that should not abort the request, and
+    /// returns the request unsigned.
+    ///
+    /// Fail-open/fail-closed rule for message signing: a failure to obtain or
+    /// encode a signature proceeds unsigned through this helper — signature
+    /// unavailability, base64 and ASN.1/DER decode failures, and header
+    /// serialization failures all take this path, because they mean the signature
+    /// could not be produced, not that the request is untrustworthy. Exactly two
+    /// cases fail closed and abort the request by throwing: an unsupported
+    /// signature algorithm, and a required body digest that cannot be created.
+    /// Both indicate the caller asked for a guarantee that cannot be honoured, so
+    /// sending the request unsigned would silently weaken it.
+    ///
+    /// - Parameters:
+    ///   - request: the original request to forward unsigned.
+    ///   - reason: the reason signing was skipped.
+    ///   - error: the optional underlying failure.
+    /// - Returns: the original, unsigned request.
+    private func proceedUnsigned(_ request: URLRequest, reason: StaticString, _ error: Error? = nil) -> URLRequest {
+        if let error {
+            os_log(reason, type: .error, String(describing: error))
+        } else {
+            os_log(reason, type: .error)
+        }
+        return request
+    }
+
     /**
      * Sets the default factory for generating signature parameters.
      *
@@ -140,7 +167,14 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
 
             // Build the signature base
             let baseBuilder = SignatureBaseBuilder(sigParams: params, ctx: provider)
-            let message = try baseBuilder.createSignatureBase()
+            let message: String
+            do {
+                message = try baseBuilder.createSignatureBase()
+            } catch {
+                return proceedUnsigned(request,
+                                       reason: "ApproovService: failed to create signature base, skipping signing: %@",
+                                       error)
+            }
             // WARNING never log the message as it contains an Approov token which provides access to your API.
 
             // Generate the signature
@@ -151,16 +185,23 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                 sigId = "install"
                 guard let base64Signature = ApproovService.getInstallMessageSignature(message),
                       let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    os_log("ApproovService: install message signature unavailable, skipping signing", type: .error)
-                    return request
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: install message signature unavailable or undecodable, skipping signing")
                 }
                 // The backend verifier expects the raw IEEE-P1363 r||s form.
-                signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
+                do {
+                    signature = try ApproovDefaultMessageSigning.decodeASN_1_DER_ES256_Signature(decodedSignature)
+                } catch {
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: failed to decode ASN.1 DER ES256 signature, skipping signing: %@",
+                                           error)
+                }
             case ApproovDefaultMessageSigning.ALG_HS256:
                 sigId = "account"
                 guard let base64Signature = ApproovService.getAccountMessageSignature(message),
                       let decodedSignature = Data(base64Encoded: base64Signature) else {
-                    throw ApproovServiceError.permanentError(message: "Failed to generate HMAC signature")
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: account message signature unavailable or undecodable, skipping signing")
                 }
                 signature = decodedSignature
             default:
@@ -168,11 +209,23 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
             }
 
             // Create signature headers
-            guard let sigHeader = try SFV.serializeDictionary(key: sigId, data: signature) else {
-                throw ApproovServiceError.permanentError(message: "Failed to serialize signature header")
-            }
-            guard let sigInputHeader = try SFV.serializeDictionary(key: sigId, innerList: params.toComponentValue()) else {
-                throw ApproovServiceError.permanentError(message: "Failed to serialize signature input header")
+            let sigHeader: String
+            let sigInputHeader: String
+            do {
+                guard let serializedSigHeader = try SFV.serializeDictionary(key: sigId, data: signature) else {
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: failed to serialize signature header, skipping signing")
+                }
+                guard let serializedSigInputHeader = try SFV.serializeDictionary(key: sigId, innerList: params.toComponentValue()) else {
+                    return proceedUnsigned(request,
+                                           reason: "ApproovService: failed to serialize signature input header, skipping signing")
+                }
+                sigHeader = serializedSigHeader
+                sigInputHeader = serializedSigInputHeader
+            } catch {
+                return proceedUnsigned(request,
+                                       reason: "ApproovService: failed to serialize signature headers, skipping signing: %@",
+                                       error)
             }
 
             // Debugging - log the message and signature-related headers
@@ -189,10 +242,14 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
 
             if params.isDebugMode() {
                 let digest = ApproovDefaultMessageSigning.sha256(data: Data(message.utf8))
-                if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
-                    signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
-                } else {
-                    os_log("ApproovService: Failed to get digest algorithm - no debug entry", type: .debug)
+                do {
+                    if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
+                        signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
+                    } else {
+                        os_log("ApproovService: failed to add debug signature base digest", type: .error)
+                    }
+                } catch {
+                    os_log("ApproovService: failed to add debug signature base digest: %@", type: .error, String(describing: error))
                 }
             } else {
                 signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")

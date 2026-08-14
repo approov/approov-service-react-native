@@ -21,6 +21,13 @@ export declare class ApproovService {
    */
   static isApproovEnabled(): Promise<boolean>;
   /**
+   * Returns whether native networking interception is currently active for the
+   * platform's HTTP library (Android: the ApproovInterceptor is present in the
+   * active OkHttpClient; iOS: NSURLSession swizzling is active). If this resolves
+   * to false, Approov is not currently intercepting or protecting requests.
+   */
+  static isInterceptorActive(): Promise<boolean>;
+  /**
    * Secure fetch-compatible API for sensitive requests.
    *
    * Note: this is a subset of full React Native fetch/NetworkingModule behavior.
@@ -41,7 +48,7 @@ export declare class ApproovService {
    * re-swizzle its network interception hooks on iOS if it detects they have been
    * hijacked or overwritten by another SDK at runtime.
    *
-   * @param attempts the maximum number of recovery attempts (default is 3).
+   * @param attempts the maximum number of recovery attempts (default is 0).
    */
   static setMaxReswizzleAttempts(attempts: number): void;
 
@@ -63,8 +70,49 @@ export declare class ApproovService {
     ERROR: number;
     NONE: number;
   }
+  /**
+   * Selects the active service mutator natively, replacing any previously
+   * installed mutator.
+   *
+   * Pass a proceed bitmask assembled from `ApproovService.ReturnDecision` bits
+   * (or an `ApproovService.MutatorPreset` value) to control which failure
+   * statuses proceed rather than block. Pass `ApproovService.MutatorPreset.DEFAULT`
+   * to restore the built-in message-signing default.
+   *
+   * The optional `options.sign` flag defaults to `true` (HTTP Message Sign the
+   * processed request). Pass `{ sign: false }` to proceed per the mask but send
+   * the request unsigned. `sign` is ignored for `MutatorPreset.DEFAULT`.
+   */
+  static setServiceMutatorType(mask: number, options?: { sign?: boolean }): Promise<void>;
+  /**
+   * Maskable FAILURE statuses. Bit values match the native PolicyMutator.BIT_*
+   * constants. SUCCESS/UNKNOWN_URL/UNPROTECTED_URL always proceed and are not
+   * exposed as bits.
+   */
+  static ReturnDecision: {
+    NO_APPROOV_SERVICE: number;
+    BAD_URL: number;
+    MITM_DETECTED: number;
+    NO_NETWORK: number;
+    POOR_NETWORK: number;
+    REJECTED: number;
+    UNKNOWN_KEY: number;
+    INTERNAL_ERROR: number;
+    NO_NETWORK_PERMISSION: number;
+    MISSING_LIB_DEPENDENCY: number;
+    DISABLED: number;
+  }
+  /**
+   * Named proceed-bitmask presets for `ApproovService.setServiceMutatorType`.
+   */
+  static MutatorPreset: {
+    DEFAULT: number;
+    ALWAYS_PROCEED: number;
+    PROCEED_IF_UNAVAILABLE: number;
+    PROCEED_DEV_CLEARTEXT: number;
+  }
   static setSuppressLoggingUnknownURL(): void;
-  static setTokenHeader(header: string, prefix: string): void;
+  static setTokenHeader(header: string, prefix: string | null): void;
   static setTraceIDHeader(header: string): void;
   static getTraceIDHeader(): Promise<String>;
   static setBindingHeader(header: string): void;
@@ -168,6 +216,13 @@ export declare const ApproovProvider: React.FC<ApproovProviderProps>;
 export declare function useApproov(): {
   approovReady: boolean;
   approovError: any;
+  /**
+   * Increments on every successful initialization. Key an effect on this rather
+   * than on `approovReady` when work must be repeated after each initialization
+   * (for example re-applying `setServiceMutatorType`), because `approovReady`
+   * latches `true` on the first success and never changes again.
+   */
+  approovInitCount: number;
 };
 
 export { ApproovMonitor };

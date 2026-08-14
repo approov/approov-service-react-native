@@ -98,6 +98,12 @@ static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
 // lock object used during initialization
 static id initializerLock = nil;
 
+// lock guarding the mutable runtime-configuration fields (token/trace/prefix headers,
+// binding header, substitution + exclusion collections). A dedicated stable object is
+// used instead of @synchronized on the field values themselves, which would change the
+// monitor whenever a field is reassigned and break mutual exclusion.
+static id configLock = nil;
+
 // keeps track of whether Approov is initialized
 BOOL isInitialized = NO;
 
@@ -120,8 +126,12 @@ NSString *initialConfigString = nil;
 BOOL pendingPrefetch = NO;
 
 static BOOL ApproovIsEnabled(void) {
-  return isInitialized && initialConfigString != nil &&
-         [initialConfigString length] != 0;
+  // Read under initializerLock so the request path never observes a torn/partial
+  // state while a re-initialization is committing the config under the same lock.
+  @synchronized(initializerLock) {
+    return isInitialized && initialConfigString != nil &&
+           [initialConfigString length] != 0;
+  }
 }
 
 // proceedOnNetworkFail has been removed; network failure handling is now
@@ -201,6 +211,7 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 + (void)initialize {
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
+    configLock = [NSObject new];
     earliestNetworkRequestTimeLock = [NSObject new];
   }
 }
@@ -364,16 +375,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // Detect a re-initialization with the identical config already in force. Re-initializing
-    // with the same config (e.g. an ApproovProvider remount, a React StrictMode double-invoke
-    // or Fast Refresh in development) must NOT discard the runtime configuration the app set
-    // up after the first initialize() call — substitution headers, exclusion URL regexes and
-    // token/binding header settings. Wiping those silently would drop request mutations and,
-    // more seriously, exclusion rules that are security relevant. Only a genuinely different
-    // config resets the service-layer state.
-    BOOL configUnchanged = isInitialized && initialConfigString != nil &&
-        [initialConfigString isEqualToString:config];
-
     // Initialize the platform SDK if not in bypass mode (empty config).
     // State is only modified after the SDK confirms success, preserving the
     // current operating mode (protected or bypass) on any failure.
@@ -409,16 +410,33 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       return;
     }
 
-    // SDK succeeded (or bypass) — now commit new service-layer state. The runtime
-    // configuration is only reset when the config actually changes; a same-config
-    // re-initialization preserves any configuration applied after the first call.
+    // SDK succeeded (or bypass) — now commit a fresh service-layer state.
+    // Same-config re-initialization is an initialization boundary too: it is
+    // forwarded to the SDK first, then runtime configuration and custom mutators
+    // are reset only after native success.
     if (!initializationResult) {
       ApproovLogD(@"native SDK already initialized");
     }
-    if (!configUnchanged) {
-      isInitialized = NO;
-      initialConfigString = nil;
-      useApproovStatusIfNoToken = NO;
+    // Warn about runtime configuration that is about to be discarded. Token binding
+    // ceasing to apply is the security-relevant one, so it is called out separately
+    // from the rest.
+    if ((bindingHeader != nil) && (bindingHeader.length != 0))
+      ApproovLogW(@"initialization is discarding the binding header - re-apply "
+                   "setBindingHeader after initialize or tokens will no longer be bound "
+                   "to that header value");
+    if ((substitutionHeaders.count != 0) || (substitutionQueryParams.count != 0) ||
+        (exclusionURLRegexs.count != 0))
+      ApproovLogW(@"initialization is discarding runtime configuration (substitution "
+                   "headers/query params and exclusion regexes) - re-apply it after "
+                   "initialize if it is still required");
+    // Do NOT clear isInitialized/initialConfigString here. This reset runs only
+    // after the SDK confirmed (re)initialization above, so the service stays
+    // initialized throughout. Clearing them would open a transient window where a
+    // concurrent request observes the service as disabled and forwards WITHOUT an
+    // Approov token (fail-open). The new config + isInitialized=YES are committed at
+    // the end of this critical section under the same initializerLock.
+    useApproovStatusIfNoToken = NO;
+    @synchronized(configLock) {
       approovTokenHeader = @"Approov-Token";
       approovTraceIDHeader = @"Approov-TraceID";
       approovTokenPrefix = @"";
@@ -426,8 +444,14 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
       substitutionHeaders = [[NSMutableDictionary alloc] init];
       substitutionQueryParams = [[NSMutableSet alloc] init];
       exclusionURLRegexs = [[NSMutableSet alloc] init];
-      suppressLoggingUnknownURL = NO;
     }
+    suppressLoggingUnknownURL = NO;
+    if (![[ApproovServiceMutatorBridge shared] isDefaultMutator])
+      ApproovLogW(@"initialization is discarding a custom service mutator - re-apply "
+                   "setServiceMutatorType (or reinstall a native mutator via "
+                   "ApproovServiceMutatorBridge) after initialize if a custom policy is "
+                   "still required");
+    [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
     @synchronized(earliestNetworkRequestTimeLock) {
@@ -455,6 +479,76 @@ RCT_EXPORT_METHOD(isInitialized : (RCTPromiseResolveBlock)resolve
 RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
   resolve(@(ApproovIsEnabled()));
+}
+
+/**
+ * Selects the active service mutator natively, replacing any previously
+ * installed mutator. Mirrors the Android setServiceMutatorType(mask, sign) so
+ * the cross-platform JavaScript layer drives identical native behaviour.
+ *
+ * A mask of -1 (ApproovService.MutatorPreset.DEFAULT) restores the built-in
+ * message-signing default. Any other mask installs a PolicyMutator whose
+ * per-status proceed/forward/block policy is driven by the bitmask; the sign
+ * flag controls whether the processed request is HTTP Message Signed.
+ *
+ * @param mask     the proceed bitmask, or -1 to restore the default mutator
+ * @param sign     whether the processed request should be message signed
+ * @param resolve  called on success
+ * @param reject   called on failure
+ */
+RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
+                  sign : (BOOL)sign
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  @try {
+    // The mask is bridged from JavaScript as a double. Reject any value that is
+    // not a finite, integral, 32-bit quantity before narrowing: a fractional
+    // value (e.g. 1.5), NaN/Infinity, or an out-of-range magnitude would
+    // otherwise be silently truncated or coerced and could install a policy
+    // other than the one the caller intended. This is security-relevant: the
+    // mask decides which failure statuses may proceed. The in-range check is
+    // evaluated first so the round-trip cast that verifies integrality is only
+    // reached for values already known to be within int32_t range.
+    if (!(mask >= INT32_MIN && mask <= INT32_MAX) || mask != (double)(int32_t)mask) {
+      reject(@"setServiceMutatorType",
+             [NSString stringWithFormat:
+                          @"invalid mutator mask: expected a finite 32-bit integer bitmask, got %g",
+                          mask],
+             nil);
+      return;
+    }
+    int32_t maskValue = (int32_t)mask;
+    // Reject undefined bits. Only bits 0-10 name a token-fetch status (mirrors
+    // PolicyMutator.ALL_BITS in ios/ApproovURLSession/PolicyMutator.swift and
+    // PolicyMutator.ALL_BITS on Android); a mask carrying any other bit (e.g.
+    // 1 << 11) grants PROCEED to nothing and would install a policy that silently
+    // BLOCKs every failure status. Fail loudly instead, so a caller's typo cannot
+    // masquerade as a deliberate block-all policy. Duplicated here rather than read
+    // from the Swift type so the ObjC native test suites, which link a stub bridge,
+    // still compile.
+    const int32_t kApproovPolicyMutatorAllBits = (1 << 11) - 1;  // bits 0-10
+    if (maskValue != -1 && (maskValue & ~kApproovPolicyMutatorAllBits) != 0) {
+      reject(@"setServiceMutatorType",
+             [NSString stringWithFormat:
+                          @"invalid mutator mask: undefined bits set (allowed bits 0-10, mask 0x%x), got 0x%x",
+                          kApproovPolicyMutatorAllBits, maskValue],
+             nil);
+      return;
+    }
+    if (maskValue == -1) {
+      // MutatorPreset.DEFAULT: restore the built-in message-signing default.
+      [[ApproovServiceMutatorBridge shared] resetToDefault];
+      ApproovLogI(@"setServiceMutatorType: restored default mutator");
+    } else {
+      [[ApproovServiceMutatorBridge shared] setPolicyMutator:(int32_t)maskValue
+                                                        sign:sign];
+      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@", (long)maskValue,
+                  sign ? @"YES" : @"NO");
+    }
+    resolve(nil);
+  } @catch (NSException *exception) {
+    reject(@"setServiceMutatorType", exception.reason, nil);
+  }
 }
 
 + (id)networkRequestLock {
@@ -674,17 +768,17 @@ RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
  */
 RCT_EXPORT_METHOD(setTokenHeader : (NSString *)header prefix : (NSString *)
                       prefix) {
-  @synchronized(approovTokenHeader) {
+  @synchronized(configLock) {
     approovTokenHeader = header;
   }
-  @synchronized(approovTokenPrefix) {
-    approovTokenPrefix = prefix;
+  @synchronized(configLock) {
+    approovTokenPrefix = prefix ?: @"";
   }
   ApproovLogI(@"setTokenHeader %@, %@", header, prefix);
 }
 
 RCT_EXPORT_METHOD(setTraceIDHeader : (NSString *)header) {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     approovTraceIDHeader = header;
   }
   ApproovLogI(@"setTraceIDHeader %@", header);
@@ -692,7 +786,7 @@ RCT_EXPORT_METHOD(setTraceIDHeader : (NSString *)header) {
 
 RCT_EXPORT_METHOD(getTraceIDHeader : (RCTPromiseResolveBlock)
                       resolve rejecter : (RCTPromiseRejectBlock)reject) {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     resolve(approovTraceIDHeader);
   }
 }
@@ -707,7 +801,7 @@ RCT_EXPORT_METHOD(getTraceIDHeader : (RCTPromiseResolveBlock)
  * @param header is the header to use for Approov token binding
  */
 RCT_EXPORT_METHOD(setBindingHeader : (NSString *)header) {
-  @synchronized(bindingHeader) {
+  @synchronized(configLock) {
     bindingHeader = header;
   }
   ApproovLogI(@"setBindingHeader %@", header);
@@ -726,7 +820,7 @@ RCT_EXPORT_METHOD(setBindingHeader : (NSString *)header) {
  */
 RCT_EXPORT_METHOD(addSubstitutionHeader : (NSString *)
                       header requiredPrefix : (NSString *)requiredPrefix) {
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     [substitutionHeaders setValue:requiredPrefix forKey:header];
   }
   ApproovLogI(@"addSubstitutionHeader %@, %@", header, requiredPrefix);
@@ -738,7 +832,7 @@ RCT_EXPORT_METHOD(addSubstitutionHeader : (NSString *)
  * @param header is the header to be removed for substitution
  */
 RCT_EXPORT_METHOD(removeSubstitutionHeader : (NSString *)header) {
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     [substitutionHeaders removeObjectForKey:header];
   }
   ApproovLogI(@"removeSubstitutionHeader %@", header);
@@ -754,7 +848,7 @@ RCT_EXPORT_METHOD(removeSubstitutionHeader : (NSString *)header) {
  * @param key is the query parameter key name to be added for substitution
  */
 RCT_EXPORT_METHOD(addSubstitutionQueryParam : (NSString *)key) {
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     [substitutionQueryParams addObject:key];
   }
   ApproovLogI(@"addSubstitutionQueryParam %@", key);
@@ -767,7 +861,7 @@ RCT_EXPORT_METHOD(addSubstitutionQueryParam : (NSString *)key) {
  * @param key is the query parameter key name to be removed for substitution
  */
 RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     [substitutionQueryParams removeObject:key];
   }
   ApproovLogI(@"removeSubstitutionQueryParam %@", key);
@@ -794,7 +888,7 @@ RCT_EXPORT_METHOD(removeSubstitutionQueryParam : (NSString *)key) {
  * to exclude them
  */
 RCT_EXPORT_METHOD(addExclusionURLRegex : (NSString *)urlRegex) {
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     [exclusionURLRegexs addObject:urlRegex];
   }
   ApproovLogI(@"addExclusionURLRegex %@", urlRegex);
@@ -808,7 +902,7 @@ RCT_EXPORT_METHOD(addExclusionURLRegex : (NSString *)urlRegex) {
  * to exclude them
  */
 RCT_EXPORT_METHOD(removeExclusionURLRegex : (NSString *)urlRegex) {
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     [exclusionURLRegexs removeObject:urlRegex];
   }
   ApproovLogI(@"removeExclusionURLRegex %@", urlRegex);
@@ -1385,7 +1479,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"Approov disabled, forwarding: %@", url);
+    ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1394,7 +1488,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // obtain a copy of the exclusion URL regular expressions in a thread safe way
   NSSet<NSString *> *exclusionURLs;
-  @synchronized(exclusionURLRegexs) {
+  @synchronized(configLock) {
     exclusionURLs = [[NSSet alloc] initWithSet:exclusionURLRegexs copyItems:NO];
   }
 
@@ -1423,7 +1517,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   // update the data hash based on any token binding header
-  @synchronized(bindingHeader) {
+  @synchronized(configLock) {
     if (![bindingHeader isEqualToString:@""]) {
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
       if (headerValue != nil) {
@@ -1514,11 +1608,11 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     if ((result.token != nil && result.token.length > 0) ||
         useApproovStatusIfNoToken) {
       NSString *tokenHeader;
-      @synchronized(approovTokenHeader) {
+      @synchronized(configLock) {
         tokenHeader = approovTokenHeader;
       }
       NSString *tokenPrefix;
-      @synchronized(approovTokenPrefix) {
+      @synchronized(configLock) {
         tokenPrefix = approovTokenPrefix;
       }
       NSString *value = @"";
@@ -1536,7 +1630,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
 
     NSString *traceIDHeader;
-    @synchronized(approovTraceIDHeader) {
+    @synchronized(configLock) {
       traceIDHeader = approovTraceIDHeader;
     }
     NSString *traceID = [result traceID];
@@ -1551,11 +1645,11 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     ApproovLogD(@"Proceeding with failure status %ld, useApproovStatusIfNoToken=%d", (long)status, useApproovStatusIfNoToken);
     if (useApproovStatusIfNoToken) {
       NSString *tokenHeader;
-      @synchronized(approovTokenHeader) {
+      @synchronized(configLock) {
         tokenHeader = approovTokenHeader;
       }
       NSString *tokenPrefix;
-      @synchronized(approovTokenPrefix) {
+      @synchronized(configLock) {
         tokenPrefix = approovTokenPrefix;
       }
       NSString *value = [NSString
@@ -1578,7 +1672,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // obtain a copy of the substitution headers in a thread safe way
   NSDictionary<NSString *, NSString *> *subsHeaders;
-  @synchronized(substitutionHeaders) {
+  @synchronized(configLock) {
     subsHeaders = [[NSDictionary alloc] initWithDictionary:substitutionHeaders
                                                  copyItems:NO];
   }
@@ -1597,51 +1691,40 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       status = [result status];
       ApproovLogI(@"substituting header %@: %@", header,
                   [Approov stringFromApproovTokenFetchStatus:status]);
+      NSError *mutatorError = nil;
+      BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorHeaderSubstitutionResult:result
+                                            header:header
+                                      errorPointer:&mutatorError];
+      if (!shouldSubstitute) {
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = [errorType isEqualToString:@"network"]
+                                                ? ApproovInterceptorActionRetry
+                                                : ApproovInterceptorActionFail;
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+        continue;
+      }
+
       if (status == ApproovTokenFetchStatusSuccess) {
         // update the header value with the actual secret
         [updatedRequest setValue:[NSString stringWithFormat:@"%@%@", prefix,
                                                             result.secureString]
               forHTTPHeaderField:header];
-      } else if (status == ApproovTokenFetchStatusRejected) {
-        // the attestation has been rejected so provide additional information
-        // in the message
-        NSString *detail = [NSString
-            stringWithFormat:@"Approov header substitution rejection %@ %@",
-                             result.ARC, result.rejectionReasons];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
-      } else if ((status == ApproovTokenFetchStatusNoNetwork) ||
-                 (status == ApproovTokenFetchStatusPoorNetwork) ||
-                 (status == ApproovTokenFetchStatusMITMDetected)) {
-        // we are unable to get the secure string due to network conditions so
-        NSString *detail = [NSString
-            stringWithFormat:@"Header substitution network error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionRetry
-                  withMessage:detail];
-      } else if (status != ApproovTokenFetchStatusUnknownKey) {
-        // we have failed to get a secure string with a more serious permanent
-        // error
-        NSString *detail = [NSString
-            stringWithFormat:@"Header substitution error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
       }
     }
   }
 
   // obtain a copy of the substitution query parameter in a thread safe way
   NSSet<NSString *> *subsQueryParams;
-  @synchronized(substitutionQueryParams) {
+  @synchronized(configLock) {
     subsQueryParams = [[NSSet alloc] initWithSet:substitutionQueryParams
                                        copyItems:NO];
   }
@@ -1676,45 +1759,33 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       status = [result status];
       ApproovLogI(@"substituting query parameter %@: %@", key,
                   [Approov stringFromApproovTokenFetchStatus:result.status]);
+      NSError *mutatorError = nil;
+      BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
+          handleInterceptorQueryParamSubstitutionResult:result
+                                               queryKey:key
+                                           errorPointer:&mutatorError];
+      if (!shouldSubstitute) {
+        if (mutatorError != nil) {
+          NSString *errorType = [mutatorError.userInfo objectForKey:@"type"];
+          ApproovInterceptorAction action = [errorType isEqualToString:@"network"]
+                                                ? ApproovInterceptorActionRetry
+                                                : ApproovInterceptorActionFail;
+          NSString *message = [mutatorError localizedDescription];
+          if (message == nil || [message length] == 0) {
+            message = [Approov stringFromApproovTokenFetchStatus:status];
+          }
+          return [ApproovInterceptorResult createWithRequest:updatedRequest
+                                                  withAction:action
+                                                 withMessage:message];
+        }
+        continue;
+      }
+
       if (status == ApproovTokenFetchStatusSuccess) {
         // update the URL with the actual secret
         url = [url stringByReplacingCharactersInRange:[match rangeAtIndex:1]
                                            withString:result.secureString];
         [updatedRequest setURL:[NSURL URLWithString:url]];
-      } else if (status == ApproovTokenFetchStatusRejected) {
-        // the attestation has been rejected so provide additional information
-        // in the message
-        NSString *detail = [NSString
-            stringWithFormat:
-                @"Approov query parameter substitution rejection %@ %@",
-                result.ARC, result.rejectionReasons];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
-      } else if ((status == ApproovTokenFetchStatusNoNetwork) ||
-                 (status == ApproovTokenFetchStatusPoorNetwork) ||
-                 (status == ApproovTokenFetchStatusMITMDetected)) {
-        // we are unable to get the secure string due to network conditions so
-        NSString *detail = [NSString
-            stringWithFormat:
-                @"Approov query parameter substitution network error: %@",
-                [Approov stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionRetry
-                  withMessage:detail];
-      } else if (status != ApproovTokenFetchStatusUnknownKey) {
-        // we have failed to get a secure string with a more serious permanent
-        // error
-        NSString *detail = [NSString
-            stringWithFormat:@"Approov query parameter substitution error: %@",
-                             [Approov
-                                 stringFromApproovTokenFetchStatus:status]];
-        return [ApproovInterceptorResult
-            createWithRequest:updatedRequest
-                   withAction:ApproovInterceptorActionFail
-                  withMessage:detail];
       }
     }
   }
@@ -1975,13 +2046,13 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 }
 
 + (NSString *)sharedTokenHeader {
-  @synchronized(approovTokenHeader) {
+  @synchronized(configLock) {
     return approovTokenHeader;
   }
 }
 
 + (NSString *)sharedTraceIDHeader {
-  @synchronized(approovTraceIDHeader) {
+  @synchronized(configLock) {
     return approovTraceIDHeader;
   }
 }
@@ -2119,10 +2190,20 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
         // Apply mutator post-processing (e.g. message signing) to mirror the
         // swizzled interception pipeline.
         NSMutableURLRequest *finalRequest = [result.request mutableCopy];
-        [[ApproovServiceMutatorBridge shared]
-            processRequest:finalRequest
-               tokenHeader:[ApproovService sharedTokenHeader]
-             traceIDHeader:[ApproovService sharedTraceIDHeader]];
+        NSError *mutatorError = nil;
+        BOOL mutatorSucceeded =
+            [[ApproovServiceMutatorBridge shared]
+                processRequest:finalRequest
+                   tokenHeader:[ApproovService sharedTokenHeader]
+                 traceIDHeader:[ApproovService sharedTraceIDHeader]
+                  errorPointer:&mutatorError];
+        if (!mutatorSucceeded) {
+          reject(@"approov_error",
+                 mutatorError.localizedDescription ?:
+                     @"Approov request failed during mutator processing",
+                 mutatorError);
+          return;
+        }
 
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate

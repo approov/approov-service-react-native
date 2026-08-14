@@ -239,7 +239,7 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
-            return true
+            return false
         case .unknownKey:
             return false
         default:
@@ -263,7 +263,7 @@ public extension ApproovServiceMutator {
         case .noNetwork,
              .poorNetwork,
              .mitmDetected:
-            return true
+            return false
         case .unknownKey:
             return false
         default:

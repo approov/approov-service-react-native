@@ -1,67 +1,90 @@
 # Approov Service for React Native
 
+![React Native](https://img.shields.io/badge/React%20Native-0.76%2B-61DAFB?logo=react&logoColor=white)
+![Android](https://img.shields.io/badge/Android-minSdk%2025-3DDC84?logo=android&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-11.0%2B-000000?logo=apple&logoColor=white)
+![npm](https://img.shields.io/npm/v/%40approov%2Fapproov-service-react-native?logo=npm&color=CB3837)
+![Approov SDK](https://img.shields.io/badge/Approov%20SDK-3.5.3-0055CC)
+![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-6A1B9A)
+![CI](https://github.com/approov/approov-service-react-native/actions/workflows/build_and_test.yml/badge.svg)
+
 A wrapper for the [Approov SDK](https://github.com/approov/approov-ios-sdk) to enable easy integration when using [`React Native`](https://reactnative.dev/) for making the API calls that you wish to protect with Approov using `fetch()` or similar. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
 
-For more detailed information, please refer to the following documentation:
-* **[ARCHITECTURE.md](ARCHITECTURE.md)**: A deep dive into the service layer's network interception design on iOS and Android, race conditions, interference from 3rd party SDKs, and the `fetchWithApproov` alternative.
-* **[USAGE.md](USAGE.md)**: Detailed instructions on using the various features of the Approov Service, including message signing, token binding, and custom networks mutators.
-* **[REFERENCE.md (Interface)](REFERENCE.md)**: The complete API reference for the React Native `ApproovService` interface, describing all available methods and error types.
-* **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: A guide providing solutions to common errors and compilation issues you may encounter during setup and integration.
+## Table of Contents
 
-## ADDING THE APPROOV PACKAGE
+- [Adding the Approov Dependency](#adding-the-approov-dependency)
+- [Manifest / Project Changes](#manifest--project-changes)
+- [Initializing Approov](#initializing-approov)
+- [Using Approov](#using-approov)
+- [Checking It Works](#checking-it-works)
+- [Next Steps](#next-steps)
 
-Add the Approov service layer to your existing App with the following command:
+## Adding the Approov Dependency
 
-```
+Add the Approov service layer to your existing app with:
+
+```shell
 npm install @approov/approov-service-react-native
 ```
 
-Note if you experience an error related to peer dependencies, then you can append the `--force` to install with your particular React Native version. The plugin supports version 0.76 or above.
+If you experience an error related to peer dependencies, append `--force` to install with your particular React Native version. The plugin supports version 0.76 or above.
 
-If you are installing into an Expo project then use:
+For Expo projects use:
 
-```
+```shell
 expo install @approov/approov-service-react-native
 ```
 
-For iOS you must also install [pod](https://cocoapods.org/) dependencies. Change the directory to `ios` and type:
+## Manifest / Project Changes
 
-```
+For iOS you must install [pod](https://cocoapods.org/) dependencies. Change to the `ios` directory and run:
+
+```shell
 pod install
 ```
 
-Note: do not worry if this generates warnings about duplicate UUIDs.
+Do not worry if this generates warnings about duplicate UUIDs.
 
-## ACTIVATING APPROOV
+## Initializing Approov
 
-In order to use Approov you must include it as a component that wraps your application components. This automatically deals with initializing Approov when the app is started. Import using the following:
+Import the service layer:
 
-```Javascript
+```javascript
 import { ApproovProvider, ApproovService } from '@approov/approov-service-react-native';
 ```
 
-This defines an `ApproovProvider` component and the `ApproovService` which allows you to make certain calls to Approov from your application.
+Initialize explicitly during startup and keep a correlation id in your app logs:
 
-You should define an initially empty function that is called just before Approov is initialized. You may wish to include certain `ApproovService` calls in this in the future:
+```javascript
+const approovSessionId = global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-```Javascript
+async function initializeApproov() {
+  try {
+    await ApproovService.initialize('<enter-your-config-string-here>');
+
+    const enabled = await ApproovService.isApproovEnabled();
+    if (enabled) {
+      const deviceId = await ApproovService.getDeviceID();
+      console.log('Approov initialized', { approovSessionId, deviceId });
+    } else {
+      console.warn('Approov initialized without active protection', { approovSessionId });
+    }
+  } catch (error) {
+    console.warn('Approov initialization failed; continuing unprotected', {
+      approovSessionId,
+      error,
+    });
+    await ApproovService.initialize('');
+  }
+}
+```
+
+If you prefer component-wrapped startup, wrap your application with `ApproovProvider` after applying any setup calls:
+
+```javascript
 const approovSetup = () => {
 };
-```
 
-You must now wrap your application with the `ApproovProvider` component. For instance, if your app's components (typically defined in `App.js`) are currently:
-
-```Javascript
-return (
-  <View>
-    <Button onPress={callAPI} title="Press Me!" />
-  </View>
-);
-```
-
-This should be changed to the following:
-
-```Javascript
 return (
   <ApproovProvider config="<enter-your-config-string-here>" onInit={approovSetup}>
     <View>
@@ -71,31 +94,36 @@ return (
 );
 ```
 
-The `<enter-your-config-string-here>` is a custom string that configures your Approov account access. This will have been provided in your Approov onboarding email.
+The config string is provided in your Approov onboarding email.
 
-## CHECKING IT WORKS
-Once the initialization is called, it is possible for any network requests to have Approov tokens or secret substitutions made. Initially you won't have set which API domains to protect, so the requests will be unchanged. It will have called Approov though and made contact with the Approov cloud service. You will see `ApproovService` logging indicating `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
+## Using Approov
 
-You may use the `ApproovMonitor` component (also imported from `@approov/approov-service-react-native`) inside the `ApproovProvider`. This will output console logging on the state of the Approov initialization.
+Once initialization succeeds, network requests may have Approov tokens, message signatures, dynamic pinning, or secure substitutions applied. Initially you will not have set which API domains to protect, so requests are unchanged, but the service will contact the Approov cloud and log `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 
-During initial rollout and whenever you add observability SDKs, you should also capture `ApproovService.getPinningDiagnostics()` metadata in your app logging:
-* **Android:** fetch the metadata immediately before the first protected request and verify `isInterceptorPresent` and `isPinnerPresent`. If either is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.
-* **iOS:** fetch the metadata immediately after the first protected request and inspect `sessionsWithoutPinning` and `unpinnedSessions`. This helps detect delegate conflicts, skipped sessions, and missing pinning verification early in development and staging.
+Support is provided for the [rn-fetch-blob](https://github.com/joltup/rn-fetch-blob) networking stack through the [@approov/rn-fetch-blob](https://www.npmjs.com/package/@approov/rn-fetch-blob) fork:
 
-See [USAGE.md](USAGE.md) for a recommended startup diagnostics workflow and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for platform-specific interpretation.
-
-On Android, you can see logging using [`logcat`](https://developer.android.com/studio/command-line/logcat) output from the device. You can see the specific Approov output using `adb logcat | grep ApproovService`. On iOS, look at the console output from the device using the [Console](https://support.apple.com/en-gb/guide/console/welcome/mac) app from MacOS. This provides console output for a connected simulator or physical device. Select the device and search for `ApproovService` to obtain specific logging related to Approov.
-
-Your Approov onboarding email should contain a link allowing you to access [Live Metrics Graphs](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs). After you've run your app with Approov integration you should be able to see the results in the live metrics within a minute or so. At this stage you could even release your app to get details of your app population and the attributes of the devices they are running upon.
-
-
-## RN-FETCH-BLOB
-Support is provided for the [rn-fetch-blob](https://github.com/joltup/rn-fetch-blob) networking stack. However, to use this a special fork of the package must be used. This is available at [@approov/rn-fetch-blob](https://www.npmjs.com/package/@approov/rn-fetch-blob). You will need to uninstall the standard package and install the special one as follows:
-
-```
+```shell
 npm uninstall rn-fetch-blob
 npm install @approov/rn-fetch-blob
 ```
 
+## Checking It Works
 
-Please see the [Quickstart](https://github.com/approov/quickstart-react-native), which is a sample application you can check out to see how integration with Approov works.
+You may use the `ApproovMonitor` component, also imported from `@approov/approov-service-react-native`, inside `ApproovProvider`. This outputs console logging on the state of Approov initialization.
+
+During initial rollout and whenever you add observability SDKs, capture `ApproovService.getPinningDiagnostics()` metadata in your app logging:
+
+- **Android:** fetch the metadata immediately before the first protected request and verify `isInterceptorPresent` and `isPinnerPresent`. If either is `false`, call `ApproovService.updateClientFactory(true)` before proceeding.
+- **iOS:** fetch the metadata immediately after the first protected request and inspect `sessionsWithoutPinning` and `unpinnedSessions`. This helps detect delegate conflicts, skipped sessions, and missing pinning verification early in development and staging.
+
+On Android, use [`logcat`](https://developer.android.com/studio/command-line/logcat) and filter with `adb logcat | grep ApproovService`. On iOS, use the [Console](https://support.apple.com/en-gb/guide/console/welcome/mac) app for a connected simulator or device and search for `ApproovService`.
+
+Your Approov onboarding email should contain a link to [Live Metrics Graphs](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs). After you run your app with Approov integration you should see results in live metrics within a minute or so.
+
+## Next Steps
+
+- Read [ARCHITECTURE.md](ARCHITECTURE.md) for the service layer's network interception design on iOS and Android, race conditions, interference from third-party SDKs, and the `fetchWithApproov` alternative.
+- Read [USAGE.md](USAGE.md) for detailed instructions on message signing, token binding, custom network mutators, API protection, and secrets protection.
+- Read [REFERENCE.md](REFERENCE.md) for the complete React Native `ApproovService` interface.
+- Read [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for platform-specific setup and runtime diagnostics.
+- See the [Quickstart](https://github.com/approov/quickstart-react-native) sample application for a working integration.

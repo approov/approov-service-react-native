@@ -5,7 +5,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -43,12 +45,24 @@ public class ApproovDefaultMessageSigningTest {
 
     private static final class RecordingApproovDefaultMessageSigning extends ApproovDefaultMessageSigning {
         private final List<String> installMessages = new ArrayList<>();
+        private final List<String> accountMessages = new ArrayList<>();
         private String installSignatureBase64 = "";
+        private String accountSignatureBase64 = "";
+        private boolean throwAccountException;
 
         @Override
         protected String getInstallMessageSignature(String message) {
             installMessages.add(message);
             return installSignatureBase64;
+        }
+
+        @Override
+        protected String getAccountMessageSignature(String message) throws ApproovException {
+            accountMessages.add(message);
+            if (throwAccountException) {
+                throw new ApproovException("account signature unavailable");
+            }
+            return accountSignatureBase64;
         }
 
         @Override
@@ -60,6 +74,14 @@ public class ApproovDefaultMessageSigningTest {
             installSignatureBase64 = signature;
         }
 
+        void setAccountSignatureBase64(String signature) {
+            accountSignatureBase64 = signature;
+        }
+
+        void setThrowAccountException(boolean throwAccountException) {
+            this.throwAccountException = throwAccountException;
+        }
+
         void clearRecordedMessages() {
             installMessages.clear();
         }
@@ -67,9 +89,13 @@ public class ApproovDefaultMessageSigningTest {
         List<String> getInstallMessages() {
             return installMessages;
         }
+
+        List<String> getAccountMessages() {
+            return accountMessages;
+        }
     }
 
-    private static final class FixedDefaultSignatureParametersFactory
+    private static class FixedDefaultSignatureParametersFactory
         extends ApproovDefaultMessageSigning.SignatureParametersFactory {
 
         FixedDefaultSignatureParametersFactory() {
@@ -92,6 +118,17 @@ public class ApproovDefaultMessageSigningTest {
             SignatureParameters params = super.buildSignatureParameters(provider, changes);
             params.setCreated(FIXED_CREATED);
             params.setExpires(FIXED_CREATED + FIXED_EXPIRES_LIFETIME);
+            return params;
+        }
+    }
+
+    private static final class UnsupportedAlgorithmFactory extends FixedDefaultSignatureParametersFactory {
+        @Override
+        protected SignatureParameters buildSignatureParameters(
+                ApproovDefaultMessageSigning.OkHttpComponentProvider provider,
+                ApproovRequestMutations changes) {
+            SignatureParameters params = super.buildSignatureParameters(provider, changes);
+            params.setAlg("unsupported-alg");
             return params;
         }
     }
@@ -122,6 +159,14 @@ public class ApproovDefaultMessageSigningTest {
             .header("Signature", "stale-signature")
             .header("Signature-Input", "stale-input")
             .header("Signature-Base-Digest", "stale-digest")
+            .build();
+    }
+
+    private Request unsignedRequestFixture() {
+        return new Request.Builder()
+            .url("https://api.example.com/reply")
+            .header("Approov-Token", "Bearer jwt-token")
+            .header("Approov-TraceID", "trace-123")
             .build();
     }
 
@@ -234,5 +279,77 @@ public class ApproovDefaultMessageSigningTest {
         assertFalse(actualMessage.contains("\"approov-traceid\""));
         assertNotNull(signed.header("Signature"));
         assertNotNull(signed.header("Signature-Input"));
+    }
+
+    @Test
+    public void installSigningBase64FailuresProceedUnsigned() throws Exception {
+        Request request = unsignedRequestFixture();
+        signer.setInstallSignatureBase64("not base64");
+
+        Request processed = signer.processedRequest(request, changes);
+
+        assertSame(request, processed);
+        assertNull(processed.header("Signature"));
+        assertNull(processed.header("Signature-Input"));
+        assertEquals(1, signer.getInstallMessages().size());
+    }
+
+    @Test
+    public void installSigningDerFailuresProceedUnsigned() throws Exception {
+        Request request = unsignedRequestFixture();
+        signer.setInstallSignatureBase64(
+            Base64.getEncoder().encodeToString("not der".getBytes(StandardCharsets.UTF_8)));
+
+        Request processed = signer.processedRequest(request, changes);
+
+        assertSame(request, processed);
+        assertNull(processed.header("Signature"));
+        assertNull(processed.header("Signature-Input"));
+        assertEquals(1, signer.getInstallMessages().size());
+    }
+
+    @Test
+    public void accountSigningUnavailableProceedsUnsigned() throws Exception {
+        Request request = unsignedRequestFixture();
+        ApproovDefaultMessageSigning.SignatureParametersFactory accountFactory =
+            new FixedDefaultSignatureParametersFactory().setUseAccountMessageSigning();
+        signer.setDefaultFactory(accountFactory);
+        signer.setThrowAccountException(true);
+
+        Request processed = signer.processedRequest(request, changes);
+
+        assertSame(request, processed);
+        assertNull(processed.header("Signature"));
+        assertNull(processed.header("Signature-Input"));
+        assertEquals(1, signer.getAccountMessages().size());
+    }
+
+    @Test
+    public void accountSigningBase64FailuresProceedUnsigned() throws Exception {
+        Request request = unsignedRequestFixture();
+        ApproovDefaultMessageSigning.SignatureParametersFactory accountFactory =
+            new FixedDefaultSignatureParametersFactory().setUseAccountMessageSigning();
+        signer.setDefaultFactory(accountFactory);
+        signer.setAccountSignatureBase64("not base64");
+
+        Request processed = signer.processedRequest(request, changes);
+
+        assertSame(request, processed);
+        assertNull(processed.header("Signature"));
+        assertNull(processed.header("Signature-Input"));
+        assertEquals(1, signer.getAccountMessages().size());
+    }
+
+    @Test
+    public void unsupportedSigningAlgorithmFailsClosed() throws Exception {
+        Request request = unsignedRequestFixture();
+        signer.setDefaultFactory(new UnsupportedAlgorithmFactory());
+
+        try {
+            signer.processedRequest(request, changes);
+            fail("Unsupported signing algorithms must fail closed");
+        } catch (IllegalStateException e) {
+            assertTrue(e.getMessage().contains("Unsupported algorithm identifier"));
+        }
     }
 }

@@ -732,9 +732,19 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
   NSMutableURLRequest *finalRequest = nil;
   if (result.action == ApproovInterceptorActionProceed) {
     finalRequest = [result.request mutableCopy];
-    [[ApproovServiceMutatorBridge shared] processRequest:finalRequest
-                                             tokenHeader:tokenHeader
-                                           traceIDHeader:traceIDHeader];
+    NSError *mutatorError = nil;
+    BOOL mutatorSucceeded =
+        [[ApproovServiceMutatorBridge shared] processRequest:finalRequest
+                                                 tokenHeader:tokenHeader
+                                               traceIDHeader:traceIDHeader
+                                                errorPointer:&mutatorError];
+    if (!mutatorSucceeded) {
+      NSString *message = mutatorError.localizedDescription ?:
+          @"Approov request failed during mutator processing";
+      return [ApproovInterceptorResult createWithRequest:request
+                                              withAction:ApproovInterceptorActionFail
+                                             withMessage:message];
+    }
   }
 
   NSString *tokenAfterMutator =

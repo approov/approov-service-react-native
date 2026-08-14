@@ -34,6 +34,8 @@ The optional `comment` parameter is an advanced native SDK feature and most appl
 
 Repeated `options:...` calls are not a general runtime update mechanism and may fail even if the config string is unchanged. If you do not have a specific need for these features, pass nothing and let the default `null` value be used.
 
+> **The comment participates in the native SDK's already-initialized check.** Once the native SDK has been initialized, a later `initialize()` with the *same* config string is only accepted if the comment is identical to the one used on the first successful call, or starts with `reinit`. Any other comment — including passing `""` where `null` was used before, or vice versa — is reported by the native SDK as "already been initialized with a different configuration" and rejects the promise; the service layer leaves its own state untouched, so the previous configuration keeps working and a retry with the original comment succeeds. This matters because a React Native hot restart or an `ApproovProvider` remount re-runs `initialize()` against a native SDK that is still initialized from the previous JS run. `ApproovProvider` and `ApproovService.initialize()` both default the comment to `null` and forward it unchanged, so the default path is stable across restarts — but do not vary the comment between calls (for example by deriving it at runtime), or every re-initialization after the first will reject.
+
 ## isInitialized
 Returns whether the React Native Approov service layer has been initialized.
 
@@ -170,10 +172,10 @@ Note that this also suppresses logging generated for domains that match a criter
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
 
 ## setTokenHeader
-Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass in an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
+Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass `null` or an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
 
 ```Javascript
-ApproovService.setTokenHeader(header: string, prefix: string);
+ApproovService.setTokenHeader(header: string, prefix: string | null);
 ```
 
 You are encouraged to make this call inside the `approovSetup` function called by the `ApproovProvider`, to ensure this is setup prior to Approov initialization.
@@ -261,6 +263,56 @@ Removes an exclusion URL regular expression previously added using addExclusionU
 ```Javascript
 ApproovService.removeExclusionURLRegex(urlRegex: string);
 ```
+
+## setServiceMutatorType
+Selects the active request-handling policy from JavaScript, replacing any previously installed service mutator, with no native mutator code required. The `mask` is a proceed-bitmask listing which Approov **failure** statuses may proceed rather than block the request; assemble it from `ApproovService.ReturnDecision` bits or pass an `ApproovService.MutatorPreset` value. This is the no-native-code alternative to registering a custom `ApproovServiceMutator`. Behaviour is identical on Android and iOS.
+
+```Javascript
+ApproovService.setServiceMutatorType(mask: number, options?: { sign?: boolean });
+```
+
+* `mask` (number): A bitwise-OR of `ApproovService.ReturnDecision` flags, or an `ApproovService.MutatorPreset` value. Each failure status **in** the mask proceeds; any failure status **not** in the mask blocks the request, which then surfaces as a failed `fetch()` (`IOException` / `Network request failed` on Android, an `NSError` failure on iOS).
+* `options.sign` (boolean, optional): Defaults to `true`, so the installed policy mutator preserves HTTP Message Signing. Pass `{ sign: false }` to proceed per the mask but send the request unsigned (for apps that sign elsewhere or must not double-sign). Ignored for `MutatorPreset.DEFAULT`.
+
+`SUCCESS` always proceeds with the signed token added, and `UNKNOWN_URL` / `UNPROTECTED_URL` always proceed unmodified (forwarded without a token). These three statuses are never maskable and are not exposed as flags. In the other direction, any failure status that has no proceed bit always blocks, even under `ALWAYS_PROCEED` — the policy fails closed rather than proceeding on a status it does not recognise. On iOS this applies today to `notInitialized`/`badKey`/`badPayload`; on both platforms it also applies to any status a later SDK adds without a corresponding bit. This matches the okhttp / urlsession service layers, whose default token-fetch handling blocks any status it does not explicitly allow. When a masked failure status proceeds, pair this call with `setUseApproovStatusIfNoToken(true)` to have the fetch-status string written into the token header; otherwise the token header is emitted empty.
+
+`ApproovService.MutatorPreset.DEFAULT` (mask `-1`) restores the built-in default mutator, which performs message signing.
+
+The mask is validated before it is applied. It must be a finite, integral 32-bit value, and it must not set any bit outside the defined `ReturnDecision` flags (bits 0-10, i.e. `0x7ff`) — apart from the `MutatorPreset.DEFAULT` sentinel `-1`. An undefined bit names no Approov status, so it could not grant proceed to anything; a mask carrying one would install a policy that silently blocks every failure status. Such a mask is rejected (the returned promise rejects with code `setServiceMutatorType`) rather than applied, so a typo cannot masquerade as a deliberate block-everything policy.
+
+`setServiceMutatorType` uses replace semantics: the new policy wholly replaces any previously installed mutator (last wins), so use this JavaScript API or a native custom mutator, not both. Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
+
+`ApproovService.ReturnDecision` — maskable failure-status bit flags:
+
+| Flag | Value |
+| :--- | :--- |
+| `NO_APPROOV_SERVICE` | `1 << 0` |
+| `BAD_URL` | `1 << 1` |
+| `MITM_DETECTED` | `1 << 2` |
+| `NO_NETWORK` | `1 << 3` |
+| `POOR_NETWORK` | `1 << 4` |
+| `REJECTED` | `1 << 5` |
+| `UNKNOWN_KEY` | `1 << 6` |
+| `INTERNAL_ERROR` | `1 << 7` |
+| `NO_NETWORK_PERMISSION` | `1 << 8` |
+| `MISSING_LIB_DEPENDENCY` | `1 << 9` |
+| `DISABLED` | `1 << 10` |
+
+`ApproovService.MutatorPreset` — named masks:
+
+| Preset | Meaning |
+| :--- | :--- |
+| `DEFAULT` | Restore the built-in default (message-signing) mutator (mask `-1`). |
+| `ALWAYS_PROCEED` | Proceed on every *maskable* failure status. Any status with no proceed bit still **blocks** even under this preset (fail-closed); on iOS this applies to `notInitialized`/`badKey`/`badPayload`. Matches the okhttp / urlsession service layers. |
+| `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service is unavailable (`NO_APPROOV_SERVICE`). |
+| `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL`, forwarding non-`https` traffic; development only. |
+
+> [!WARNING]
+> Including `MITM_DETECTED` or `REJECTED` in the mask removes Approov's protection for those cases: the request proceeds **without proof of attestation** (no valid Approov token). With `MITM_DETECTED` masked, a request the SDK reports as man-in-the-middle intercepted is still sent; with `REJECTED` masked, a request from an app that failed attestation (for example tampered, repackaged, or running in a compromised environment) is still sent. Prefer the named presets, and only set these bits in a production mask deliberately.
+
+On iOS, `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status and are inert (harmless) if included.
+
+This function returns a `Promise` that resolves once the selected policy has been installed.
 
 ## prefetch
 *OBSOLETE:* the prefetch operation is now performed automatically by the platform SDK upon invoking `initialize`.
@@ -423,6 +475,23 @@ Important limitations:
 
 * On iOS, a pre-request baseline with zero sessions is normal.
 * On iOS, this method only reports on sessions that Approov successfully intercepted and registered. A completely bypassed request may not appear in this metadata and must be diagnosed from native logs.
+
+## getSessionDiagnostics
+(iOS-focused) Returns detailed diagnostics about the `NSURLSession` instances Approov has observed, for debugging interception and pinning coverage. On Android, where interception is interceptor-based rather than session-based, it resolves to a minimal object.
+
+```Javascript
+ApproovService.getSessionDiagnostics();
+```
+
+Returns a `Promise` resolving to an object summarising observed sessions:
+* `enabled` (boolean), `message` (string): overall state.
+* `totalSessions`, `totalRequests`, `registeredSessionCount`, `unregisteredSessionCount`, `nilDelegateSessionCount`, `policySkippedSessionCount`, `taskObservedWithoutSessionCreationCount` (numbers): session/request counters.
+* `registeredSessions` / `unregisteredSessions` (arrays): per-session detail — delegate class/image/bundle, `createdAt`, `requestCount`, `registeredForPinning`, auth-challenge/pinned/blocked counts, and last-observed task metadata. See `index.d.ts` for the full field list.
+
+Use it alongside `getPinningDiagnostics` when investigating why requests are, or are not, being intercepted and pinned on iOS.
+
+## approovInitCount
+`approovInitCount: number` is a field on the object returned by the `useApproov()` hook (it is not a static method). It is a monotonically increasing counter, incremented each time the service layer completes an `initialize()` — including a same-config re-initialization. Every (re-)initialization resets runtime configuration and any custom service mutator back to defaults, so a change in `approovInitCount` is the signal to re-apply your customizations (`setServiceMutatorType`, `setBindingHeader`, substitution/exclusion configuration, etc.). Track it in an effect and re-apply when it changes.
 
 ## updateClientFactory
 Manually forces the Approov SDK to rebuild and re-register its network client hooks. This is primarily useful on Android to recover the networking stack if a third-party SDK (like New Relic or Datadog) has overwritten the React Native `OkHttpClientFactory` *after* Approov initialization. Calling this safely layers Approov protection back onto the active network client. This method resolves immediately with `true` on iOS as no manual recovery is required.

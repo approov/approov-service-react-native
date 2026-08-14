@@ -94,14 +94,18 @@ NSString *const PropsExtension = @"plist";
       ApproovLogI(@"read properties file from %@", [propsURL absoluteString]);
     }
   } else {
-    ApproovLogE(@"properties file at %@ not found", [propsURL absoluteString]);
-    [NSException
-         raise:@"ApproovPropsNotFound"
-        format:
-            @"Approov props not found: \
-         Please make sure you have "
-            @"the plist file '%@.%@' available in your app's root directory.",
-            PropsResource, PropsExtension];
+    // The properties file is OPTIONAL, matching the Android layer where a missing
+    // approov.props is tolerated (loadApproovProps returns null). Leaving _props nil
+    // is safe: every consumer uses a non-nil key, and sending -objectForKey: to a nil
+    // dictionary returns nil. This lets a native approov.config-only integration
+    // (no per-request properties) run without shipping an empty approov.plist.
+    // WARN (not INFO): expected for approov.config-only integrations, but a build that
+    // accidentally drops a previously-shipped plist would otherwise lose token binding
+    // (binding.name) and a custom token header (token.name) silently (fail-open).
+    ApproovLogW(@"optional properties file %@.%@ not found; using defaults - any "
+                 "token.name / binding.name it would supply are NOT applied (set them "
+                 "via setTokenHeader / setBindingHeader if required)",
+                PropsResource, PropsExtension);
   }
   return self;
 }

@@ -196,6 +196,20 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 When enabled, the `Approov-Token` header is populated with the status string (with the configured prefix) only when the mutator allows the request to proceed without a token (for example, default `NO_APPROOV_SERVICE` handling, or custom mutator overrides). If the mutator blocks the request, no outbound request is made.
 
+> ⚠️ **The status string differs between platforms.** Android emits the SDK enum name, iOS emits the
+> SDK's human-readable description:
+>
+> | Condition | Android | iOS |
+> |---|---|---|
+> | MITM detected on the Approov channel | `MITM_DETECTED` | `MITM detected` |
+>
+> Android uses `TokenFetchStatus.toString()` (the enum name, matching the okhttp and retrofit
+> layers); iOS uses `stringFromApproovTokenFetchStatus`, which returns prose. A backend that matches
+> the Android spelling exactly will therefore **not** match traffic from iOS. Until this is
+> normalised, either match case-insensitively ignoring separators, or map both forms at the backend.
+> Verified on device/simulator: an iOS request that proceeded under a `MITM_DETECTED` policy arrived
+> with `approov-token: MITM detected`.
+
 ## Using `fetchWithApproov` (Alternative to Swizzling)
 
 By default, the `@approov/approov-service-react-native` package uses **swizzling (iOS)** and **OkHttpClient factory overrides (Android)** to automatically intercept all React Native `fetch()` calls and inject Approov tokens.
@@ -297,7 +311,7 @@ await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { sign: false 
 
 > ⚠️ **Security warning.** The mask decides which failures the app will *tolerate*. Putting **`MITM_DETECTED`** or **`REJECTED`** in the mask removes Approov's protection for those cases: the request proceeds **without proof of attestation** (no valid Approov token). Masking `MITM_DETECTED` lets a request the SDK reports as man-in-the-middle intercepted go out anyway; masking `REJECTED` lets a request from an app that failed attestation (tampered, repackaged, or running in a compromised environment) go out anyway. Most apps should use the named presets. Reach for the raw `ReturnDecision` bitmask only deliberately, and **never** ship `MITM_DETECTED` or `REJECTED` in a production mask unless you fully intend to accept that risk.
 
-**Reporting the status to your backend.** When a failure status is in the mask, the request proceeds. If you also enable `ApproovService.setUseApproovStatusIfNoToken(true)`, the fetch-status string (for example `MITM_DETECTED`) is written into the token header so the backend can see why no real token was sent; otherwise the token header is emitted empty.
+**Reporting the status to your backend.** When a failure status is in the mask, the request proceeds. If you also enable `ApproovService.setUseApproovStatusIfNoToken(true)`, the fetch-status string is written into the token header so the backend can see why no real token was sent; otherwise the token header is emitted empty. **The exact string differs per platform** — see [Use Approov Status as Token](#use-approov-status-as-token) — so match on it loosely or normalise it at your backend.
 
 ```javascript
 ApproovService.setUseApproovStatusIfNoToken(true);
@@ -362,7 +376,7 @@ To send the failure reason in the token header when the request is allowed to co
 ApproovService.setUseApproovStatusIfNoToken(true);
 ```
 
-With that setting enabled, the service layer places the failure status string into the configured token header, for example `Approov-Token: MITM_DETECTED` or `Approov-Token: NO_APPROOV_SERVICE`.
+With that setting enabled, the service layer places the failure status string into the configured token header. **The format is not the same on both platforms:** Android sends the SDK enum name (`Approov-Token: MITM_DETECTED`), while iOS sends the SDK's human-readable description (`Approov-Token: MITM detected`). See [Use Approov Status as Token](#use-approov-status-as-token).
 
 
 ### Android Implementation (Java)

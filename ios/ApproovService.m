@@ -494,11 +494,13 @@ RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
  *
  * @param mask     the proceed bitmask, or -1 to restore the default mutator
  * @param sign     whether the processed request should be message signed
+ * @param signatureMode  @"account" for the account signature, otherwise install
  * @param resolve  called on success
  * @param reject   called on failure
  */
 RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
                   sign : (BOOL)sign
+                  signatureMode : (NSString *)signatureMode
                   resolver : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
   @try {
@@ -541,10 +543,12 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
       [[ApproovServiceMutatorBridge shared] resetToDefault];
       ApproovLogI(@"setServiceMutatorType: restored default mutator");
     } else {
+      BOOL useAccount = [@"account" isEqualToString:signatureMode];
       [[ApproovServiceMutatorBridge shared] setPolicyMutator:(int32_t)maskValue
-                                                        sign:sign];
-      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@", (long)maskValue,
-                  sign ? @"YES" : @"NO");
+                                                        sign:sign
+                                          useAccountSigning:useAccount];
+      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@ mode=%@", (long)maskValue,
+                  sign ? @"YES" : @"NO", useAccount ? @"account" : @"install");
     }
     resolve(nil);
   } @catch (NSException *exception) {

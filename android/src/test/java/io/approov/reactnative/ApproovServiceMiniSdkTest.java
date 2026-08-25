@@ -717,7 +717,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-optin-signed");
 
         awaitResolvedPromise(promise ->
-            service.setServiceMutatorType(PolicyMutator.BIT_NO_APPROOV_SERVICE, true, promise));
+            service.setServiceMutatorType(PolicyMutator.BIT_NO_APPROOV_SERVICE, true, "install", promise));
 
         Request request = new Request.Builder()
             .url(getTargetURL())

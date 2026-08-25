@@ -30,9 +30,12 @@ import Approov
      * - Parameters:
      *   - mask: the proceed bitmask (see `PolicyMutator.BIT_*`).
      *   - sign: whether the processed request should be HTTP Message Signed.
+     *   - useAccountSigning: true for the account signature, false for install.
      */
-    @objc public func setPolicyMutator(_ mask: Int32, sign: Bool) {
-        self.serviceMutator = PolicyMutator(proceedMask: mask, sign: sign)
+    @objc public func setPolicyMutator(_ mask: Int32, sign: Bool, useAccountSigning: Bool) {
+        self.serviceMutator = PolicyMutator(proceedMask: mask,
+                                            sign: sign,
+                                            useAccountSigning: useAccountSigning)
     }
 
     /**

@@ -128,11 +128,14 @@ public final class PolicyMutator: ApproovServiceMutator, CustomStringConvertible
      *                  delegating to `ApproovDefaultMessageSigning`), `false` to
      *                  forward the request unmodified and unsigned.
      */
-    public init(proceedMask: Int32, sign: Bool = true) {
+    public init(proceedMask: Int32, sign: Bool = true, useAccountSigning: Bool = false) {
         self.proceedMask = proceedMask
         self.sign = sign
-        self.signer = ApproovDefaultMessageSigning()
-            .setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
+        var factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+        if useAccountSigning {
+            factory = factory.setUseAccountMessageSigning()
+        }
+        self.signer = ApproovDefaultMessageSigning().setDefaultFactory(factory)
     }
 
     public var description: String {

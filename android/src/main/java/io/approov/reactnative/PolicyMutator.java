@@ -135,7 +135,26 @@ public class PolicyMutator extends ApproovDefaultMessageSigning {
      *                    unsigned
      */
     public PolicyMutator(int proceedMask, boolean sign) {
-        setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+        this(proceedMask, sign, false);
+    }
+
+    /**
+     * Constructs a {@code PolicyMutator} driven by the supplied proceed bitmask,
+     * selecting which message signature is produced when signing is enabled.
+     *
+     * @param proceedMask        bitmask of failure-status bits that should PROCEED
+     * @param sign               {@code true} to sign the processed request
+     * @param useAccountSigning  {@code true} to produce the account signature,
+     *                           {@code false} for the install signature (the
+     *                           default). Ignored when {@code sign} is false.
+     */
+    public PolicyMutator(int proceedMask, boolean sign, boolean useAccountSigning) {
+        ApproovDefaultMessageSigning.SignatureParametersFactory factory =
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory();
+        if (useAccountSigning) {
+            factory.setUseAccountMessageSigning();
+        }
+        setDefaultFactory(factory);
         this.proceedMask = proceedMask;
         this.sign = sign;
     }

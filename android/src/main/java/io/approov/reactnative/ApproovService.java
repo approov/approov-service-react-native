@@ -216,7 +216,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * Builds the React Native default service mutator. This is the standard
      * pass-through mutator: requests are protected with an Approov token and
      * pinning as usual, and are forwarded unsigned. HTTP Message Signing is
-     * opt-in and is selected with {@link #setServiceMutatorType(double, boolean, Promise)}
+     * opt-in and is selected with {@link #setServiceMutatorType(double, boolean, String, Promise)}
      * or by installing {@link ApproovDefaultMessageSigning} through
      * {@link #setServiceMutator(ApproovServiceMutator)}.
      *
@@ -229,7 +229,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
     /**
      * Sentinel mask value selecting the built-in default mutator rather than a
      * {@link PolicyMutator}. Passed from JavaScript as {@code MutatorPreset.DEFAULT}
-     * to {@link #setServiceMutatorType(double, boolean, Promise)} to restore the
+     * to {@link #setServiceMutatorType(double, boolean, String, Promise)} to restore the
      * out-of-box pass-through mutator, which does not sign requests.
      */
     public static final int MUTATOR_PRESET_DEFAULT = -1;
@@ -273,6 +273,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *
      * @param maskDouble the proceed bitmask (bridged as a double), or
      *                   {@link #MUTATOR_PRESET_DEFAULT} to restore the default
+     * @param signatureMode {@code "account"} to produce the account signature,
+     *                   anything else (normally {@code "install"}) for the install
+     *                   signature; ignored when {@code sign} is false or for
+     *                   {@link #MUTATOR_PRESET_DEFAULT}
      * @param sign       {@code true} to HTTP Message Sign the processed request,
      *                   {@code false} to proceed per the mask and forward the
      *                   request unsigned; ignored for
@@ -280,7 +284,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * @param promise    resolved with null on success, rejected on error
      */
     @ReactMethod
-    public void setServiceMutatorType(double maskDouble, boolean sign, Promise promise) {
+    public void setServiceMutatorType(double maskDouble, boolean sign, String signatureMode, Promise promise) {
         try {
             // The mask is bridged from JavaScript as a double. Reject any value that is
             // not a finite, integral, 32-bit quantity before narrowing to int: a
@@ -310,7 +314,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box default mutator (sign flag N/A)
                 setServiceMutator(null);
             } else {
-                setServiceMutator(new PolicyMutator(mask, sign));
+                setServiceMutator(new PolicyMutator(mask, sign, "account".equals(signatureMode)));
             }
             if (currentLogLevel <= LOG_DEBUG)
                 Log.d(TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);

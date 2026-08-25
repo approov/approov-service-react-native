@@ -160,7 +160,7 @@ static BOOL gIsDefaultMutator = YES;
 // to observe is whether ApproovService.m *calls* these helpers — in particular that a
 // config-change re-initialization triggers the mutator reset. Swallowing the calls
 // silently would leave that integration point untested.
-- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign {
+- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign useAccountSigning:(BOOL)useAccountSigning {
   gSetPolicyMutatorCount += 1;
   gLastPolicyMutatorMask = mask;
   gLastPolicyMutatorSign = sign;

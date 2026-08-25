@@ -252,7 +252,7 @@ private func testSignTrueDelegatesToTheSigner() throws {
 private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
     let bridge = ApproovServiceMutatorBridge.shared
 
-    bridge.setPolicyMutator(PolicyMutator.BIT_MITM_DETECTED, sign: true)
+    bridge.setPolicyMutator(PolicyMutator.BIT_MITM_DETECTED, sign: true, useAccountSigning: false)
     assertTrue(bridge.serviceMutator is PolicyMutator,
                "setPolicyMutator should install a PolicyMutator as the active mutator")
 
@@ -276,7 +276,7 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
 
     // Substitution results use the same mask semantics: masked failures skip
     // substitution, while unmasked failures surface a hard block.
-    bridge.setPolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, sign: true)
+    bridge.setPolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, sign: true, useAccountSigning: false)
     var substitutionSkipError: NSError?
     let shouldSubstitute = bridge.handleInterceptorHeaderSubstitutionResult(
         result(.noApproovService),

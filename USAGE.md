@@ -164,7 +164,7 @@ It is possible to sign HTTP requests using Approov to ensure message integrity a
 *   **Integrity:** Ensures that the request parameters (headers, body, URL) have not been tampered with during transit.
 *   **Authenticity:** Proves that the request originated from a genuine, attested application instance.
 
-Message signing is enabled automatically by the default `ApproovService` configuration. If your Approov account has message signing enabled, the SDK will automatically add the message signature headers to your outbound requests.
+Message signing is opt-in. The default `ApproovService` configuration forwards requests unsigned. To enable it, install a policy mutator with `setServiceMutatorType(mask, { sign: true })`, or install `ApproovDefaultMessageSigning` natively. Once enabled, and provided your Approov account has message signing configured, the message signature headers are added to your outbound requests automatically.
 
 For more details on how to configure or override message signing behavior, see the [Approov Service Mutator](#approov-service-mutator) section below.
 
@@ -289,7 +289,7 @@ await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_
 
 | Preset | Effect |
 | :--- | :--- |
-| `DEFAULT` | Restore the built-in default mutator (the standard behaviour described under *Default Behavior* above, including HTTP Message Signing). |
+| `DEFAULT` | Restore the built-in default mutator (the standard behaviour described under *Default Behavior* above). Requests are forwarded unsigned. |
 | `ALWAYS_PROCEED` | Proceed on every **maskable** failure status — includes `MITM_DETECTED` and `REJECTED` (read the warning below). Note: any status with no proceed bit still blocks even under this preset; on iOS this applies to `notInitialized`/`badKey`/`badPayload`. |
 | `PROCEED_IF_UNAVAILABLE` | Proceed only when the Approov service itself is unavailable (`NO_APPROOV_SERVICE`). Note this is not the offline case: a device without connectivity yields `NO_NETWORK`, which this preset blocks — add `ReturnDecision.NO_NETWORK` to the mask if you also want to tolerate offline devices. |
 | `PROCEED_DEV_CLEARTEXT` | Proceed on `BAD_URL` (non-`https` traffic, e.g. Metro dev servers); the request still runs through the Approov pipeline. Development only. |
@@ -319,7 +319,7 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 
 **A blocked request surfaces as a failed fetch.** A failure status that is *not* in the mask blocks the request: it fails as a rejected `fetch()` — an `IOException` / `Network request failed` on Android, and an `NSError` failure on iOS. The outcome is identical on both platforms.
 
-**Signing.** `options.sign` defaults to `true`, so the installed policy mutator preserves HTTP Message Signing. Pass `{ sign: false }` to proceed per the mask but send the request **unsigned** — for apps that sign elsewhere or must not double-sign. `sign` is ignored for `MutatorPreset.DEFAULT`, which always restores the signing default.
+**Signing.** `options.sign` defaults to `true`, so a policy mutator installed with `setServiceMutatorType` applies HTTP Message Signing. This is the opt-in route: the out-of-box default does not sign. Pass `{ sign: false }` to proceed per the mask and send the request **unsigned**, for apps that sign elsewhere or must not double-sign. `sign` is ignored for `MutatorPreset.DEFAULT`, which restores the unsigned default mutator.
 
 **Replace semantics (last wins).** `setServiceMutatorType` replaces any previously installed mutator, including a native one. Use the JavaScript API *or* a native custom mutator, not both.
 
@@ -352,9 +352,9 @@ if (__DEV__) await ApproovService.setServiceMutatorType(ApproovService.MutatorPr
 
 Guard it with `__DEV__` so it can never take effect in a release build.
 
-## Default Behavior: HTTP Message Signing
+## Default Behavior
 
-By default, the Approov Service is configured with a default mutator (`ApproovDefaultMessageSigning`) that **automatically performs HTTP Message Signing**. It fetches the Approov token, adds the `Approov-Token` header to requests, and generates the required message signature headers.
+By default, the Approov Service is configured with the standard pass-through mutator. It fetches the Approov token, adds the `Approov-Token` header to requests, and applies pinning, and it forwards the request **unsigned**. HTTP Message Signing is **opt-in**: enable it with `setServiceMutatorType(mask, { sign: true })` from JavaScript, or by installing `ApproovDefaultMessageSigning` natively.
 
 If you need to change other networking behaviors, you can do so natively by setting a custom `ApproovServiceMutator`.
 
@@ -819,5 +819,5 @@ If you must log from the client, ensure you have a fallback strategy for when th
 ## Tips
 
 - Keep mutator logic fast and side-effect safe. These native hooks run on the request path and blocking them will hang the network traffic.
-- To preserve the existing behavior and layer your changes on top, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Do **not** base custom mutators on `ApproovServiceMutator.DEFAULT` (Android) — it is a no-op pass-through that performs no message signing.
+- To add message signing on top of your own behaviour, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Basing a custom mutator on `ApproovServiceMutator.DEFAULT` (Android) gives you the pass-through behaviour, which performs no message signing.
 - If you override multiple hooks, keep them focused (one concern per hook) for easier testing and maintenance.

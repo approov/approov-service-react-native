@@ -297,10 +297,10 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
     assertTrue(substitutionBlockError?.userInfo["type"] as? String == "general",
                "A blocked substitution status must be a general error")
 
-    // resetToDefault restores the built-in signing default.
+    // resetToDefault restores the built-in default mutator (unsigned).
     bridge.resetToDefault()
-    assertTrue(bridge.serviceMutator is ApproovDefaultMessageSigning,
-               "resetToDefault should restore an ApproovDefaultMessageSigning mutator")
+    assertTrue(bridge.serviceMutator is ApproovServiceMutatorDefault,
+               "resetToDefault should restore the ApproovServiceMutatorDefault mutator")
     assertFalse(bridge.serviceMutator is PolicyMutator,
                 "resetToDefault should remove the installed PolicyMutator")
 }

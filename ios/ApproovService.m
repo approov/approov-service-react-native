@@ -487,7 +487,8 @@ RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
  * the cross-platform JavaScript layer drives identical native behaviour.
  *
  * A mask of -1 (ApproovService.MutatorPreset.DEFAULT) restores the built-in
- * message-signing default. Any other mask installs a PolicyMutator whose
+ * default mutator, which forwards requests unsigned. Any other mask installs a
+ * PolicyMutator whose
  * per-status proceed/forward/block policy is driven by the bitmask; the sign
  * flag controls whether the processed request is HTTP Message Signed.
  *
@@ -536,7 +537,7 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
       return;
     }
     if (maskValue == -1) {
-      // MutatorPreset.DEFAULT: restore the built-in message-signing default.
+      // MutatorPreset.DEFAULT: restore the built-in default mutator.
       [[ApproovServiceMutatorBridge shared] resetToDefault];
       ApproovLogI(@"setServiceMutatorType: restored default mutator");
     } else {

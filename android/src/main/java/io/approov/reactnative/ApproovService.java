@@ -213,22 +213,24 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Builds the React Native default service mutator, including HTTP Message
-     * Signing.
+     * Builds the React Native default service mutator. This is the standard
+     * pass-through mutator: requests are protected with an Approov token and
+     * pinning as usual, and are forwarded unsigned. HTTP Message Signing is
+     * opt-in and is selected with {@link #setServiceMutatorType(double, boolean, Promise)}
+     * or by installing {@link ApproovDefaultMessageSigning} through
+     * {@link #setServiceMutator(ApproovServiceMutator)}.
      *
-     * @return a freshly configured default signing mutator
+     * @return the default service mutator
      */
-    private static ApproovDefaultMessageSigning buildDefaultServiceMutator() {
-        ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
-        signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-        return signer;
+    private static ApproovServiceMutator buildDefaultServiceMutator() {
+        return ApproovServiceMutator.DEFAULT;
     }
 
     /**
-     * Sentinel mask value selecting the built-in signing default rather than a
+     * Sentinel mask value selecting the built-in default mutator rather than a
      * {@link PolicyMutator}. Passed from JavaScript as {@code MutatorPreset.DEFAULT}
      * to {@link #setServiceMutatorType(double, boolean, Promise)} to restore the
-     * out-of-box {@link ApproovDefaultMessageSigning} mutator (with message signing).
+     * out-of-box pass-through mutator, which does not sign requests.
      */
     public static final int MUTATOR_PRESET_DEFAULT = -1;
 
@@ -260,9 +262,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * Selects the active service mutator from JavaScript.
      *
      * <p>A {@code mask} equal to {@link #MUTATOR_PRESET_DEFAULT} restores the
-     * built-in {@link ApproovDefaultMessageSigning} mutator (with message
-     * signing), exactly as the static initializer configures it; the {@code sign}
-     * flag is not applicable in that case. Any other value installs a
+     * built-in pass-through mutator, exactly as the static initializer configures
+     * it; requests are forwarded unsigned and the {@code sign} flag is not
+     * applicable in that case. Any other value installs a
      * {@link PolicyMutator} driven by that proceed bitmask (see the
      * {@code PolicyMutator.BIT_*} constants).
      *
@@ -271,9 +273,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
      *
      * @param maskDouble the proceed bitmask (bridged as a double), or
      *                   {@link #MUTATOR_PRESET_DEFAULT} to restore the default
-     * @param sign       {@code true} to HTTP Message Sign the processed request
-     *                   (the default), {@code false} to proceed per the mask but
-     *                   forward the request unsigned; ignored for
+     * @param sign       {@code true} to HTTP Message Sign the processed request,
+     *                   {@code false} to proceed per the mask and forward the
+     *                   request unsigned; ignored for
      *                   {@link #MUTATOR_PRESET_DEFAULT}
      * @param promise    resolved with null on success, rejected on error
      */
@@ -305,7 +307,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                                 + Integer.toHexString(mask));
                 return;
             }
-            if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box signing default (sign flag N/A)
+            if (mask == MUTATOR_PRESET_DEFAULT) {   // restore out-of-box default mutator (sign flag N/A)
                 setServiceMutator(null);
             } else {
                 setServiceMutator(new PolicyMutator(mask, sign));
@@ -835,7 +837,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 exclusionURLRegexs = new HashMap<>();
                 suppressLoggingUnknownURL = false;
                 sessionMetadataCollectionEnabled = true;
-                if ((serviceMutator != null) && (serviceMutator.getClass() != ApproovDefaultMessageSigning.class))
+                if ((serviceMutator != null) && (serviceMutator != ApproovServiceMutator.DEFAULT))
                     Log.w(TAG, "initialization is discarding a custom service mutator - re-apply " +
                             "setServiceMutatorType (or setServiceMutator) after initialize if a " +
                             "custom policy is still required");

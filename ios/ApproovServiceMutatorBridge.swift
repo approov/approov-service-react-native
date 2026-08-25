@@ -18,10 +18,7 @@ import Approov
     }
 
     private override init() {
-        let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-        let signer = ApproovDefaultMessageSigning()
-        _ = signer.setDefaultFactory(factory)
-        _serviceMutator = signer
+        _serviceMutator = ApproovServiceMutatorDefault.shared
         super.init()
     }
 
@@ -40,24 +37,23 @@ import Approov
 
     /**
      * Indicates whether the currently installed service mutator is the built-in
-     * default signer. Used by the initialization path to warn when a custom
-     * mutator (policy or native) is about to be discarded by a reset.
+     * default. Used by the initialization path to warn when a custom mutator
+     * (policy or native) is about to be discarded by a reset.
      */
     @objc public var isDefaultMutator: Bool {
-        return type(of: serviceMutator) == ApproovDefaultMessageSigning.self
+        return serviceMutator is ApproovServiceMutatorDefault
     }
 
     /**
-     * Restores the built-in default service mutator: a freshly configured
-     * `ApproovDefaultMessageSigning` signer identical to the one installed at
-     * construction time. Exposed to Objective-C because the Swift-typed
-     * `serviceMutator` property cannot be assigned directly from Objective-C.
+     * Restores the built-in default service mutator: the standard pass-through
+     * mutator installed at construction time, which forwards requests unsigned.
+     * HTTP Message Signing is opt-in via `setPolicyMutator(_:sign:)` or by
+     * installing `ApproovDefaultMessageSigning` directly. Exposed to
+     * Objective-C because the Swift-typed `serviceMutator` property cannot be
+     * assigned directly from Objective-C.
      */
     @objc public func resetToDefault() {
-        let factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-        let signer = ApproovDefaultMessageSigning()
-        _ = signer.setDefaultFactory(factory)
-        self.serviceMutator = signer
+        self.serviceMutator = ApproovServiceMutatorDefault.shared
     }
 
     private func headerValue(forHTTPHeaderField header: String,

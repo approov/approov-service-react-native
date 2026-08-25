@@ -175,7 +175,7 @@ ApproovService.ReturnDecision = {
 }
 const _RD = ApproovService.ReturnDecision
 ApproovService.MutatorPreset = {
-  DEFAULT: -1,                                              // restore the built-in signing default
+  DEFAULT: -1,                                              // restore the built-in default mutator (unsigned)
   ALWAYS_PROCEED: Object.values(_RD).reduce((a, b) => a | b, 0),   // = 2047
   PROCEED_IF_UNAVAILABLE: _RD.NO_APPROOV_SERVICE,           // UNKNOWN_URL/UNPROTECTED_URL already always proceed
   PROCEED_DEV_CLEARTEXT: _RD.BAD_URL,                       // proceed on BAD_URL (non-https Metro dev traffic), still through the Approov pipeline

@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assert.assertThrows;
@@ -675,6 +676,61 @@ public class ApproovServiceMiniSdkTest {
         String message = signer.getInstallMessages().get(0);
         assertTrue(message.contains("\"approov-token\""));
         assertTrue(message.contains("\"approov-traceid\""));
+    }
+
+    /**
+     * The out-of-box default must protect the request but not sign it. Every other
+     * signing test in this class installs a signer explicitly, so without this one
+     * the default's signing behaviour is unasserted and can change unnoticed.
+     */
+    @Test
+    public void fetchWithApproovDoesNotSignByDefault() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-default-unsigned");
+
+        assertSame("no mutator was installed, so the default must be active",
+            ApproovServiceMutator.DEFAULT, ApproovService.getServiceMutator());
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+        JSONObject reply = fetchNetworkReply(request);
+
+        // still protected
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNotNull(getHeader(reply, "Approov-TraceID"));
+
+        // but unsigned
+        assertNull("default mutator must not sign", getHeader(reply, "Signature"));
+        assertNull("default mutator must not sign", getHeader(reply, "Signature-Input"));
+        assertNull("default mutator must not digest the body", getHeader(reply, "Content-Digest"));
+    }
+
+    /**
+     * Opting in from the JavaScript API must produce signed requests, so the
+     * absence of signing above is the default rather than signing being broken.
+     */
+    @Test
+    public void fetchWithApproovSignsWhenPolicyMutatorOptsIn() throws Exception {
+        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-optin-signed");
+
+        awaitResolvedPromise(promise ->
+            service.setServiceMutatorType(PolicyMutator.BIT_NO_APPROOV_SERVICE, true, promise));
+
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .post(RequestBody.create(APPLICATION_JSON, "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)))
+            .header("Authorization", "Bearer oauth-token")
+            .header("Content-Type", "application/json")
+            .build();
+        JSONObject reply = fetchNetworkReply(request);
+
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNotNull("opting in must sign", getHeader(reply, "Signature"));
+        assertNotNull("opting in must sign", getHeader(reply, "Signature-Input"));
+        assertNotNull("opting in must digest the body", getHeader(reply, "Content-Digest"));
     }
 
     @Test

@@ -166,7 +166,34 @@ It is possible to sign HTTP requests using Approov to ensure message integrity a
 
 Message signing is opt-in. The default `ApproovService` configuration forwards requests unsigned. To enable it, install a policy mutator with `setServiceMutatorType(mask, { sign: true })`, or install `ApproovDefaultMessageSigning` natively. Once enabled, and provided your Approov account has message signing configured, the message signature headers are added to your outbound requests automatically.
 
-For more details on how to configure or override message signing behavior, see the [Approov Service Mutator](#approov-service-mutator) section below.
+### Enabling message signing from JavaScript (no native code)
+
+You do not need any native code to turn message signing on. `setServiceMutatorType` installs a policy mutator that signs, and `options.signature` chooses which signature type it produces: `'install'` (the default, the per-installation Secure Enclave/TEE key) or `'account'` (the shared account HMAC-SHA256 key). Apply it after `initialize` has completed (see the re-initialization note in the [Approov Service Mutator](#approov-service-mutator) section, the mutator is reset on every successful init).
+
+```javascript
+import { ApproovService } from '@approov/approov-service-react-native';
+
+await ApproovService.initialize('<config>');
+
+// Enable installation message signing (the default signature type).
+// Signing is on unless you pass { sign: false }, so a named preset already signs:
+await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_IF_UNAVAILABLE);
+
+// Or be explicit about the mask and the signature type:
+const RD = ApproovService.ReturnDecision;
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { sign: true, signature: 'install' });
+
+// Account message signing instead of the install key:
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { signature: 'account' });
+
+// Turn signing back off (forward unsigned), or restore the unsigned default mutator:
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { sign: false });
+await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.DEFAULT);
+```
+
+`signature` is ignored when `sign` is `false` and for `MutatorPreset.DEFAULT` (which restores the unsigned default mutator). The behaviour is identical on Android and iOS.
+
+For the failure-status mask, the security warning on masking `MITM_DETECTED`/`REJECTED`, and how a proceeding request reports its status to the backend, see the [Approov Service Mutator](#approov-service-mutator) section below. Reach for a native `ApproovServiceMutator` (the platform examples further down) only when you need fully custom per-request logic.
 
 ## Token Binding
 
@@ -320,6 +347,13 @@ ApproovService.setUseApproovStatusIfNoToken(true);
 **A blocked request surfaces as a failed fetch.** A failure status that is *not* in the mask blocks the request: it fails as a rejected `fetch()` — an `IOException` / `Network request failed` on Android, and an `NSError` failure on iOS. The outcome is identical on both platforms.
 
 **Signing.** `options.sign` defaults to `true`, so a policy mutator installed with `setServiceMutatorType` applies HTTP Message Signing. This is the opt-in route: the out-of-box default does not sign. Pass `{ sign: false }` to proceed per the mask and send the request **unsigned**, for apps that sign elsewhere or must not double-sign. `sign` is ignored for `MutatorPreset.DEFAULT`, which restores the unsigned default mutator.
+
+**Signature type.** `options.signature` selects which HTTP Message Signature the installed mutator produces: `'install'` (the default, the per-installation Secure Enclave/TEE key, strong non-repudiation) or `'account'` (the shared account HMAC-SHA256 key delivered on a successful attestation). It is ignored when `sign` is `false` and for `MutatorPreset.DEFAULT`. See [Enabling message signing from JavaScript](#enabling-message-signing-from-javascript-no-native-code) for worked examples.
+
+```javascript
+const RD = ApproovService.ReturnDecision;
+await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { signature: 'account' });
+```
 
 **Replace semantics (last wins).** `setServiceMutatorType` replaces any previously installed mutator, including a native one. Use the JavaScript API *or* a native custom mutator, not both.
 

@@ -487,17 +487,20 @@ RCT_EXPORT_METHOD(isApproovEnabled : (RCTPromiseResolveBlock)resolve
  * the cross-platform JavaScript layer drives identical native behaviour.
  *
  * A mask of -1 (ApproovService.MutatorPreset.DEFAULT) restores the built-in
- * message-signing default. Any other mask installs a PolicyMutator whose
+ * default mutator, which forwards requests unsigned. Any other mask installs a
+ * PolicyMutator whose
  * per-status proceed/forward/block policy is driven by the bitmask; the sign
  * flag controls whether the processed request is HTTP Message Signed.
  *
  * @param mask     the proceed bitmask, or -1 to restore the default mutator
  * @param sign     whether the processed request should be message signed
+ * @param signatureMode  @"account" for the account signature, otherwise install
  * @param resolve  called on success
  * @param reject   called on failure
  */
 RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
                   sign : (BOOL)sign
+                  signatureMode : (NSString *)signatureMode
                   resolver : (RCTPromiseResolveBlock)resolve
                   rejecter : (RCTPromiseRejectBlock)reject) {
   @try {
@@ -536,14 +539,16 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
       return;
     }
     if (maskValue == -1) {
-      // MutatorPreset.DEFAULT: restore the built-in message-signing default.
+      // MutatorPreset.DEFAULT: restore the built-in default mutator.
       [[ApproovServiceMutatorBridge shared] resetToDefault];
       ApproovLogI(@"setServiceMutatorType: restored default mutator");
     } else {
+      BOOL useAccount = [@"account" isEqualToString:signatureMode];
       [[ApproovServiceMutatorBridge shared] setPolicyMutator:(int32_t)maskValue
-                                                        sign:sign];
-      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@", (long)maskValue,
-                  sign ? @"YES" : @"NO");
+                                                        sign:sign
+                                          useAccountSigning:useAccount];
+      ApproovLogI(@"setServiceMutatorType: mask=%ld sign=%@ mode=%@", (long)maskValue,
+                  sign ? @"YES" : @"NO", useAccount ? @"account" : @"install");
     }
     resolve(nil);
   } @catch (NSException *exception) {

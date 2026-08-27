@@ -83,7 +83,7 @@ export declare class ApproovService {
    * processed request). Pass `{ sign: false }` to proceed per the mask but send
    * the request unsigned. `sign` is ignored for `MutatorPreset.DEFAULT`.
    */
-  static setServiceMutatorType(mask: number, options?: { sign?: boolean }): Promise<void>;
+  static setServiceMutatorType(mask: number, options?: { sign?: boolean; signature?: 'install' | 'account' }): Promise<void>;
   /**
    * Maskable FAILURE statuses. Bit values match the native PolicyMutator.BIT_*
    * constants. SUCCESS/UNKNOWN_URL/UNPROTECTED_URL always proceed and are not

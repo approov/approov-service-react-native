@@ -21,7 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)handleInterceptorQueryParamSubstitutionResult:(id)result
                                              queryKey:(NSString *)queryKey
                                          errorPointer:(NSError *_Nullable *_Nullable)errorPointer;
-- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign;
+- (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign useAccountSigning:(BOOL)useAccountSigning;
 - (void)resetToDefault;
 @property (nonatomic, readonly) BOOL isDefaultMutator;
 

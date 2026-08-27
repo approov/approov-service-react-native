@@ -354,13 +354,10 @@ public class ApproovServiceRegressionTest {
 
         ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
         assertNotSame("custom mutator must not persist across a config change", custom, afterReset);
-        // PolicyMutator extends ApproovDefaultMessageSigning, so an "instanceof
-        // ApproovDefaultMessageSigning" assertion alone would pass even if the custom
-        // mutator survived. Assert the negative explicitly.
         assertFalse("re-init must not leave a PolicyMutator installed",
             afterReset instanceof PolicyMutator);
-        assertTrue("re-init must restore the default message-signing mutator",
-            afterReset instanceof ApproovDefaultMessageSigning);
+        assertSame("re-init must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
     }
 
     @Test
@@ -384,19 +381,19 @@ public class ApproovServiceRegressionTest {
         assertNotSame("same-config re-init must reset custom mutators", custom, afterReset);
         assertFalse("same-config re-init must not leave a PolicyMutator installed",
             afterReset instanceof PolicyMutator);
-        assertTrue("same-config re-init must restore the default message-signing mutator",
-            afterReset instanceof ApproovDefaultMessageSigning);
+        assertSame("same-config re-init must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
     }
 
     @Test
-    public void setServiceMutatorNullRestoresDefaultMessageSigningMutator() {
+    public void setServiceMutatorNullRestoresDefaultMutator() {
         ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false));
 
         ApproovService.setServiceMutator(null);
 
         ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
-        assertTrue("null reset must restore the default message-signing mutator",
-            afterReset instanceof ApproovDefaultMessageSigning);
+        assertSame("null reset must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
         assertFalse("null reset must not leave a PolicyMutator installed",
             afterReset instanceof PolicyMutator);
     }

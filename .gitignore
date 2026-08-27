@@ -68,3 +68,7 @@ buck-out/
 
 # CocoaPods
 /ios/Pods/
+core-service-layers-testing
+
+# build/test log dumps (never commit)
+*.log

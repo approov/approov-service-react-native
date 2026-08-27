@@ -252,7 +252,7 @@ private func testSignTrueDelegatesToTheSigner() throws {
 private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
     let bridge = ApproovServiceMutatorBridge.shared
 
-    bridge.setPolicyMutator(PolicyMutator.BIT_MITM_DETECTED, sign: true)
+    bridge.setPolicyMutator(PolicyMutator.BIT_MITM_DETECTED, sign: true, useAccountSigning: false)
     assertTrue(bridge.serviceMutator is PolicyMutator,
                "setPolicyMutator should install a PolicyMutator as the active mutator")
 
@@ -276,7 +276,7 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
 
     // Substitution results use the same mask semantics: masked failures skip
     // substitution, while unmasked failures surface a hard block.
-    bridge.setPolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, sign: true)
+    bridge.setPolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, sign: true, useAccountSigning: false)
     var substitutionSkipError: NSError?
     let shouldSubstitute = bridge.handleInterceptorHeaderSubstitutionResult(
         result(.noApproovService),
@@ -297,10 +297,10 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
     assertTrue(substitutionBlockError?.userInfo["type"] as? String == "general",
                "A blocked substitution status must be a general error")
 
-    // resetToDefault restores the built-in signing default.
+    // resetToDefault restores the built-in default mutator (unsigned).
     bridge.resetToDefault()
-    assertTrue(bridge.serviceMutator is ApproovDefaultMessageSigning,
-               "resetToDefault should restore an ApproovDefaultMessageSigning mutator")
+    assertTrue(bridge.serviceMutator is ApproovServiceMutatorDefault,
+               "resetToDefault should restore the ApproovServiceMutatorDefault mutator")
     assertFalse(bridge.serviceMutator is PolicyMutator,
                 "resetToDefault should remove the installed PolicyMutator")
 }

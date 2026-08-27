@@ -65,6 +65,7 @@ static void AssertEqualIntegers(NSInteger expected, NSInteger actual,
                 rejecter:(RCTPromiseRejectBlock)reject;
 - (void)setServiceMutatorType:(double)mask
                          sign:(BOOL)sign
+                signatureMode:(NSString *)signatureMode
                      resolver:(RCTPromiseResolveBlock)resolve
                      rejecter:(RCTPromiseRejectBlock)reject;
 - (void)setTokenHeader:(NSString *)header prefix:(NSString *_Nullable)prefix;
@@ -730,6 +731,7 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
     __block NSString *rejectionCode = nil;
     [service setServiceMutatorType:invalidMasks[i]
                               sign:YES
+                     signatureMode:@"install"
                           resolver:^(__unused id value) { didResolve = YES; }
                           rejecter:^(NSString *code, __unused NSString *message,
                                      __unused NSError *error) { rejectionCode = code; }];
@@ -753,6 +755,7 @@ static void TestSetServiceMutatorTypeValidatesMask(void) {
     __block NSString *rejectionCode = nil;
     [service setServiceMutatorType:validMasks[i]
                               sign:YES
+                     signatureMode:@"install"
                           resolver:^(__unused id value) { didResolve = YES; }
                           rejecter:^(NSString *code, __unused NSString *message,
                                      __unused NSError *error) { rejectionCode = code; }];
@@ -782,6 +785,7 @@ static void TestInitializeResetsServiceMutatorOnReinitialization(void) {
   __block BOOL policyResolved = NO;
   [service setServiceMutatorType:8.0  // BIT_NO_NETWORK (1 << 3)
                             sign:NO
+                   signatureMode:@"install"
                         resolver:^(__unused id value) { policyResolved = YES; }
                         rejecter:^(__unused NSString *code, __unused NSString *message,
                                    __unused NSError *error) {}];

@@ -274,7 +274,7 @@ public class ApproovServicePublicApiTest {
             for (double mask : invalidMasks) {
                 Promise promise = mock(Promise.class);
 
-                newService().setServiceMutatorType(mask, true, promise);
+                newService().setServiceMutatorType(mask, true, "install", promise);
 
                 org.mockito.Mockito.verify(promise)
                     .reject(org.mockito.ArgumentMatchers.eq("setServiceMutatorType"), anyString());
@@ -300,7 +300,7 @@ public class ApproovServicePublicApiTest {
             for (double mask : invalidMasks) {
                 Promise promise = mock(Promise.class);
 
-                newService().setServiceMutatorType(mask, true, promise);
+                newService().setServiceMutatorType(mask, true, "install", promise);
 
                 org.mockito.Mockito.verify(promise)
                     .reject(org.mockito.ArgumentMatchers.eq("setServiceMutatorType"), anyString());
@@ -324,7 +324,7 @@ public class ApproovServicePublicApiTest {
             for (double mask : validMasks) {
                 Promise promise = mock(Promise.class);
 
-                newService().setServiceMutatorType(mask, true, promise);
+                newService().setServiceMutatorType(mask, true, "install", promise);
 
                 org.mockito.Mockito.verify(promise).resolve(any());
                 org.mockito.Mockito.verify(promise, org.mockito.Mockito.never())

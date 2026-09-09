@@ -106,21 +106,26 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
             wrappedBuilder.apply(builder);
 
         if (builder != null) {
-            // Guard against double-registration: on RN < 0.73 both the
-            // OkHttpClientFactory and legacy setCustomClientBuilder paths may
-            // fire for the same builder. Adding the interceptor twice would
-            // cause duplicate token fetches and signature generations.
-            boolean alreadyPresent = false;
-            for (Interceptor existing : builder.interceptors()) {
-                if (existing instanceof ApproovInterceptor) {
-                    alreadyPresent = true;
-                    break;
-                }
-            }
-            if (!alreadyPresent) {
-                builder.addInterceptor(interceptor);
-            }
+            // Remove any ApproovInterceptor already on the builder, then add ours. This
+            // covers two cases:
+            // - Double-registration on RN < 0.73, where both the OkHttpClientFactory and the
+            //   legacy setCustomClientBuilder fire for the same builder; adding the
+            //   interceptor twice would cause duplicate token fetches and signatures.
+            // - Re-registration when a new ApproovService is built (for example the RN
+            //   context is recreated by an Expo OTA reload). The previous factory is wrapped
+            //   and runs first, adding a STALE interceptor bound to the old service. A
+            //   class-level "already present?" check cannot tell that stale interceptor
+            //   apart from our own, so it would skip adding the live one and leave the client
+            //   fetching tokens through a dead service. Removing every ApproovInterceptor
+            //   first guarantees the client uses THIS service's interceptor.
+            builder.interceptors().removeIf(existing -> existing instanceof ApproovInterceptor);
+            builder.addInterceptor(interceptor);
             builder.certificatePinner(pinner);
         }
+    }
+
+    // Package-private accessor for tests: the interceptor this builder installs.
+    Interceptor getInterceptor() {
+        return interceptor;
     }
 }

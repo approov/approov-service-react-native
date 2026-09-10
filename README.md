@@ -105,7 +105,7 @@ The config string is provided in your Approov onboarding email.
 
 ## Using Approov
 
-On Android, token processing uses an application interceptor and certificate pinning uses a network interceptor. Clients share the service's pin state: initialization loads pins before its promise resolves, and SDK configuration updates refresh that state for existing clients. Creating clients does not fetch pins. The initial SDK pin fetch can still block initialization. Approov pins replace the client's built-in pinning policy; customer pins are not merged. Successful TLS checks are cached with a bounded cache that is invalidated by pin updates.
+On Android, token processing uses an application interceptor and certificate pinning uses a network interceptor. Clients share the service's pin state: initialization loads pins before its promise resolves, and SDK configuration updates refresh that state for existing clients. Creating clients does not fetch pins. The initial SDK pin fetch can still block initialization. Approov pins replace the client's built-in pinning policy; customer pins are not merged. Every HTTPS network exchange checks the current pins, including exchanges on reused connections. Handshake approvals are not cached; these checks do not fetch pins from the SDK.
 
 Once initialization succeeds, network requests may have Approov tokens, message signatures, dynamic pinning, or secure substitutions applied. Initially you will not have set which API domains to protect, so requests are unchanged, but the service will contact the Approov cloud and log `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 

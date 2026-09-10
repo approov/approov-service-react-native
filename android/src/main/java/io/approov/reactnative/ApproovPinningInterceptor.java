@@ -22,9 +22,6 @@
 package io.approov.reactnative;
 
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
-import java.util.Objects;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import okhttp3.CertificatePinner;
 import okhttp3.Connection;
@@ -41,64 +38,18 @@ import okhttp3.Response;
  * a configuration update; existing clients see the replacement on their next exchange.
  */
 public final class ApproovPinningInterceptor implements Interceptor {
-    // As in approov-service-okhttp, cache successful checks for concurrent/reused connections
-    // while bounding retention in long-running apps. Each pin snapshot owns its own cache.
-    private static final int MAX_CACHED_HANDSHAKES = 10;
-    private volatile PinSnapshot snapshot = new PinSnapshot(CertificatePinner.DEFAULT);
-
-    private static final class VerifiedHandshake {
-        final String host;
-        final Handshake handshake;
-
-        VerifiedHandshake(String host, Handshake handshake) {
-            this.host = host;
-            this.handshake = handshake;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof VerifiedHandshake))
-                return false;
-            VerifiedHandshake that = (VerifiedHandshake) other;
-            return host.equals(that.host) && handshake.equals(that.handshake);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(host, handshake);
-        }
-    }
-
-    private static final class PinSnapshot {
-        final CertificatePinner pinner;
-        final LinkedHashSet<VerifiedHandshake> knownValidHandshakes = new LinkedHashSet<>();
-
-        PinSnapshot(CertificatePinner pinner) {
-            this.pinner = pinner;
-        }
-
-        synchronized void check(String host, Handshake handshake) throws SSLPeerUnverifiedException {
-            VerifiedHandshake key = new VerifiedHandshake(host, handshake);
-            if (knownValidHandshakes.contains(key))
-                return;
-            pinner.check(host, handshake.peerCertificates());
-            while (knownValidHandshakes.size() >= MAX_CACHED_HANDSHAKES) {
-                Iterator<VerifiedHandshake> oldest = knownValidHandshakes.iterator();
-                oldest.next();
-                oldest.remove();
-            }
-            knownValidHandshakes.add(key);
-        }
-    }
+    // Share immutable pins across clients, but do not cache handshake approvals. Each HTTPS
+    // exchange validates its hostname and certificate chain against the current pin set.
+    private volatile CertificatePinner certificatePinner = CertificatePinner.DEFAULT;
 
     // Serialize rebuilds so an earlier fetch cannot overwrite a later update. A failed fetch
     // leaves the previous complete snapshot intact and propagates to the caller.
     synchronized void rebuildPins(ApproovService service) {
-        snapshot = new PinSnapshot(ApproovCertificatePinner.build(service));
+        certificatePinner = ApproovCertificatePinner.build(service);
     }
 
     CertificatePinner getCertificatePinner() {
-        return snapshot.pinner;
+        return certificatePinner;
     }
 
     @Override
@@ -114,11 +65,11 @@ public final class ApproovPinningInterceptor implements Interceptor {
         if (handshake == null)
             throw new ApproovNetworkException("network interceptor has no TLS handshake for an HTTPS request");
 
-        // Select one complete pin/cache generation. A concurrent rebuild replaces the entire
-        // snapshot, so an in-flight check can never populate the new generation's cache.
-        PinSnapshot pins = snapshot;
+        // Use one complete immutable pin set for this check. A concurrent refresh is visible
+        // to subsequent exchanges, including those reusing this same TLS connection.
+        CertificatePinner pins = certificatePinner;
         try {
-            pins.check(request.url().host(), handshake);
+            pins.check(request.url().host(), handshake.peerCertificates());
         } catch (SSLPeerUnverifiedException failure) {
             // Force a new TLS negotiation after a mismatch, preserving the pinning exception.
             try {

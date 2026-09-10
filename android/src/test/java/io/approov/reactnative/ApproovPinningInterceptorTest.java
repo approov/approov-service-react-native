@@ -80,14 +80,18 @@ public class ApproovPinningInterceptorTest {
     }
 
     @Test
-    public void reusesCachedApprovalForSameHostAndHandshake() throws Exception {
+    public void checksEveryExchangeWithoutFetchingPins() throws Exception {
         pins(Collections.singletonMap("example.com", Collections.singletonList(matchingPin)));
         Handshake handshake = handshake();
         Interceptor.Chain chain = chain("https://example.com/a", handshake);
-        pinning.intercept(chain);
-        pinning.intercept(chain);
-        verify(handshake, times(1)).peerCertificates();
-        verify(chain, times(2)).proceed(chain.request());
+        clearInvocations(certificate);
+        for (int i = 0; i < 1000; i++)
+            pinning.intercept(chain);
+        verify(handshake, times(1000)).peerCertificates();
+        verify(certificate, times(1000)).getPublicKey();
+        verify(chain, times(1000)).proceed(chain.request());
+        // Only the initial pin refresh calls the SDK; checking connections is local work.
+        sdk.verify(() -> Approov.getPins("public-key-sha256"), times(1));
     }
 
     @Test
@@ -105,7 +109,7 @@ public class ApproovPinningInterceptorTest {
     }
 
     @Test
-    public void rotationInvalidatesPreviouslyApprovedHandshake() throws Exception {
+    public void rotationRechecksPreviouslyAcceptedConnection() throws Exception {
         pins(Collections.singletonMap("example.com", Collections.singletonList(matchingPin)));
         Interceptor.Chain chain = chain("https://example.com/a", handshake());
         pinning.intercept(chain);
@@ -115,7 +119,7 @@ public class ApproovPinningInterceptorTest {
     }
 
     @Test
-    public void inFlightApprovalCannotPopulateNewPinCache() throws Exception {
+    public void pinUpdateDuringCheckAppliesToNextExchange() throws Exception {
         pins(Collections.singletonMap("example.com", Collections.singletonList(matchingPin)));
         Handshake handshake = handshake();
         when(handshake.peerCertificates()).thenAnswer(invocation -> {
@@ -127,17 +131,6 @@ public class ApproovPinningInterceptorTest {
         pinning.intercept(chain);
         assertThrows(SSLPeerUnverifiedException.class, () -> pinning.intercept(chain));
         verify(chain, times(1)).proceed(any());
-    }
-
-    @Test
-    public void cacheEvictsOldestApprovalAfterTenEntries() throws Exception {
-        pins(Collections.singletonMap("example.com", Collections.singletonList(matchingPin)));
-        Handshake first = handshake();
-        pinning.intercept(chain("https://example.com/a", first));
-        for (int i = 0; i < 10; i++)
-            pinning.intercept(chain("https://example.com/a", handshake()));
-        pinning.intercept(chain("https://example.com/a", first));
-        verify(first, times(2)).peerCertificates();
     }
 
     @Test

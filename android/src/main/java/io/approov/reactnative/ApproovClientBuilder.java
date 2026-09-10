@@ -43,8 +43,11 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     // current certificate pinner to be used
     private CertificatePinner pinner;
 
-    // prior client builder that might have been set by another SDK (e.g. New Relic)
-    private CustomClientBuilder wrappedBuilder;
+    // prior client builder that might have been set by another SDK (e.g. New Relic). Held as
+    // Object and applied reflectively because React Native types this hook as the nested
+    // NetworkingModule.CustomClientBuilder on some versions and the top-level
+    // com.facebook.react.modules.network.CustomClientBuilder on others.
+    private Object wrappedBuilder;
 
     /**
      * Creates a long-lived ApproovClientBuilder for OkHttp requests. This adds
@@ -101,9 +104,14 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
 
     @Override
     public void apply(OkHttpClient.Builder builder) {
-        // apply the wrapped builder first if it exists
-        if (wrappedBuilder != null)
-            wrappedBuilder.apply(builder);
+        // apply the wrapped builder first if it exists (reflectively, see wrappedBuilder)
+        if (wrappedBuilder != null) {
+            try {
+                wrappedBuilder.getClass().getMethod("apply", OkHttpClient.Builder.class).invoke(wrappedBuilder, builder);
+            } catch (Exception e) {
+                Log.w("ApproovService", "wrapped custom client builder could not be applied: " + e.getMessage());
+            }
+        }
 
         if (builder != null) {
             // Remove any ApproovInterceptor already on the builder, then add ours. This
@@ -127,5 +135,25 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     // Package-private accessor for tests: the interceptor this builder installs.
     Interceptor getInterceptor() {
         return interceptor;
+    }
+
+    // Package-private: the builder this one wraps (another SDK's, or a previous Approov
+    // builder), or null.
+    Object getWrappedBuilder() {
+        return wrappedBuilder;
+    }
+
+    /**
+     * Builds a long-lived ApproovClientBuilder that wraps a previously registered builder of
+     * any CustomClientBuilder type, so that registering Approov as the NetworkingModule's
+     * custom client builder preserves rather than replaces the other SDK's hook.
+     *
+     * @param approovService  is the ApproovService being used
+     * @param previousBuilder is the previously registered builder, or null
+     */
+    static ApproovClientBuilder wrapping(ApproovService approovService, Object previousBuilder) {
+        ApproovClientBuilder builder = new ApproovClientBuilder(approovService, null);
+        builder.wrappedBuilder = previousBuilder;
+        return builder;
     }
 }

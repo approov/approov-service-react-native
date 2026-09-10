@@ -5,16 +5,76 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import okhttp3.Interceptor;
+import okhttp3.CertificatePinner;
 import okhttp3.OkHttpClient;
 
+import com.criticalblue.approovsdk.Approov;
+import com.facebook.react.modules.network.NetworkingModule.CustomClientBuilder;
+import java.util.Collections;
+import org.mockito.MockedStatic;
 import org.junit.Test;
 
 public class ApproovClientBuilderTest {
+
+    private static final String PIN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    private static final String PIN_B = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB=";
+
+    @Test
+    public void replacesCustomerPinsIncludingOverlappingHosts() {
+        ApproovService service = mock(ApproovService.class);
+        when(service.isApproovEnabled()).thenReturn(true);
+        CertificatePinner customer = new CertificatePinner.Builder()
+                .add("api.example.com", "sha256/" + PIN_B)
+                .add("customer.example.com", "sha256/" + PIN_B).build();
+        CustomClientBuilder callback = builder -> builder.certificatePinner(customer);
+
+        try (MockedStatic<Approov> sdk = mockStatic(Approov.class)) {
+            sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(
+                    Collections.singletonMap("api.example.com", Collections.singletonList(PIN_A)));
+            ApproovClientBuilder approov = new ApproovClientBuilder(service, callback, true);
+            OkHttpClient.Builder request = new OkHttpClient.Builder();
+            approov.apply(request);
+            CertificatePinner expected = new CertificatePinner.Builder()
+                    .add("api.example.com", "sha256/" + PIN_A).build();
+            assertEquals(expected.getPins(), request.build().certificatePinner().getPins());
+        }
+    }
+
+    @Test
+    public void requestHookDropsRotatedAndRemovedPinsFromBaseClient() {
+        ApproovService service = mock(ApproovService.class);
+        when(service.isApproovEnabled()).thenReturn(true);
+        try (MockedStatic<Approov> sdk = mockStatic(Approov.class)) {
+            sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(
+                    Collections.singletonMap("api.example.com", Collections.singletonList(PIN_A)));
+            ApproovClientBuilder factoryBuilder = new ApproovClientBuilder(service, null);
+            ApproovClientBuilder hook = ApproovClientBuilder.wrapping(service, null, factoryBuilder);
+            OkHttpClient.Builder baseBuilder = new OkHttpClient.Builder();
+            factoryBuilder.apply(baseBuilder);
+            OkHttpClient base = baseBuilder.build();
+
+            sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(
+                    Collections.singletonMap("api.example.com", Collections.singletonList(PIN_B)));
+            factoryBuilder.approovPinsUpdated();
+            OkHttpClient.Builder request = base.newBuilder();
+            hook.apply(request);
+            CertificatePinner expected = new CertificatePinner.Builder()
+                    .add("api.example.com", "sha256/" + PIN_B).build();
+            assertEquals(expected.getPins(), request.build().certificatePinner().getPins());
+
+            sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.emptyMap());
+            factoryBuilder.approovPinsUpdated();
+            request = base.newBuilder();
+            hook.apply(request);
+            assertTrue(request.build().certificatePinner().getPins().isEmpty());
+        }
+    }
 
     @Test
     public void longLivedBuildersRegisterForPinChangeNotifications() {

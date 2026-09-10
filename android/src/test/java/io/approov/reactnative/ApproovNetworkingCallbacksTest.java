@@ -13,13 +13,16 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.network.CustomClientBuilder;
 import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
+import com.facebook.react.modules.network.OkHttpClientFactory;
 
 import io.approov.testfixtures.CustomClientBuilderFixtures;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 
+import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
@@ -75,6 +78,123 @@ public class ApproovNetworkingCallbacksTest {
     private static CustomClientBuilder installedBuilder() throws Exception {
         return (CustomClientBuilder) field(NetworkingModule.class,
                 "customClientBuilder", "mCustomClientBuilder").get(null);
+    }
+
+    private static OkHttpClientFactory installedFactory() throws Exception {
+        return (OkHttpClientFactory) field(OkHttpClientProvider.class, "factory", "sFactory").get(null);
+    }
+
+    private static void assertLiveProtection(OkHttpClient client, ApproovService service) throws Exception {
+        int count = 0;
+        for (Interceptor interceptor : client.interceptors()) {
+            if (interceptor instanceof ApproovInterceptor) {
+                count++;
+                assertSame(service, field(ApproovInterceptor.class, "approovService").get(interceptor));
+            }
+        }
+        assertEquals(1, count);
+    }
+
+    private static void assertBaseConfiguration(OkHttpClient expected, OkHttpClient actual) {
+        assertTrue(actual.interceptors().containsAll(expected.interceptors()));
+        assertEquals(expected.networkInterceptors(), actual.networkInterceptors());
+        assertEquals(expected.connectTimeoutMillis(), actual.connectTimeoutMillis());
+        assertEquals(expected.readTimeoutMillis(), actual.readTimeoutMillis());
+        assertSame(expected.connectionPool(), actual.connectionPool());
+        assertSame(expected.dispatcher(), actual.dispatcher());
+        assertSame(expected.cookieJar(), actual.cookieJar());
+    }
+
+    private static OkHttpClient customerClient() {
+        return new OkHttpClient.Builder()
+                .addInterceptor(chain -> chain.proceed(chain.request()))
+                .addNetworkInterceptor(chain -> chain.proceed(chain.request()))
+                .connectTimeout(37, TimeUnit.SECONDS)
+                .readTimeout(43, TimeUnit.SECONDS)
+                .certificatePinner(new CertificatePinner.Builder()
+                        .add("customer.example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").build())
+                .build();
+    }
+
+    private OkHttpClientFactory recover(ApproovService service, boolean wrapExisting) throws Exception {
+        Promise result = mock(Promise.class);
+        service.updateClientFactory(wrapExisting, result);
+        verify(result).resolve(true);
+        return installedFactory();
+    }
+
+    @Test
+    public void repeatedRecoveryAndReloadPreserveCustomerConfiguration() throws Exception {
+        OkHttpClient customer = customerClient();
+        OkHttpClientProvider.setOkHttpClientFactory(() -> customer);
+        ApproovService service = new ApproovService(context);
+        for (int i = 0; i < 3; i++) {
+            attachClient(OkHttpClientProvider.createClient());
+            OkHttpClientFactory recovery = recover(service, true);
+            assertBaseConfiguration(customer, recovery.createNewNetworkModuleClient());
+            assertLiveProtection(recovery.createNewNetworkModuleClient(), service);
+            service = new ApproovService(context);
+            OkHttpClient next = OkHttpClientProvider.createClient();
+            assertBaseConfiguration(customer, next);
+            assertLiveProtection(next, service);
+            assertTrue(next.certificatePinner().getPins().isEmpty());
+            OkHttpClient retired = recovery.createNewNetworkModuleClient();
+            assertBaseConfiguration(customer, retired);
+            assertFalse(retired.interceptors().stream().anyMatch(i2 -> i2 instanceof ApproovInterceptor));
+        }
+    }
+
+    @Test
+    public void wrappedRecoveryRetiresToBaseWithNoApproovInterceptorOrPins() throws Exception {
+        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.singletonMap(
+                "api.example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
+        OkHttpClient customer = customerClient();
+        OkHttpClientProvider.setOkHttpClientFactory(() -> customer);
+        ApproovService old = new ApproovService(context);
+        old.initialize("test-config", null, mock(Promise.class));
+        attachClient(OkHttpClientProvider.createClient());
+        OkHttpClientFactory recovery = recover(old, true);
+        assertFalse(recovery.createNewNetworkModuleClient().certificatePinner().getPins().isEmpty());
+        Interceptor outerMarker = chain -> chain.proceed(chain.request());
+        OkHttpClientProvider.setOkHttpClientFactory(() -> recovery.createNewNetworkModuleClient()
+                .newBuilder().addInterceptor(outerMarker).build());
+
+        ApproovService live = new ApproovService(context);
+        OkHttpClient next = OkHttpClientProvider.createClient();
+        assertBaseConfiguration(customer, next);
+        assertTrue(next.interceptors().contains(outerMarker));
+        assertLiveProtection(next, live);
+        OkHttpClient retired = recovery.createNewNetworkModuleClient();
+        assertBaseConfiguration(customer, retired);
+        assertEquals(customer.interceptors(), retired.interceptors());
+        assertTrue(retired.certificatePinner().getPins().isEmpty());
+    }
+
+    @Test
+    public void repeatedRecoveryWithoutReloadPreservesConfigurationAndReleasesPreviousProtection() throws Exception {
+        OkHttpClient customer = customerClient();
+        ApproovService service = new ApproovService(context);
+        attachClient(customer);
+        OkHttpClientFactory first = recover(service, true);
+        OkHttpClientFactory second = recover(service, true);
+        assertBaseConfiguration(customer, second.createNewNetworkModuleClient());
+        assertLiveProtection(second.createNewNetworkModuleClient(), service);
+        assertBaseConfiguration(customer, first.createNewNetworkModuleClient());
+        assertEquals(customer.interceptors(), first.createNewNetworkModuleClient().interceptors());
+    }
+
+    @Test
+    public void recoveryWithoutWrappingStillStartsFromDefaultsAfterReload() throws Exception {
+        OkHttpClient customer = customerClient();
+        ApproovService service = new ApproovService(context);
+        attachClient(customer);
+        recover(service, false);
+        ApproovService live = new ApproovService(context);
+        OkHttpClient next = OkHttpClientProvider.createClient();
+        assertFalse(next.interceptors().contains(customer.interceptors().get(0)));
+        assertTrue(next.networkInterceptors().isEmpty());
+        assertEquals(new OkHttpClient.Builder().build().connectTimeoutMillis(), next.connectTimeoutMillis());
+        assertLiveProtection(next, live);
     }
 
     private void attachClient(OkHttpClient client) throws Exception {

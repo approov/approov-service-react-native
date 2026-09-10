@@ -567,32 +567,20 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
         // 0.73+) ---
         // Capture any existing factory set by another SDK so we can chain through it.
-        OkHttpClientFactory existingFactory = null;
-        try {
-            Field factoryField = OkHttpClientProvider.class.getDeclaredField("sFactory");
-            factoryField.setAccessible(true);
-            existingFactory = (OkHttpClientFactory) factoryField.get(null);
-            if (existingFactory != null)
-                log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
-        } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "could not check for existing OkHttpClientFactory: " + e.getMessage());
-        }
-        final OkHttpClientFactory wrappedFactory = existingFactory;
-        OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
-            @Override
-            public OkHttpClient createNewNetworkModuleClient() {
-                OkHttpClient.Builder builder;
-                if (wrappedFactory != null) {
-                    // Chain: let the existing factory build its client, then layer Approov on top
-                    builder = wrappedFactory.createNewNetworkModuleClient().newBuilder();
-                } else {
-                    // No prior factory — start from the RN default builder
-                    builder = OkHttpClientProvider.createClientBuilder();
-                }
-                clientBuilder.apply(builder);
-                return builder.build();
-            }
-        });
+        OkHttpClientFactory existingFactory = readInstalledOkHttpClientFactory();
+        if (existingFactory != null)
+            log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
+
+        // If the installed factory is one WE registered previously (e.g. the RN context was
+        // recreated by an OTA reload), do NOT wrap it again: chaining a new Approov factory
+        // onto the old one on every reload retains every previous ApproovService and its
+        // ReactContext (a leak), and re-adds a stale interceptor. Unwrap to the underlying
+        // non-Approov factory and replace our own layer instead.
+        OkHttpClientFactory underlyingFactory = existingFactory;
+        while (underlyingFactory instanceof ApproovOkHttpClientFactory)
+            underlyingFactory = ((ApproovOkHttpClientFactory) underlyingFactory).wrappedFactory;
+
+        OkHttpClientProvider.setOkHttpClientFactory(new ApproovOkHttpClientFactory(underlyingFactory, clientBuilder));
         log(LOG_INFO, TAG, "registered Approov via OkHttpClientFactory");
 
         // --- LEGACY FALLBACK: setCustomClientBuilder (RN < 0.73 only) ---
@@ -601,18 +589,197 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // ApproovClientBuilder.apply() has a deduplication guard that prevents
         // the interceptor from being added twice.
         try {
-            Method setBuilder = NetworkingModule.class.getMethod(
-                    "setCustomClientBuilder", NetworkingModule.CustomClientBuilder.class);
-            setBuilder.invoke(null, clientBuilder);
-            log(LOG_DEBUG, TAG, "registered Approov via legacy setCustomClientBuilder");
-        } catch (NoSuchMethodException e) {
-            log(LOG_DEBUG, TAG, "setCustomClientBuilder not available (expected on RN 0.73+)");
+            // React Native applies this hook PER REQUEST, on a newBuilder() of the module's
+            // client, so it must be preserved rather than replaced: another SDK (e.g. New
+            // Relic) registers its own request customisation here. Read the previously
+            // registered builder and wrap it. If that previous builder is one of ours from an
+            // earlier context (reload), unwrap to the non-Approov builder underneath so we
+            // replace our own layer instead of chaining it (same reasoning as the factory).
+            // This hook gets its OWN ApproovClientBuilder, distinct from the factory path's:
+            // the factory-built module client already carries our interceptor, and a single
+            // shared builder wrapping the other SDK's hook would apply that hook twice per
+            // request (once via the factory, once via this hook).
+            Object previousBuilder = readInstalledCustomClientBuilder();
+            while (previousBuilder instanceof ApproovClientBuilder)
+                previousBuilder = ((ApproovClientBuilder) previousBuilder).getWrappedBuilder();
+            if (previousBuilder != null)
+                log(LOG_DEBUG, TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
+            ApproovClientBuilder hookBuilder = ApproovClientBuilder.wrapping(this, previousBuilder);
+
+            // Match setCustomClientBuilder by shape, not a hardcoded parameter type. The
+            // accepted type is the nested NetworkingModule.CustomClientBuilder on some RN
+            // versions and the top-level com.facebook.react.modules.network.CustomClientBuilder
+            // on others (the nested type extends the top-level one, so ApproovClientBuilder is
+            // assignable to whichever the runtime expects). getMethod() with the wrong exact
+            // type silently misses the method and skips this registration path entirely.
+            Method setBuilder = null;
+            for (Method m : NetworkingModule.class.getMethods()) {
+                if (m.getName().equals("setCustomClientBuilder")
+                        && m.getParameterTypes().length == 1
+                        && m.getParameterTypes()[0].isInstance(hookBuilder)) {
+                    setBuilder = m;
+                    break;
+                }
+            }
+            if (setBuilder != null) {
+                setBuilder.invoke(null, hookBuilder);
+                log(LOG_DEBUG, TAG, "registered Approov via setCustomClientBuilder"
+                        + (previousBuilder != null ? " (wrapping existing builder)" : ""));
+            } else {
+                log(LOG_DEBUG, TAG, "setCustomClientBuilder not available");
+            }
         } catch (Exception e) {
             log(LOG_DEBUG, TAG, "setCustomClientBuilder failed: " + e.getMessage());
         }
 
         // add the Approov client builder to any rn-fetch-blob instances
         configureRNFetchBlobIfFound(clientBuilder);
+    }
+
+    /**
+     * Reads the OkHttpClientFactory currently installed on OkHttpClientProvider, if any.
+     * The backing field was named "sFactory" while OkHttpClientProvider was a Java class
+     * (RN &lt;= 0.78) and "factory" after it became a Kotlin object (RN &gt;= 0.79), so both
+     * names are tried. Returning null here would make the caller silently discard another
+     * SDK's factory (and its interceptors/config) on RN &gt;= 0.79.
+     *
+     * @return the installed factory, or null if none / not readable
+     */
+    private OkHttpClientFactory readInstalledOkHttpClientFactory() {
+        for (String fieldName : new String[] {"factory", "sFactory"}) {
+            try {
+                Field field = OkHttpClientProvider.class.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                Object value;
+                try {
+                    value = field.get(null);
+                } catch (NullPointerException instanceField) {
+                    // Kotlin object: the property is on the INSTANCE singleton, not static.
+                    Field instance = OkHttpClientProvider.class.getDeclaredField("INSTANCE");
+                    instance.setAccessible(true);
+                    value = field.get(instance.get(null));
+                }
+                return (OkHttpClientFactory) value;
+            } catch (NoSuchFieldException tryNext) {
+                // field name not present on this RN version - try the other
+            } catch (Exception e) {
+                log(LOG_DEBUG, TAG, "could not read OkHttpClientProvider." + fieldName + ": " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns the OkHttpClient the NetworkingModule is actually using for fetch(), read by
+     * reflection ("client" on RN 0.73+ Kotlin NetworkingModule, "mClient" on older Java),
+     * or null if it cannot be obtained.
+     */
+    private OkHttpClient getNetworkingModuleClient() {
+        try {
+            NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
+            if (networkingModule == null)
+                return null;
+            Field clientField;
+            try {
+                clientField = NetworkingModule.class.getDeclaredField("client");
+            } catch (NoSuchFieldException e) {
+                clientField = NetworkingModule.class.getDeclaredField("mClient");
+            }
+            clientField.setAccessible(true);
+            Object client = clientField.get(networkingModule);
+            return (client instanceof OkHttpClient) ? (OkHttpClient) client : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Returns true if the given client has an ApproovInterceptor on its application or
+     * network interceptor chain.
+     */
+    private static boolean clientHasApproovInterceptor(OkHttpClient client) {
+        if (client == null)
+            return false;
+        for (Interceptor interceptor : client.interceptors())
+            if (interceptor instanceof ApproovInterceptor)
+                return true;
+        for (Interceptor interceptor : client.networkInterceptors())
+            if (interceptor instanceof ApproovInterceptor)
+                return true;
+        return false;
+    }
+
+    /**
+     * Reads the custom client builder currently registered on the NetworkingModule, if any
+     * ("customClientBuilder" on the Kotlin NetworkingModule, "mCustomClientBuilder" on older
+     * Java versions). Returned as Object because React Native types it differently across
+     * versions.
+     */
+    private Object readInstalledCustomClientBuilder() {
+        for (String fieldName : new String[] {"customClientBuilder", "mCustomClientBuilder"}) {
+            try {
+                Field field = NetworkingModule.class.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(null);
+            } catch (NoSuchFieldException tryNext) {
+                // not this RN version's field name
+            } catch (Exception e) {
+                log(LOG_DEBUG, TAG, "could not read NetworkingModule." + fieldName + ": " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Builds the client a fetch() request would actually run through, the way the
+     * NetworkingModule does it: the module's own client, then the registered custom client
+     * builder applied to a newBuilder() of it. Inspecting only the module's client field (or the
+     * provider's cached singleton) misses protection delivered through that per-request hook,
+     * and vice versa, so diagnostics must look at this effective client. Falls back to the
+     * provider client if the module client cannot be read.
+     */
+    private OkHttpClient effectiveRequestClient() {
+        OkHttpClient base = getNetworkingModuleClient();
+        if (base == null)
+            base = OkHttpClientProvider.getOkHttpClient();
+        OkHttpClient.Builder builder = base.newBuilder();
+        Object hook = readInstalledCustomClientBuilder();
+        if (hook != null) {
+            try {
+                hook.getClass().getMethod("apply", OkHttpClient.Builder.class).invoke(hook, builder);
+            } catch (Exception e) {
+                log(LOG_DEBUG, TAG, "could not apply registered custom client builder for diagnostics: " + e.getMessage());
+            }
+        }
+        return builder.build();
+    }
+
+    /**
+     * The OkHttpClientFactory that layers Approov protection on top of any factory previously
+     * installed by another SDK. It is a named type (not an anonymous class) and holds a
+     * reference to the factory it wraps so that a later Approov registration can recognise its
+     * own previous factory and unwrap it, rather than chaining onto it and retaining the old
+     * ApproovService / ReactContext across reloads.
+     */
+    private static final class ApproovOkHttpClientFactory implements OkHttpClientFactory {
+        // the underlying non-Approov factory this one wraps, or null to start from the RN default
+        final OkHttpClientFactory wrappedFactory;
+        // the builder that applies Approov protection (interceptor + pinning)
+        private final ApproovClientBuilder clientBuilder;
+
+        ApproovOkHttpClientFactory(OkHttpClientFactory wrappedFactory, ApproovClientBuilder clientBuilder) {
+            this.wrappedFactory = wrappedFactory;
+            this.clientBuilder = clientBuilder;
+        }
+
+        @Override
+        public OkHttpClient createNewNetworkModuleClient() {
+            OkHttpClient.Builder builder = (wrappedFactory != null)
+                    ? wrappedFactory.createNewNetworkModuleClient().newBuilder()
+                    : OkHttpClientProvider.createClientBuilder();
+            clientBuilder.apply(builder);
+            return builder.build();
+        }
     }
 
     /**
@@ -624,23 +791,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void isInterceptorActive(Promise promise) {
         try {
-            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            boolean found = false;
-            for (Interceptor interceptor : client.interceptors()) {
-                if (interceptor instanceof ApproovInterceptor) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                for (Interceptor interceptor : client.networkInterceptors()) {
-                    if (interceptor instanceof ApproovInterceptor) {
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            promise.resolve(found);
+            // Inspect the EFFECTIVE per-request client (module client + registered custom
+            // client builder), not the provider's cached singleton and not the module's client
+            // field alone: the cached client can carry the interceptor while the live request
+            // path does not, and the module's field lacks any protection that React Native
+            // adds per request through the custom client builder hook.
+            promise.resolve(clientHasApproovInterceptor(effectiveRequestClient()));
         } catch (Exception e) {
             promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
         }
@@ -1928,7 +2084,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getPinningDiagnostics(Promise promise) {
         try {
-            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
+            // the effective per-request client (see effectiveRequestClient), not the provider's
+            // cached singleton, which can differ from what fetch() really runs through
+            OkHttpClient client = effectiveRequestClient();
             WritableMap diagnostics = safeCreateMap();
             boolean isInterceptorPresent = false;
             WritableArray interceptors = safeCreateArray();
@@ -1980,7 +2138,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             // we obtain the NetworkingModule and the current client it is using
             NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
-            OkHttpClient currentClient = OkHttpClientProvider.getOkHttpClient();
+            // recover from the client the NetworkingModule is ACTUALLY using, not the provider's
+            // cached singleton: copying the cache and then installing the copy on the module
+            // would silently drop any interceptor another SDK had added to the live client
+            OkHttpClient currentClient = getNetworkingModuleClient();
+            if (currentClient == null)
+                currentClient = OkHttpClientProvider.getOkHttpClient();
 
             // if we are wrapping the existing client then we use it as the basis for the
             // new one

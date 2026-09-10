@@ -39,10 +39,13 @@ import com.facebook.react.bridge.Arguments;
 import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
 import com.facebook.react.modules.network.OkHttpClientFactory;
+import com.facebook.react.modules.network.CookieJarContainer;
+import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
 import okhttp3.CertificatePinner;
+import okhttp3.JavaNetCookieJar;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -58,6 +61,7 @@ import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.net.CookieHandler;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -735,6 +739,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     private static Field networkingModuleClientField() throws NoSuchFieldException {
         return resolveField(NetworkingModule.class, "client", "mClient");
+    }
+
+    /**
+     * Keeps cookie handling connected to the active NetworkingModule when recovery discards
+     * other client settings. A fresh container alone would lose the handler that RN already
+     * installed during initialize(). With no module yet, RN will initialize the new container.
+     */
+    private static CookieJarContainer networkingCookieJar(NetworkingModule module)
+            throws ReflectiveOperationException {
+        if (module == null)
+            return new ReactCookieJarContainer();
+        Field containerField = resolveField(NetworkingModule.class, "cookieJarContainer", "mCookieJarContainer");
+        CookieJarContainer container = (CookieJarContainer) containerField.get(module);
+        if (container == null) {
+            // Newer RN allows construction with a non-RN cookie jar. Repair that case by
+            // connecting the module's existing handler and recording the container so RN's
+            // initialize/invalidate lifecycle continues to manage it.
+            container = new ReactCookieJarContainer();
+            CookieHandler handler = (CookieHandler) resolveField(NetworkingModule.class,
+                    "cookieHandler", "mCookieHandler").get(module);
+            container.setCookieJar(new JavaNetCookieJar(handler));
+            containerField.set(module, container);
+        }
+        return container;
     }
 
     /**
@@ -2262,7 +2290,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
             if (wrapExisting) {
                 builder = currentClient.newBuilder();
             } else {
-                builder = new OkHttpClient.Builder();
+                // Retain plain OkHttp defaults (including timeouts), but keep RN's cookie
+                // bridge even if another SDK replaced the live client's cookie jar.
+                builder = new OkHttpClient.Builder().cookieJar(networkingCookieJar(networkingModule));
             }
 
             // Preserve the base configuration independently of Approov protection, so a later

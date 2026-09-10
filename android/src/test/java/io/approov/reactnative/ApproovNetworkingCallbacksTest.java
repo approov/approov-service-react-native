@@ -14,15 +14,21 @@ import com.facebook.react.modules.network.CustomClientBuilder;
 import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
 import com.facebook.react.modules.network.OkHttpClientFactory;
+import com.facebook.react.modules.network.ForwardingCookieHandler;
+import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import io.approov.testfixtures.CustomClientBuilderFixtures;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.URI;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.CertificatePinner;
+import okhttp3.Cookie;
+import okhttp3.CookieJar;
+import okhttp3.HttpUrl;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
@@ -201,6 +207,94 @@ public class ApproovNetworkingCallbacksTest {
         NetworkingModule module = mock(NetworkingModule.class);
         when(context.getNativeModule(NetworkingModule.class)).thenReturn(module);
         field(NetworkingModule.class, "client", "mClient").set(module, client);
+        // A real NetworkingModule normally retains its own RN cookie container even if
+        // another SDK subsequently replaces its client with one using a different jar.
+        field(NetworkingModule.class, "cookieJarContainer", "mCookieJarContainer")
+                .set(module, new ReactCookieJarContainer());
+    }
+
+    private NetworkingModule realNetworkingModule() {
+        when(context.getApplicationContext()).thenReturn(context);
+        NetworkingModule module = new NetworkingModule(context);
+        when(context.getNativeModule(NetworkingModule.class)).thenReturn(module);
+        return module;
+    }
+
+    private ForwardingCookieHandler installCookieHandler(NetworkingModule module) throws Exception {
+        ForwardingCookieHandler handler = mock(ForwardingCookieHandler.class);
+        when(handler.get(any(URI.class), anyMap())).thenReturn(
+                Collections.singletonMap("Cookie", Collections.singletonList("session=abc123")));
+        field(NetworkingModule.class, "cookieHandler", "mCookieHandler").set(module, handler);
+        return handler;
+    }
+
+    private static void assertCookieBridge(OkHttpClient client, ForwardingCookieHandler handler) throws Exception {
+        HttpUrl url = HttpUrl.get("https://api.example.com/me");
+        assertEquals("abc123", client.cookieJar().loadForRequest(url).get(0).value());
+        client.cookieJar().saveFromResponse(url, Collections.singletonList(new Cookie.Builder()
+                .name("session").value("updated").domain("api.example.com").build()));
+        verify(handler).get(eq(url.uri()), anyMap());
+        verify(handler).put(eq(url.uri()), anyMap());
+    }
+
+    @Test
+    public void resetPreservesInitializedCookiesAndPlainTimeoutsAcrossReload() throws Exception {
+        ApproovService service = new ApproovService(context);
+        NetworkingModule module = realNetworkingModule();
+        ForwardingCookieHandler handler = installCookieHandler(module);
+        module.initialize();
+        CookieJar initializedJar = ((OkHttpClient) field(NetworkingModule.class, "client", "mClient")
+                .get(module)).cookieJar();
+        // The active module's container is authoritative even after a client replacement.
+        field(NetworkingModule.class, "client", "mClient").set(module, customerClient());
+        OkHttpClient recovered = recover(service, false).createNewNetworkModuleClient();
+        assertSame(initializedJar, recovered.cookieJar());
+        assertSame(recovered, field(NetworkingModule.class, "client", "mClient").get(module));
+        assertCookieBridge(recovered, handler);
+        OkHttpClient defaults = new OkHttpClient.Builder().build();
+        assertEquals(defaults.connectTimeoutMillis(), recovered.connectTimeoutMillis());
+        assertEquals(defaults.readTimeoutMillis(), recovered.readTimeoutMillis());
+        assertEquals(defaults.writeTimeoutMillis(), recovered.writeTimeoutMillis());
+        assertTrue(recovered.networkInterceptors().isEmpty());
+
+        module.invalidate();
+        ApproovService live = new ApproovService(context);
+        NetworkingModule reloaded = realNetworkingModule();
+        ForwardingCookieHandler nextHandler = installCookieHandler(reloaded);
+        reloaded.initialize();
+        OkHttpClient next = (OkHttpClient) field(NetworkingModule.class, "client", "mClient").get(reloaded);
+        assertCookieBridge(next, nextHandler);
+        assertLiveProtection(next, live);
+        assertEquals(defaults.connectTimeoutMillis(), next.connectTimeoutMillis());
+        assertEquals(defaults.readTimeoutMillis(), next.readTimeoutMillis());
+        assertEquals(defaults.writeTimeoutMillis(), next.writeTimeoutMillis());
+    }
+
+    @Test
+    public void resetBeforeModuleCreationSuppliesCookieContainer() throws Exception {
+        ApproovService service = new ApproovService(context);
+        OkHttpClient recovered = recover(service, false).createNewNetworkModuleClient();
+        assertTrue(recovered.cookieJar() instanceof ReactCookieJarContainer);
+        NetworkingModule module = realNetworkingModule();
+        ForwardingCookieHandler handler = installCookieHandler(module);
+        module.initialize();
+        assertCookieBridge(recovered, handler);
+    }
+
+    @Test
+    public void resetConnectsMissingContainerToExistingModuleHandler() throws Exception {
+        ApproovService service = new ApproovService(context);
+        NetworkingModule module = realNetworkingModule();
+        ForwardingCookieHandler handler = installCookieHandler(module);
+        // RN 0.81 permits a null container when its initial client uses a non-RN jar.
+        field(NetworkingModule.class, "cookieJarContainer", "mCookieJarContainer").set(module, null);
+        field(NetworkingModule.class, "client", "mClient").set(module, customerClient());
+        OkHttpClient recovered = recover(service, false).createNewNetworkModuleClient();
+        assertCookieBridge(recovered, handler);
+        assertSame(recovered.cookieJar(), field(NetworkingModule.class,
+                "cookieJarContainer", "mCookieJarContainer").get(module));
+        module.invalidate();
+        assertTrue(recovered.cookieJar().loadForRequest(HttpUrl.get("https://api.example.com/me")).isEmpty());
     }
 
     private static ReadableMap diagnostics(Promise promise) {

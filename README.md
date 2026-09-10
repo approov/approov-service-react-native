@@ -53,6 +53,8 @@ Import the service layer:
 import { ApproovProvider, ApproovService } from '@approov/approov-service-react-native';
 ```
 
+**You MUST await successful completion of `ApproovService.initialize(config)` with your valid Approov configuration before making any protected request.** Gate every protected request path, including background tasks and startup effects, on that completion. Android and iOS no longer wait for initialization inside their request interceptors; a request sent before initialization can proceed unprotected. If initialization fails, keep protected requests blocked. Do not rely on a startup delay or polling `isInitialized()` as a substitute for awaiting the initialization promise.
+
 Initialize explicitly during startup and keep a correlation id in your app logs:
 
 ```javascript
@@ -67,19 +69,24 @@ async function initializeApproov() {
       const deviceId = await ApproovService.getDeviceID();
       console.log('Approov initialized', { approovSessionId, deviceId });
     } else {
-      console.warn('Approov initialized without active protection', { approovSessionId });
+      throw new Error('Approov protection is not enabled');
     }
   } catch (error) {
-    console.warn('Approov initialization failed; continuing unprotected', {
+    console.error('Approov initialization failed; protected requests remain blocked', {
       approovSessionId,
       error,
     });
-    await ApproovService.initialize('');
+    throw error;
   }
+}
+
+async function startProtectedRequests() {
+  await initializeApproov();
+  // Start protected requests only after the await above succeeds.
 }
 ```
 
-If you prefer component-wrapped startup, wrap your application with `ApproovProvider` after applying any setup calls:
+If you prefer component-wrapped startup, wrap your application with `ApproovProvider` after applying any setup calls. The same initialization requirement applies: protected requests must remain blocked until initialization completes successfully, including requests started outside the provider's children:
 
 ```javascript
 const approovSetup = () => {
@@ -97,6 +104,8 @@ return (
 The config string is provided in your Approov onboarding email.
 
 ## Using Approov
+
+On Android, token processing uses an application interceptor and certificate pinning uses a network interceptor. Clients share the service's pin state: initialization loads pins before its promise resolves, and SDK configuration updates refresh that state for existing clients. Creating clients does not fetch pins. The initial SDK pin fetch can still block initialization. Approov pins replace the client's built-in pinning policy; customer pins are not merged. Successful TLS checks are cached with a bounded cache that is invalidated by pin updates.
 
 Once initialization succeeds, network requests may have Approov tokens, message signatures, dynamic pinning, or secure substitutions applied. Initially you will not have set which API domains to protect, so requests are unchanged, but the service will contact the Approov cloud and log `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 

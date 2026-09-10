@@ -94,49 +94,10 @@ public class ApproovInterceptor implements Interceptor {
             throw new IOException(e);
         }
 
-        // if Approov is not initialized then perform any necessary synchronization to
-        // avoid a race on any
-        // initial network fetches
+        // Protected request paths MUST await initialize(). There is no startup grace period.
         if (!approovService.isInitialized()) {
-            // mark the earliest network fetch request time prior to initialization - it is
-            // only updated
-            // if it is currently unset
-            approovService.setEarliestNetworkRequestTime();
-
-            // wait until any initial fetch time is reached
-            boolean waitForReady = true;
-            boolean hasLoggedInitWarning = false;
-            while (waitForReady) {
-                // if initialization has completed then we can proceed
-                if (approovService.isInitialized()) {
-                    waitForReady = false;
-                    break;
-                }
-                
-                long currentTime = System.currentTimeMillis();
-                long earliestTime = approovService.getEarliestNetworkRequestTime();
-                if (currentTime >= earliestTime)
-                    waitForReady = false;
-                else {
-                    if (!hasLoggedInitWarning) {
-                        Log.e(TAG, "Approov initialization is delaying a network request! A native thread is sleeping. You MUST await ApproovService.initialize() or use the useApproov() hook before calling fetch().");
-                        hasLoggedInitWarning = true;
-                    }
-                    // sleep for a short period to block this request thread
-                    Log.d(TAG, "request paused: " + url);
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Log.d(TAG, "request pause interrupted: " + url);
-                    }
-                }
-            }
-
-            // if Approov is still not initialized then forward the request unchanged
-            if (!approovService.isInitialized()) {
-                Log.d(TAG, "uninitialized forwarded: " + url);
-                return chain.proceed(request);
-            }
+            Log.e(TAG, "uninitialized forwarded (await ApproovService.initialize() before protected requests): " + url);
+            return chain.proceed(request);
         }
 
         if (!approovService.isApproovEnabled()) {
@@ -165,7 +126,7 @@ public class ApproovInterceptor implements Interceptor {
         if (approovResults.isConfigChanged()) {
             Log.d(TAG, "dynamic config update received");
             Approov.fetchConfig();
-            approovService.notifyPinChangeListeners();
+            approovService.rebuildPins();
         }
 
         // we cannot proceed if the pins need to be updated. We notify any certificate
@@ -177,7 +138,7 @@ public class ApproovInterceptor implements Interceptor {
         // there was poor network connectivity at that point.
         if (approovResults.isForceApplyPins()) {
             Log.d(TAG, "force apply pins asserted so aborting request");
-            approovService.notifyPinChangeListeners();
+            approovService.rebuildPins();
             throw new IOException("Approov pins need to be updated");
         }
 

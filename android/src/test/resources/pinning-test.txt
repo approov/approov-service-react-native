@@ -1,0 +1,8 @@
+pinning-test.p12 contains a test-only self-signed localhost certificate and private key.
+It is trusted only by ApproovPinningTlsTest. The password is test-password.
+Generate a replacement with the JDK keytool:
+
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 \
+  -keystore pinning-test.p12 -storepass test-password -keypass test-password \
+  -dname 'CN=localhost' -ext 'SAN=dns:localhost,ip:127.0.0.1' \
+  -startdate '2020/01/01 00:00:00' -validity 36500 -noprompt

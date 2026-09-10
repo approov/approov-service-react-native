@@ -166,7 +166,7 @@ public class ApproovInterceptorTest {
         when(service.getUseApproovStatusIfNoToken()).thenReturn(false);
         when(service.isInitialized()).thenReturn(true);
         when(service.isApproovEnabled()).thenReturn(true);
-        doNothing().when(service).notifyPinChangeListeners();
+        doNothing().when(service).rebuildPins();
         when(chain.proceed(any())).thenAnswer(invocation -> {
             Request proceeded = invocation.getArgument(0);
             return new Response.Builder()
@@ -226,19 +226,17 @@ public class ApproovInterceptorTest {
         }
     }
 
-    @Test
-    public void uninitializedRequestsForwardWhenTheStartupWindowHasExpired() throws Exception {
+    @Test(timeout = 1000)
+    public void uninitializedRequestsForwardWithoutAStartupWait() throws Exception {
         Request request = request("https://example.com/data");
         when(chain.request()).thenReturn(request);
         when(service.isInitialized()).thenReturn(false);
         when(service.isApproovEnabled()).thenReturn(false);
-        when(service.getEarliestNetworkRequestTime()).thenReturn(System.currentTimeMillis() - 1L);
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Response response = interceptor.intercept(chain);
 
             assertEquals(request, response.request());
-            verify(service).setEarliestNetworkRequestTime();
             approov.verifyNoInteractions();
         }
     }
@@ -452,7 +450,7 @@ public class ApproovInterceptorTest {
             interceptor.intercept(chain);
 
             approov.verify(Approov::fetchConfig);
-            verify(service).notifyPinChangeListeners();
+            verify(service).rebuildPins();
         }
     }
 
@@ -469,7 +467,7 @@ public class ApproovInterceptorTest {
             IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
             assertTrue(error.getMessage().contains("Approov pins need to be updated"));
-            verify(service).notifyPinChangeListeners();
+            verify(service).rebuildPins();
         }
     }
 

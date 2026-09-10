@@ -78,14 +78,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
 
-    /**
-     * Interface to be implemented by classes that wish to be notified of any pin
-     * changes.
-     */
-    public interface PinChangeListener {
-        void approovPinsUpdated();
-    }
-
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
 
@@ -103,19 +95,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // any prefix to be added before the Approov token, such as "Bearer "
     private static final String APPROOV_TOKEN_PREFIX = "";
 
-    // time window (in millseconds) applied to any network request attempts made
-    // before Approov
-    // is initialized. The start of the window is defined by the first network
-    // request received
-    // prior to initialization. That network request, and any others arriving during
-    // the window, may
-    // then be delayed until the end of the window period. This is to allow time for
-    // the Approov
-    // initialization to be completed as it may be in a race with API requests made
-    // as the app
-    // starts up.
-    private static final long STARTUP_SYNC_TIME_WINDOW = 2500;
-
     // flag indicating whether the Approov SDK has been initialized - if not then no
     // Approov functionality is enabled
     private static boolean isInitialized = false;
@@ -125,12 +104,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // the application context used for certain framework calls
     private Context applicationContext;
-
-    // the earliest time that any network request will be allowed to avoid any
-    // potential race conditions with Approov
-    // protected API calls being made before Approov itself can be initialized - or
-    // 0 they may proceed immediately
-    private long earliestNetworkRequestTime;
 
     // flag indicating if there is a pending prefetch to be executed upon
     // initialization
@@ -194,8 +167,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
-    // list of listeners for pin changes
-    private List<PinChangeListener> pinChangeListeners;
+    // One mutable pinning interceptor shared by every client created for this service. It has
+    // no reference back to the service or ReactContext and does no SDK work in its constructor.
+    private final ApproovPinningInterceptor pinningInterceptor = new ApproovPinningInterceptor();
 
     // Log levels matching iOS/ApproovUtils
     private static final int LOG_EXTREME = 0;
@@ -507,7 +481,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // initialize the service state
         super(reactContext);
         applicationContext = reactContext;
-        earliestNetworkRequestTime = 0;
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
         sessionMetadataCollectionEnabled = true;
@@ -518,7 +491,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-        pinChangeListeners = new ArrayList<>();
 
         // load any configuration and use it to initialize the SDK
         String config = loadApproovConfig();
@@ -567,6 +539,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } else
             log(LOG_INFO, TAG, "started");
 
+        // Load initial pins once, including when a recreated service inherits initialized SDK
+        // state. Client builders only attach this shared interceptor and never query the SDK.
+        rebuildPins();
+
         // Register Approov protection in the React Native networking stack.
         // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
         // (RN < 0.73) versions.
@@ -614,13 +590,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // the factory-built module client already carries our interceptor, and a single
             // shared builder wrapping the other SDK's hook would apply that hook twice per
             // request (once via the factory, once via this hook). It shares the factory
-            // builder's pinner, so one pinner and one pin-change listener exist per service.
+            // builder's service-owned pinning interceptor.
             Object previousBuilder = readInstalledCustomClientBuilder();
             while (previousBuilder instanceof ApproovClientBuilder)
                 previousBuilder = ((ApproovClientBuilder) previousBuilder).getWrappedBuilder();
             if (previousBuilder != null)
                 log(LOG_DEBUG, TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
-            ApproovClientBuilder hookBuilder = ApproovClientBuilder.wrapping(this, previousBuilder, clientBuilder);
+            ApproovClientBuilder hookBuilder = ApproovClientBuilder.wrapping(this, previousBuilder);
 
             // Match setCustomClientBuilder by shape, not a hardcoded parameter type. The
             // accepted type is the nested NetworkingModule.CustomClientBuilder on some RN
@@ -803,14 +779,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Returns true if an ApproovInterceptor is on either interceptor chain of the builder. This
+     * Returns true if the token interceptor is on the application chain of the builder. This
      * is the one detection rule every diagnostic uses.
      */
     private static boolean hasApproovInterceptor(OkHttpClient.Builder builder) {
         for (Interceptor interceptor : builder.interceptors())
-            if (interceptor instanceof ApproovInterceptor)
-                return true;
-        for (Interceptor interceptor : builder.networkInterceptors())
             if (interceptor instanceof ApproovInterceptor)
                 return true;
         return false;
@@ -949,33 +922,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
     }
 
-    /**
-     * Adds a pin change listener that will be notified of any future Approov
-     * pin changes.
-     * 
-     * @param listener is the pin change listener
-     */
-    public synchronized void addPinChangeListener(PinChangeListener listener) {
-        pinChangeListeners.add(listener);
+    /** Refresh shared pins on initialization or an SDK configuration update. */
+    public void rebuildPins() {
+        pinningInterceptor.rebuildPins(this);
     }
 
-    /**
-     * Gets all of the pin change listeners.
-     * 
-     * @return List of pin change listeners
-     */
-    public synchronized List<PinChangeListener> getPinChangeListeners() {
-        return new ArrayList<PinChangeListener>(pinChangeListeners);
-    }
-
-    /**
-     * Notifies pin change listeners of a pin update.
-     */
-    public void notifyPinChangeListeners() {
-        List<PinChangeListener> listeners = getPinChangeListeners();
-        for (PinChangeListener listener : listeners) {
-            listener.approovPinsUpdated();
-        }
+    ApproovPinningInterceptor getPinningInterceptor() {
+        return pinningInterceptor;
     }
 
     /**
@@ -1029,42 +982,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         userInfo.putString("rejectionARC", rejectionARC);
         userInfo.putString("rejectionReasons", rejectionReasons);
         return userInfo;
-    }
-
-    /**
-     * Sets the earliest network request based on the current time plus the window
-     * period if
-     * the time has not been previously set.
-     */
-    public synchronized void setEarliestNetworkRequestTime() {
-        if (earliestNetworkRequestTime == 0) {
-            earliestNetworkRequestTime = System.currentTimeMillis() + STARTUP_SYNC_TIME_WINDOW;
-            log(LOG_INFO, TAG, "startup sync time window started");
-        }
-    }
-
-    /**
-     * Clears the earliest network request time so any network requests can proceed
-     * immediately.
-     */
-    private synchronized void clearEarliestNetworkRequestTime() {
-        earliestNetworkRequestTime = 0;
-    }
-
-    /**
-     * Returns the earliest time that network requests should be allowed, in
-     * milliseconds, or 0
-     * if they are allowed immediately. This is used to perform a synchronization on
-     * any early network
-     * request thats should perhaps be subject to Approov protection that are
-     * performed prior to the
-     * initialization.
-     * 
-     * @return earliest network time in milliseconds, or 0 if no delay should be
-     *         imposed
-     */
-    public synchronized long getEarliestNetworkRequestTime() {
-        return earliestNetworkRequestTime;
     }
 
     /**
@@ -1152,14 +1069,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 initialConfig = config;
                 isInitialized = true;
             }
-            clearEarliestNetworkRequestTime();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");
                 log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                notifyPinChangeListeners();
             } else {
                 log(LOG_INFO, TAG, "initialized without Approov SDK");
             }
+            rebuildPins();
             if (pendingPrefetch) {
                 prefetch();
                 pendingPrefetch = false;
@@ -1167,15 +1083,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.resolve(null);
         } catch (IllegalArgumentException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
-            // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
+            // Report initialization or pin-refresh failure; protected callers must not proceed.
             promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
         } catch (IllegalStateException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
-            // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
+            // Report initialization or pin-refresh failure; protected callers must not proceed.
             promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
@@ -2242,13 +2154,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
             diagnostics.putBoolean("isInterceptorPresent", hasApproovInterceptor(builder));
             diagnostics.putArray("interceptors", interceptors);
 
-            // OkHttp can attach a chain cleaner to an empty pinner, making it unequal to
-            // DEFAULT even though no pins are configured, so count the pins. The pinner is read
-            // off the builder; only an OkHttp build without that accessor falls back to building.
-            CertificatePinner pinner = ApproovClientBuilder.pinnerOf(builder);
-            if (pinner == null)
-                pinner = builder.build().certificatePinner();
-            boolean isPinnerPresent = !pinner.getPins().isEmpty();
+            // Only a network pinning interceptor enforces Approov pins. An empty pinner or
+            // one accidentally placed in the application chain must not report protection.
+            boolean isPinnerPresent = false;
+            for (Interceptor interceptor : builder.networkInterceptors()) {
+                if (interceptor instanceof ApproovPinningInterceptor &&
+                        !((ApproovPinningInterceptor) interceptor).getCertificatePinner().getPins().isEmpty()) {
+                    isPinnerPresent = true;
+                    break;
+                }
+            }
             diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
 
             log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());
@@ -2299,14 +2214,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // service can replace our layer without losing customer interceptors or settings.
             // Remove Approov from either chain to avoid retaining an old service. Approov owns
             // the pinning policy; neither customer pins nor old Approov pins are preserved.
-            builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
-            builder.networkInterceptors().removeIf(i -> i instanceof ApproovInterceptor);
+            builder.interceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
+            builder.networkInterceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
             builder.certificatePinner(CertificatePinner.DEFAULT);
             OkHttpClient baseClient = builder.build();
 
             // add the Approov protection to the builder
             // updateClientFactory builds a one-shot recovered client snapshot, so the
-            // builder should not register as a PinChangeListener.
+            // builder shares the service pinning state without fetching pins.
             ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
             approovBuilder.apply(builder);
 
@@ -2419,7 +2334,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on
+                // ephemeral builder: share pinning state without registering listeners on
                 // every fetch
                 ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);

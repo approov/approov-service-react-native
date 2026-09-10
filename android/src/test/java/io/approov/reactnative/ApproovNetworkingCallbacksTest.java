@@ -99,11 +99,15 @@ public class ApproovNetworkingCallbacksTest {
             }
         }
         assertEquals(1, count);
+        assertEquals(1, client.networkInterceptors().stream().filter(i -> i instanceof ApproovPinningInterceptor).count());
+        assertTrue(client.networkInterceptors().contains(service.getPinningInterceptor()));
     }
 
     private static void assertBaseConfiguration(OkHttpClient expected, OkHttpClient actual) {
         assertTrue(actual.interceptors().containsAll(expected.interceptors()));
-        assertEquals(expected.networkInterceptors(), actual.networkInterceptors());
+        java.util.List<Interceptor> vendorNetwork = new java.util.ArrayList<>(actual.networkInterceptors());
+        vendorNetwork.removeIf(i -> i instanceof ApproovPinningInterceptor);
+        assertEquals(expected.networkInterceptors(), vendorNetwork);
         assertEquals(expected.connectTimeoutMillis(), actual.connectTimeoutMillis());
         assertEquals(expected.readTimeoutMillis(), actual.readTimeoutMillis());
         assertSame(expected.connectionPool(), actual.connectionPool());
@@ -130,6 +134,31 @@ public class ApproovNetworkingCallbacksTest {
     }
 
     @Test
+    public void initializationPublishesPinsBeforeResolvingAndClientCreationDoesNotRefetch() throws Exception {
+        ApproovService service = new ApproovService(context);
+        Promise initialized = mock(Promise.class);
+        sdk.when(() -> Approov.getPins("public-key-sha256")).thenAnswer(invocation -> {
+            verify(initialized, never()).resolve(any());
+            return Collections.singletonMap("api.example.com",
+                    Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+        });
+        doAnswer(invocation -> {
+            assertFalse(service.getPinningInterceptor().getCertificatePinner().getPins().isEmpty());
+            return null;
+        }).when(initialized).resolve(null);
+        service.initialize("test-config", null, initialized);
+        verify(initialized).resolve(null);
+        for (int i = 0; i < 3; i++) {
+            OkHttpClient client = OkHttpClientProvider.createClient();
+            attachClient(client);
+            installedBuilder().apply(client.newBuilder());
+            new ApproovClientBuilder(service, null, true).apply(client.newBuilder());
+            assertLiveProtection(recover(service, true).createNewNetworkModuleClient(), service);
+        }
+        sdk.verify(() -> Approov.getPins("public-key-sha256"), times(1));
+    }
+
+    @Test
     public void repeatedRecoveryAndReloadPreserveCustomerConfiguration() throws Exception {
         OkHttpClient customer = customerClient();
         OkHttpClientProvider.setOkHttpClientFactory(() -> customer);
@@ -146,7 +175,8 @@ public class ApproovNetworkingCallbacksTest {
             assertTrue(next.certificatePinner().getPins().isEmpty());
             OkHttpClient retired = recovery.createNewNetworkModuleClient();
             assertBaseConfiguration(customer, retired);
-            assertFalse(retired.interceptors().stream().anyMatch(i2 -> i2 instanceof ApproovInterceptor));
+            assertFalse(retired.interceptors().stream().anyMatch(ApproovClientBuilder::isApproovInterceptor));
+            assertFalse(retired.networkInterceptors().stream().anyMatch(ApproovClientBuilder::isApproovInterceptor));
         }
     }
 
@@ -160,7 +190,7 @@ public class ApproovNetworkingCallbacksTest {
         old.initialize("test-config", null, mock(Promise.class));
         attachClient(OkHttpClientProvider.createClient());
         OkHttpClientFactory recovery = recover(old, true);
-        assertFalse(recovery.createNewNetworkModuleClient().certificatePinner().getPins().isEmpty());
+        assertFalse(old.getPinningInterceptor().getCertificatePinner().getPins().isEmpty());
         Interceptor outerMarker = chain -> chain.proceed(chain.request());
         OkHttpClientProvider.setOkHttpClientFactory(() -> recovery.createNewNetworkModuleClient()
                 .newBuilder().addInterceptor(outerMarker).build());
@@ -198,7 +228,7 @@ public class ApproovNetworkingCallbacksTest {
         ApproovService live = new ApproovService(context);
         OkHttpClient next = OkHttpClientProvider.createClient();
         assertFalse(next.interceptors().contains(customer.interceptors().get(0)));
-        assertTrue(next.networkInterceptors().isEmpty());
+        assertEquals(Collections.singletonList(live.getPinningInterceptor()), next.networkInterceptors());
         assertEquals(new OkHttpClient.Builder().build().connectTimeoutMillis(), next.connectTimeoutMillis());
         assertLiveProtection(next, live);
     }
@@ -255,7 +285,7 @@ public class ApproovNetworkingCallbacksTest {
         assertEquals(defaults.connectTimeoutMillis(), recovered.connectTimeoutMillis());
         assertEquals(defaults.readTimeoutMillis(), recovered.readTimeoutMillis());
         assertEquals(defaults.writeTimeoutMillis(), recovered.writeTimeoutMillis());
-        assertTrue(recovered.networkInterceptors().isEmpty());
+        assertEquals(Collections.singletonList(service.getPinningInterceptor()), recovered.networkInterceptors());
 
         module.invalidate();
         ApproovService live = new ApproovService(context);
@@ -396,6 +426,31 @@ public class ApproovNetworkingCallbacksTest {
         Promise promise = mock(Promise.class);
         service.getPinningDiagnostics(promise);
         assertFalse(diagnostics(promise).getBoolean("isPinnerPresent"));
+    }
+
+    @Test
+    public void diagnosticsRequirePinsOnTheNetworkChainWithoutFetchingPins() throws Exception {
+        ApproovService service = new ApproovService(context);
+        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.singletonMap(
+                "api.example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
+        service.initialize("test-config", null, mock(Promise.class));
+        NetworkingModule.setCustomClientBuilder(null);
+        attachClient(new OkHttpClient.Builder()
+                .certificatePinner(service.getPinningInterceptor().getCertificatePinner())
+                .addInterceptor(service.getPinningInterceptor())
+                .addNetworkInterceptor(new ApproovInterceptor(service)).build());
+        Promise misplaced = mock(Promise.class);
+        service.getPinningDiagnostics(misplaced);
+        assertFalse(diagnostics(misplaced).getBoolean("isInterceptorPresent"));
+        assertFalse(diagnostics(misplaced).getBoolean("isPinnerPresent"));
+
+        attachClient(new OkHttpClient.Builder().addInterceptor(new ApproovInterceptor(service))
+                .addNetworkInterceptor(service.getPinningInterceptor()).build());
+        Promise correct = mock(Promise.class);
+        service.getPinningDiagnostics(correct);
+        assertTrue(diagnostics(correct).getBoolean("isInterceptorPresent"));
+        assertTrue(diagnostics(correct).getBoolean("isPinnerPresent"));
+        sdk.verify(() -> Approov.getPins("public-key-sha256"), times(1));
     }
 
     @Test

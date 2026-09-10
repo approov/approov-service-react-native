@@ -9,7 +9,6 @@
 #import "ios/ApproovService.h"
 
 extern BOOL isInitialized;
-extern NSTimeInterval earliestNetworkRequestTime;
 extern BOOL useApproovStatusIfNoToken;
 extern BOOL suppressLoggingUnknownURL;
 extern NSString *approovTokenHeader;
@@ -22,7 +21,6 @@ extern NSMutableSet<NSString *> *substitutionQueryParams;
 extern NSMutableSet<NSString *> *exclusionURLRegexs;
 
 @interface ApproovService (MiniSDKNativeTests)
-+ (id)networkRequestLock;
 - (void)initialize:(NSString *)config
            comment:(NSString *_Nullable)comment
           resolver:(RCTPromiseResolveBlock)resolve
@@ -126,7 +124,6 @@ static NSString *TargetHost(void) {
 
 static void ResetSharedState(void) {
   isInitialized = NO;
-  earliestNetworkRequestTime = 0;
   useApproovStatusIfNoToken = NO;
   suppressLoggingUnknownURL = NO;
   initialConfigString = @"test-config";
@@ -1276,16 +1273,16 @@ static void TestInterceptRequestForwardsLocalhost(void) {
 
 static void TestInterceptRequestForwardsWhenUninitialized(void) {
   ApproovService *service = FreshService();
-  @synchronized([ApproovService networkRequestLock]) {
-    earliestNetworkRequestTime = [[NSDate date] timeIntervalSince1970] - 1.0;
-  }
   NSURLRequest *request =
       [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/data"]];
 
+  NSTimeInterval started = [[NSProcessInfo processInfo] systemUptime];
   ApproovInterceptorResult *result = [service interceptRequest:request];
+  AssertTrue([[NSProcessInfo processInfo] systemUptime] - started < 1.0,
+             @"Uninitialized requests must not wait for the former 2.5 second grace period");
 
   AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
-                      @"Expired startup window should forward uninitialized requests");
+                      @"Uninitialized requests should forward without a startup wait");
   AssertEqualObjects(@"uninitalized forwarded", result.message,
                      @"Uninitialized path should forward without mutation");
 }

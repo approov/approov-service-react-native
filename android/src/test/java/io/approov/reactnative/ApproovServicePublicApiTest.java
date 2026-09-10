@@ -93,14 +93,18 @@ public class ApproovServicePublicApiTest {
     }
 
     @Test
-    public void getPinningDiagnosticsResolvesExpectedFlagsAndInterceptorNames() {
+    public void getPinningDiagnosticsResolvesExpectedFlagsAndInterceptorNames() throws Exception {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class);
              MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
             ApproovService service = newService();
             Promise promise = mock(Promise.class);
             AtomicReference<Object> resolvedValue = new AtomicReference<>();
 
-            approov.when(() -> Approov.getPins(anyString())).thenReturn(Collections.emptyMap());
+            setStaticField("isInitialized", true);
+            setStaticField("initialConfig", "test-config");
+            approov.when(() -> Approov.getPins(anyString())).thenReturn(Collections.singletonMap(
+                "example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
+            service.rebuildPins();
             doAnswer(invocation -> {
                 resolvedValue.set(invocation.getArgument(0));
                 return null;
@@ -110,9 +114,7 @@ public class ApproovServicePublicApiTest {
             OkHttpClient client = new OkHttpClient.Builder()
                 .addInterceptor(new ApproovInterceptor(service))
                 .addInterceptor(extraInterceptor)
-                .certificatePinner(new CertificatePinner.Builder()
-                    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                    .build())
+                .addNetworkInterceptor(service.getPinningInterceptor())
                 .build();
             okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
 
@@ -139,7 +141,7 @@ public class ApproovServicePublicApiTest {
     }
 
     @Test
-    public void clientBuilderRefreshesCertificatePinsWhenPinListenersAreNotified() throws Exception {
+    public void existingClientRefreshesCertificatePinsWhenConfigurationChanges() throws Exception {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             ApproovService service = newService();
             setStaticField("isInitialized", true);
@@ -158,19 +160,19 @@ public class ApproovServicePublicApiTest {
                 .thenReturn(initialPins)
                 .thenReturn(updatedPins);
 
+            service.rebuildPins();
             ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
             OkHttpClient.Builder firstBuilder = new OkHttpClient.Builder();
             clientBuilder.apply(firstBuilder);
-            CertificatePinner firstPinner = firstBuilder.build().certificatePinner();
+            ApproovPinningInterceptor installed = (ApproovPinningInterceptor) firstBuilder.build().networkInterceptors().get(0);
+            CertificatePinner firstPinner = installed.getCertificatePinner();
 
             assertTrue("expected initial pinner to contain BBB... pin but was " + firstPinner.getPins(),
                 hasPinHash(firstPinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
 
-            service.notifyPinChangeListeners();
+            service.rebuildPins();
 
-            OkHttpClient.Builder secondBuilder = new OkHttpClient.Builder();
-            clientBuilder.apply(secondBuilder);
-            CertificatePinner secondPinner = secondBuilder.build().certificatePinner();
+            CertificatePinner secondPinner = installed.getCertificatePinner();
 
             assertTrue("expected refreshed pinner to contain AAA... pin but was " + secondPinner.getPins(),
                 hasPinHash(secondPinner, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
@@ -191,10 +193,11 @@ public class ApproovServicePublicApiTest {
                     Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
                 ));
 
+            service.rebuildPins();
             ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
             OkHttpClient.Builder builder = new OkHttpClient.Builder();
             clientBuilder.apply(builder);
-            CertificatePinner pinner = builder.build().certificatePinner();
+            CertificatePinner pinner = ((ApproovPinningInterceptor) builder.build().networkInterceptors().get(0)).getCertificatePinner();
 
             assertTrue("expected exclusion regex to leave certificate pinning active",
                 hasPinHash(pinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));

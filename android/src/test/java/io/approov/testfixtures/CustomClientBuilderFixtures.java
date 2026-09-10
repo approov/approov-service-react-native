@@ -36,6 +36,7 @@ public final class CustomClientBuilderFixtures {
     public static CustomClientBuilder removingProtection() {
         return builder -> {
             builder.interceptors().clear();
+            builder.networkInterceptors().clear();
             builder.certificatePinner(CertificatePinner.DEFAULT);
         };
     }

@@ -297,7 +297,7 @@ public class ApproovServiceMiniSdkTest {
 
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+        assertEquals(0, service.getPinningInterceptor().getCertificatePinner().getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNull(getHeader(reply, "Approov-Token"));
@@ -388,9 +388,9 @@ public class ApproovServiceMiniSdkTest {
         OkHttpClient client = new OkHttpClient.Builder()
             .addInterceptor(new ApproovInterceptor(service))
             .addInterceptor(extraInterceptor)
-            .certificatePinner(ApproovCertificatePinner.build(service))
+            .addNetworkInterceptor(service.getPinningInterceptor())
             .build();
-        assertFalse(client.certificatePinner().getPins().isEmpty());
+        assertFalse(service.getPinningInterceptor().getCertificatePinner().getPins().isEmpty());
 
         try (org.mockito.MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
             okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);
@@ -423,9 +423,9 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-accept-any");
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
+        service.rebuildPins();
 
-        assertEquals(0, ApproovCertificatePinner.build(service).getPins().size());
+        assertEquals(0, service.getPinningInterceptor().getCertificatePinner().getPins().size());
 
         JSONObject reply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
         assertNotNull(getHeader(reply, "Approov-Token"));
@@ -439,9 +439,9 @@ public class ApproovServiceMiniSdkTest {
         assertNotNull(getHeader(firstReply, "Approov-Token"));
 
         AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
-        service.notifyPinChangeListeners();
+        service.rebuildPins();
 
-        CertificatePinner refreshedPinner = ApproovCertificatePinner.build(service);
+        CertificatePinner refreshedPinner = service.getPinningInterceptor().getCertificatePinner();
         assertEquals(0, refreshedPinner.getPins().size());
 
         JSONObject secondReply = fetchNetworkReply(new Request.Builder().url(getTargetURL()).build());
@@ -1297,7 +1297,6 @@ public class ApproovServiceMiniSdkTest {
     private void resetServiceState() throws Exception {
         setStaticField("isInitialized", false);
         setStaticField("initialConfig", null);
-        setInstanceField("earliestNetworkRequestTime", 0L);
         setInstanceField("pendingPrefetch", false);
     }
 

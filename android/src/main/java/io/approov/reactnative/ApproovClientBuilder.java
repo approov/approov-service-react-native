@@ -22,31 +22,19 @@
 package io.approov.reactnative;
 
 import com.facebook.react.modules.network.NetworkingModule.CustomClientBuilder;
-import com.facebook.react.modules.network.ReactCookieJarContainer;
-
-import android.content.Context;
-
-import java.lang.reflect.Method;
 
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
 // ApproovClientBuilder is a custom client building for OkHttp to add Approov protection, including dynamic pinning
-public class ApproovClientBuilder implements CustomClientBuilder, ApproovService.PinChangeListener {
-    // underlying ApproovService that is wrapping the SDK; null once retired
-    private volatile ApproovService approovService;
-
+public class ApproovClientBuilder implements CustomClientBuilder {
     // interceptor for adding Approov tokens or substituting headers and/or query
     // parameters; null once retired
     private volatile Interceptor interceptor;
 
-    // current certificate pinner, owned by this builder unless pinnerSource is set
-    private volatile CertificatePinner pinner;
-
-    // the builder whose pinner this one shares (the custom-client-builder hook shares the
-    // factory path's, so one pinner and one pin-change listener exist per service), or null
-    private volatile ApproovClientBuilder pinnerSource;
+    // Shared by all clients of this service; constructing a builder never fetches pins.
+    private volatile ApproovPinningInterceptor pinningInterceptor;
 
     // prior client builder that might have been set by another SDK (e.g. New Relic). Held as
     // Object because React Native types this hook as the nested
@@ -58,100 +46,28 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     // builder it wraps, adds no Approov protection, and holds no reference to the old service
     private volatile boolean retired;
 
-    /**
-     * Creates a long-lived ApproovClientBuilder for OkHttp requests. This adds
-     * the interceptor and certificate pinning, which can be dynamically updated
-     * if the pins change during app usage. The builder registers itself as a
-     * PinChangeListener so that it is notified when pins are updated.
-     *
-     * @param approovService is the ApproovService being used
-     * @param wrappedBuilder is the CustomClientBuilder that was already set, or
-     *                       null if none
-     */
+    /** Creates a builder using the service's shared pinning state. */
     public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder) {
-        this(approovService, wrappedBuilder, false, null);
+        this(approovService, (Object) wrappedBuilder);
     }
 
     /**
-     * Creates an ApproovClientBuilder for OkHttp requests. This adds the
-     * interceptor and certificate pinning. When {@code ephemeral} is false the
-     * builder registers itself as a PinChangeListener so that it can react to
-     * dynamic pin changes over the app's lifetime. When {@code ephemeral} is
-     * true the builder is intended for a single, short-lived request (e.g.
-     * fetchWithApproov) and does NOT register as a listener, avoiding unbounded
-     * listener list growth.
-     *
-     * @param approovService is the ApproovService being used
-     * @param wrappedBuilder is the CustomClientBuilder that was already set, or
-     *                       null if none
-     * @param ephemeral      if true, skip PinChangeListener registration
+     * Retains the existing constructor for callers creating short-lived builders. All builders
+     * now share service-owned pins, so neither kind registers listeners or fetches pins.
      */
     public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder, boolean ephemeral) {
-        this(approovService, wrappedBuilder, ephemeral, null);
+        this(approovService, (Object) wrappedBuilder);
     }
 
-    /**
-     * The single construction path. A builder given a {@code pinnerSource} owns no pinner and
-     * registers no listener; it reads the source's current pinner when applied.
-     *
-     * @param approovService is the ApproovService being used
-     * @param wrappedBuilder is the previously registered builder of any CustomClientBuilder
-     *                       type, or null
-     * @param ephemeral      if true, skip PinChangeListener registration
-     * @param pinnerSource   the builder whose pinner to share, or null to own one
-     */
-    ApproovClientBuilder(ApproovService approovService, Object wrappedBuilder, boolean ephemeral,
-            ApproovClientBuilder pinnerSource) {
-        this.approovService = approovService;
+    private ApproovClientBuilder(ApproovService approovService, Object wrappedBuilder) {
         this.wrappedBuilder = wrappedBuilder;
-        this.pinnerSource = pinnerSource;
-
-        // set the interceptor
         interceptor = new ApproovInterceptor(approovService);
-
-        // a builder sharing another's pinner neither builds nor listens; otherwise set the
-        // initial pinner and, on long-lived builders only, register for pin changes (ephemeral
-        // builders, used by fetchWithApproov, build a fresh pinner on every call so listening
-        // would just leak references)
-        if (pinnerSource == null) {
-            pinner = ApproovCertificatePinner.build(approovService);
-            if (!ephemeral)
-                approovService.addPinChangeListener(this);
-        }
+        pinningInterceptor = approovService.getPinningInterceptor();
     }
 
-    /**
-     * Builds the builder registered as the NetworkingModule's custom client builder. It wraps the
-     * previously registered builder of any CustomClientBuilder type, so registering Approov
-     * preserves rather than replaces the other SDK's hook, and it shares the factory path's
-     * pinner so one pinner and one listener exist per service.
-     *
-     * @param approovService  is the ApproovService being used
-     * @param previousBuilder is the previously registered builder, or null
-     * @param pinnerSource    is the factory path's builder whose pinner is shared
-     */
-    static ApproovClientBuilder wrapping(ApproovService approovService, Object previousBuilder,
-            ApproovClientBuilder pinnerSource) {
-        return new ApproovClientBuilder(approovService, previousBuilder, true, pinnerSource);
-    }
-
-    /**
-     * Handles a change to the Approov pins by creating a new pinner.
-     */
-    public void approovPinsUpdated() {
-        if (retired || (pinnerSource != null))
-            return;
-        ApproovService service = approovService;
-        if (service != null)
-            pinner = ApproovCertificatePinner.build(service);
-    }
-
-    /**
-     * The pinner currently in force for this builder, its own or its source's.
-     */
-    CertificatePinner currentPinner() {
-        ApproovClientBuilder source = pinnerSource;
-        return (source != null) ? source.currentPinner() : pinner;
+    /** Wraps the vendor's per-request callback, sharing the service's pinning interceptor. */
+    static ApproovClientBuilder wrapping(ApproovService approovService, Object previousBuilder) {
+        return new ApproovClientBuilder(approovService, previousBuilder);
     }
 
     /**
@@ -162,10 +78,8 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
      */
     void retire() {
         retired = true;
-        approovService = null;
         interceptor = null;
-        pinner = null;
-        pinnerSource = null;
+        pinningInterceptor = null;
     }
 
     @Override
@@ -177,62 +91,25 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
         if ((builder == null) || retired)
             return;
         Interceptor current = interceptor;
-        CertificatePinner approovPinner = currentPinner();
-        if ((current == null) || (approovPinner == null))
+        ApproovPinningInterceptor currentPinning = pinningInterceptor;
+        if ((current == null) || (currentPinning == null))
             return;
 
-        // Remove any ApproovInterceptor already on the builder, then add ours. This
-        // covers two cases:
-        // - Double-registration on RN < 0.73, where both the OkHttpClientFactory and the
-        //   legacy setCustomClientBuilder fire for the same builder; adding the
-        //   interceptor twice would cause duplicate token fetches and signatures.
-        // - Re-registration when a new ApproovService is built (for example the RN
-        //   context is recreated by an Expo OTA reload). The previous factory is wrapped
-        //   and runs first, adding a STALE interceptor bound to the old service. A
-        //   class-level "already present?" check cannot tell that stale interceptor
-        //   apart from our own, so it would skip adding the live one and leave the client
-        //   fetching tokens through a dead service. Removing every ApproovInterceptor
-        //   first guarantees the client uses THIS service's interceptor.
-        builder.interceptors().removeIf(existing -> existing instanceof ApproovInterceptor);
+        // Replace both Approov layers, including misplaced or stale copies left by another
+        // factory/hook. Preserve every third-party interceptor and its relative order.
+        builder.interceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
+        builder.networkInterceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
         builder.addInterceptor(current);
+        builder.addNetworkInterceptor(currentPinning);
 
-        // Approov owns this client's pinning policy. Replace the existing pinner so
-        // customer pins and pins removed by an Approov update are not carried forward.
-        builder.certificatePinner(approovPinner);
+        // Pinning is enforced on each network exchange. Clear the built-in pinner so stale
+        // Approov pins cannot reject a connection before our network interceptor runs.
+        // Approov continues to own the policy: customer pins are not merged or retained.
+        builder.certificatePinner(CertificatePinner.DEFAULT);
     }
 
-    // the OkHttp accessor for a builder's current pinner, resolved once; null when this OkHttp
-    // build has none (older OkHttp), in which case callers fall back
-    private static volatile Method builderPinnerGetter;
-    private static volatile boolean builderPinnerGetterResolved;
-
-    /**
-     * Reads the pinner currently set on a builder without building a client. OkHttp exposes it
-     * to the JVM as the accessor of its internal Kotlin property.
-     *
-     * @param builder the builder to read
-     * @return the current pinner, or null if this OkHttp build exposes no accessor
-     */
-    static CertificatePinner pinnerOf(OkHttpClient.Builder builder) {
-        if (builder == null)
-            return null;
-        Method getter = builderPinnerGetter;
-        if ((getter == null) && !builderPinnerGetterResolved) {
-            try {
-                getter = OkHttpClient.Builder.class.getMethod("getCertificatePinner$okhttp");
-            } catch (NoSuchMethodException e) {
-                getter = null;
-            }
-            builderPinnerGetter = getter;
-            builderPinnerGetterResolved = true;
-        }
-        if (getter == null)
-            return null;
-        try {
-            return (CertificatePinner) getter.invoke(builder);
-        } catch (Exception e) {
-            return null;
-        }
+    static boolean isApproovInterceptor(Interceptor interceptor) {
+        return interceptor instanceof ApproovInterceptor || interceptor instanceof ApproovPinningInterceptor;
     }
 
     /**

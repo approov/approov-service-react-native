@@ -13,7 +13,7 @@ Many of the methods execute asynchronously and return a `Promise`. This is resol
 * `userInfo.rejectionReasons`: Only provided for a `rejection` error type. If the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) feature is enabled, this provides a comma separated list of reasons why the app attestation was rejected.
 
 ## initialize
-You will not generally need to call this function directly, since this is called automatically if you use the `ApproovProvider` component. It is only included here for completeness.
+You will not generally need to call this function directly, since this is called automatically if you use the `ApproovProvider` component. Even when using the provider, protected requests MUST be gated on successful initialization (`approovReady && !approovError`). If initializing directly, you MUST `await ApproovService.initialize(validConfig)` before starting protected requests. Keep those requests blocked on failure. Neither Android nor iOS provides a startup grace period.
 
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the Approov CLI. This will generate an error if a second attempt is made at initialization with a different `config` but will succeed if called multiple times with the same `config`.
 
@@ -45,7 +45,7 @@ ApproovService.isInitialized();
 
 This function returns a `Promise<boolean>`.
 
-This reflects service-layer readiness, not whether the native Approov SDK is actively protecting requests. For example, if you initialize with an empty config string, `isInitialized()` resolves to `true` while `isApproovEnabled()` resolves to `false`.
+This flag can become true before pin loading and the initialization promise complete. It is not a substitute for awaiting `initialize()`, and does not tell you whether the native Approov SDK is actively protecting requests. For example, if you initialize with an empty config string, `isInitialized()` resolves to `true` while `isApproovEnabled()` resolves to `false`.
 
 ## isApproovEnabled
 Returns whether the native Approov SDK is active and request protection is enabled.
@@ -449,15 +449,15 @@ ApproovService.getMaxReswizzleAttempts().then((attempts) => { ... })
 - Returns a `Promise<number>` resolving to the configured maximum reswizzle attempts. The default is `0` (disabled).
 
 ## getPinningDiagnostics
-Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this checks the active shared `OkHttpClient` to ensure the `ApproovInterceptor` and certificate pinner are still present. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
+Returns an object containing diagnostics about the current state of certificate pinning and SDK interception. On Android, this inspects the effective request builder, including the registered custom client builder, for the application token interceptor and network pinning interceptor. On iOS, it reports metadata for intercepted `NSURLSession` instances, including whether requests were observed without verified pinning.
 
 ```Javascript
 ApproovService.getPinningDiagnostics();
 ```
 
 This function returns a `Promise` resolving to an object with the following structure:
-* `isInterceptorPresent` (boolean): (Android only) True if the Approov HTTP interceptor is configured.
-* `isPinnerPresent` (boolean): (Android only) True if the Approov Certificate Pinner is configured.
+* `isInterceptorPresent` (boolean): (Android only) True if the Approov token interceptor is on the application interceptor chain.
+* `isPinnerPresent` (boolean): (Android only) True if an Approov pinning interceptor is on the network chain with at least one configured pin. An empty or unrelated built-in pinner does not count.
 * `interceptors` (Array<string>): (Android only) A list of class names for all currently active interceptors.
 * `totalAuthChallenges` (number): (iOS only) Total TLS auth challenges observed across intercepted sessions.
 * `totalPinned` (number): (iOS only) Number of auth challenges where pinning validation succeeded.

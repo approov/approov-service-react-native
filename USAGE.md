@@ -7,7 +7,7 @@ You can initialize the `ApproovService` with an empty configuration string if yo
 
 > ```javascript
 > // Initialize with an empty string to operate as a standard network client
-> ApproovService.initialize("");
+> await ApproovService.initialize("");
 > ```
 
 When initialized this way, all network requests made through the native React Native networking module will proceed without Approov token injection, message signing, secure string substitution, or dynamic pinning. You can enable full Approov protection later in the application lifecycle by calling `ApproovService.initialize(config)` with a valid configuration string.
@@ -18,7 +18,8 @@ The Approov SDK must fully complete its native initialization sequence and recei
 
 If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
 
-> You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
+> You **MUST await successful `ApproovService.initialize(validConfig)` completion before every protected request path can start**. With `ApproovProvider`, gate requests on `approovReady && !approovError`, which reflects that promise. If initialization fails, keep protected requests blocked.
+> Android and iOS have no startup grace period; the former 2.5-second waits have been removed. Polling `isInitialized()` is not a substitute for awaiting the initialization promise.
 > A request that leaves the device before initialization completes may be forwarded without an Approov token.
 > If you intentionally initialize with `""`, that request path is treated as an explicit no-Approov bootstrap mode: requests will proceed without Approov protection until you later call `ApproovService.initialize("<valid-config>")`.
 > This empty-first then valid-config-later flow is supported for advanced service-layer integrations, but switching directly between different non-empty config strings is still rejected.
@@ -59,7 +60,7 @@ const MainScreen = () => {
 ```
 
 ### Option 2: Awaiting the Promise (For Headless/Service logic)
-If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
+If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You MUST `await` its successful completion before making protected network calls.
 
 ```javascript
 import { Platform } from 'react-native';

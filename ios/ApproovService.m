@@ -86,15 +86,6 @@ RCT_EXPORT_MODULE(ApproovService);
 static NSString *const ConfigResource = @"approov";
 static NSString *const ConfigExtension = @"config";
 
-// time window (in millseconds) applied to any network request attempts made
-// before Approov is initialized. The start of the window is defined by the
-// first network request received prior to initialization. That network request,
-// and any others arriving during the window, may then be delayed until the end
-// of the window period. This is to allow time for the Approov initialization to
-// be completed as it may be in a race with API requests made as the app starts
-// up.
-static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
-
 // lock object used during initialization
 static id initializerLock = nil;
 
@@ -106,14 +97,6 @@ static id configLock = nil;
 
 // keeps track of whether Approov is initialized
 BOOL isInitialized = NO;
-
-// lock object used for synchronizing the earliestNetworkRequestTime
-static id earliestNetworkRequestTimeLock = nil;
-
-// the earliest time that any network request will be allowed to avoid any
-// potential race conditions with Approov protected API calls being made before
-// Approov itself can be initialized - or 0.0 they may proceed immediately
-NSTimeInterval earliestNetworkRequestTime = 0.0;
 
 // the current shared ApproovService instance
 static ApproovService *sharedApproovService = nil;
@@ -212,7 +195,6 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
     configLock = [NSObject new];
-    earliestNetworkRequestTimeLock = [NSObject new];
   }
 }
 
@@ -344,9 +326,8 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * The platform SDK returns YES on first initialization, or NO with a nil error
  * if already initialized with the same configuration (treated as success).
  * NO with a non-nil error indicates a genuine failure such as a different-config
- * conflict, which is surfaced as a rejected promise. The startup synchronization
- * gate is cleared on both success and failure so that pending requests are never
- * held indefinitely.
+ * conflict, which is surfaced as a rejected promise. Protected request paths must
+ * await successful initialization; request interception has no startup grace period.
  *
  * @param config   the configuration string, or empty string for bypass mode
  * @param comment  optional comment forwarded to the native SDK, or nil
@@ -391,14 +372,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     }
 
     if (initializationError != nil) {
-      // Genuine initialization failure — release the gate so pending requests
-      // are not held indefinitely. Service-layer state is NOT modified;
-      // the previous operating mode (protected or bypass) is fully preserved.
+      // Preserve the previous operating mode if SDK initialization fails.
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestNetworkRequestTime = 0.0;
-      }
       NSError *error =
           [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                      code:0
@@ -454,9 +430,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
-    @synchronized(earliestNetworkRequestTimeLock) {
-      earliestNetworkRequestTime = 0.0;
-    }
     if (ApproovIsEnabled()) {
       [Approov setUserProperty:@"approov-react-native"];
       ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
@@ -554,10 +527,6 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
   } @catch (NSException *exception) {
     reject(@"setServiceMutatorType", exception.reason, nil);
   }
-}
-
-+ (id)networkRequestLock {
-  return earliestNetworkRequestTimeLock;
 }
 
 /**
@@ -1428,59 +1397,14 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
               withMessage:@"localhost forwarded"];
   }
 
-  // if the Approov SDK is not initialized then we just return immediately
-  // without making any changes
+  // Protected request paths MUST await initialize(). There is no startup grace period.
   if (!isInitialized) {
-    // if this is the first network request performed prior to Approov
-    // initialization then we start a time window in case we are in a race with
-    // that initialization
-    @synchronized(earliestNetworkRequestTimeLock) {
-      if (earliestNetworkRequestTime == 0) {
-        earliestNetworkRequestTime =
-            [[NSDate date] timeIntervalSince1970] + STARTUP_SYNC_TIME_WINDOW;
-        ApproovLogI(@"startup sync time window started");
-      }
-    }
-
-    // wait until any initial fetch time is reached
-    BOOL waitForReady = YES;
-    while (waitForReady) {
-      // if initialization has completed then we can proceed
-      if (isInitialized) {
-        waitForReady = NO;
-        break;
-      }
-
-      NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-      NSTimeInterval earliestTime = 0.0;
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestTime = earliestNetworkRequestTime;
-      }
-      if (currentTime >= earliestTime)
-        waitForReady = NO;
-      else {
-        // sleep for a short period to block this request thread
-        static BOOL hasLoggedInitWarning = NO;
-        if (!hasLoggedInitWarning) {
-          ApproovLogE(
-              @"Approov initialization is delaying a network request! A native "
-              @"thread is sleeping. You MUST await ApproovService.initialize() "
-              @"or use the useApproov() hook before calling fetch().");
-          hasLoggedInitWarning = YES;
-        }
-        ApproovLogI(@"request paused: %@", url);
-        [NSThread sleepForTimeInterval:0.1];
-      }
-    }
-
-    // if Approov is still not initialized then forward the request unchanged
-    if (!isInitialized) {
-      ApproovLogI(@"uninitialized forwarded: %@", url);
-      return [ApproovInterceptorResult
-          createWithRequest:updatedRequest
-                 withAction:ApproovInterceptorActionProceed
-                withMessage:@"uninitalized forwarded"];
-    }
+    ApproovLogE(@"Uninitialized request: await ApproovService.initialize() before protected requests");
+    ApproovLogI(@"uninitialized forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"uninitalized forwarded"];
   }
 
   if (!ApproovIsEnabled()) {

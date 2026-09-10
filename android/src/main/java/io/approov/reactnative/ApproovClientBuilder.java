@@ -25,7 +25,6 @@ import com.facebook.react.modules.network.NetworkingModule.CustomClientBuilder;
 import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import android.content.Context;
-import android.util.Log;
 
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
@@ -44,7 +43,7 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
     private CertificatePinner pinner;
 
     // prior client builder that might have been set by another SDK (e.g. New Relic). Held as
-    // Object and applied reflectively because React Native types this hook as the nested
+    // Object because React Native types this hook as the nested
     // NetworkingModule.CustomClientBuilder on some versions and the top-level
     // com.facebook.react.modules.network.CustomClientBuilder on others.
     private Object wrappedBuilder;
@@ -104,14 +103,7 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
 
     @Override
     public void apply(OkHttpClient.Builder builder) {
-        // apply the wrapped builder first if it exists (reflectively, see wrappedBuilder)
-        if (wrappedBuilder != null) {
-            try {
-                wrappedBuilder.getClass().getMethod("apply", OkHttpClient.Builder.class).invoke(wrappedBuilder, builder);
-            } catch (Exception e) {
-                Log.w("ApproovService", "wrapped custom client builder could not be applied: " + e.getMessage());
-            }
-        }
+        applyCustomClientBuilder(wrappedBuilder, builder);
 
         if (builder != null) {
             // Remove any ApproovInterceptor already on the builder, then add ours. This
@@ -129,6 +121,22 @@ public class ApproovClientBuilder implements CustomClientBuilder, ApproovService
             builder.interceptors().removeIf(existing -> existing instanceof ApproovInterceptor);
             builder.addInterceptor(interceptor);
             builder.certificatePinner(pinner);
+        }
+    }
+
+    /**
+     * Invokes an RN callback through its public interface, so non-public implementations
+     * (including another SDK's anonymous classes and lambdas) work as they do in RN.
+     * Preserve callback exceptions: callers must not continue with a partially configured
+     * builder. Diagnostics use this same dispatch and reject if the callback fails.
+     */
+    static void applyCustomClientBuilder(Object callback, OkHttpClient.Builder builder) {
+        if (callback instanceof CustomClientBuilder) {
+            ((CustomClientBuilder) callback).apply(builder);
+        } else if (callback != null) {
+            // The top-level interface is available throughout the supported RN range
+            // (0.76+); its implementations need not implement the legacy nested subtype.
+            ((com.facebook.react.modules.network.CustomClientBuilder) callback).apply(builder);
         }
     }
 

@@ -744,13 +744,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             base = OkHttpClientProvider.getOkHttpClient();
         OkHttpClient.Builder builder = base.newBuilder();
         Object hook = readInstalledCustomClientBuilder();
-        if (hook != null) {
-            try {
-                hook.getClass().getMethod("apply", OkHttpClient.Builder.class).invoke(hook, builder);
-            } catch (Exception e) {
-                log(LOG_DEBUG, TAG, "could not apply registered custom client builder for diagnostics: " + e.getMessage());
-            }
-        }
+        ApproovClientBuilder.applyCustomClientBuilder(hook, builder);
         return builder.build();
     }
 
@@ -2109,7 +2103,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
             diagnostics.putArray("interceptors", interceptors);
 
             CertificatePinner pinner = client.certificatePinner();
-            boolean isPinnerPresent = (pinner != null) && !pinner.equals(CertificatePinner.DEFAULT);
+            // OkHttp can attach a chain cleaner to an empty pinner, making it unequal
+            // to DEFAULT even though no pins are configured.
+            boolean isPinnerPresent = (pinner != null) && !pinner.getPins().isEmpty();
             diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
 
             log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());

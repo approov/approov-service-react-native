@@ -377,13 +377,20 @@ public class ApproovServiceMiniSdkTest {
 
     @Test
     public void getPinningDiagnosticsReportsInterceptorAndPinner() throws Exception {
-        reinitializeServiceWithScenario("\"protectedDomains\": [\"" + getTargetHost() + "\"]", "reinit-pinning-diag");
+        // Token protection alone does not configure TLS pins. Give this positive
+        // diagnostic test an explicit pin instead of relying on pinner != DEFAULT.
+        reinitializeServiceWithScenario(
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"],"
+                + "\"pins\": {\"public-key-sha256\": {\"" + getTargetHost()
+                + "\": [\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"]}}",
+            "reinit-pinning-diag");
         Interceptor extraInterceptor = chain -> chain.proceed(chain.request());
         OkHttpClient client = new OkHttpClient.Builder()
             .addInterceptor(new ApproovInterceptor(service))
             .addInterceptor(extraInterceptor)
             .certificatePinner(ApproovCertificatePinner.build(service))
             .build();
+        assertFalse(client.certificatePinner().getPins().isEmpty());
 
         try (org.mockito.MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
             okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(client);

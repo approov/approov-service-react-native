@@ -4,10 +4,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -438,7 +441,7 @@ public class ApproovInterceptorTest {
     }
 
     @Test
-    public void configChangesRefreshPinsAndNotifyListeners() throws Exception {
+    public void configChangesRefreshSharedPins() throws Exception {
         Request request = request("https://api.example.com/data");
         when(chain.request()).thenReturn(request);
         Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
@@ -455,7 +458,7 @@ public class ApproovInterceptorTest {
     }
 
     @Test
-    public void forceApplyPinsStopsTheRequestAndNotifiesListeners() {
+    public void forceApplyPinsRefreshesBeforeProceedingWithTheToken() throws Exception {
         Request request = request("https://api.example.com/data");
         when(chain.request()).thenReturn(request);
         Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
@@ -463,12 +466,53 @@ public class ApproovInterceptorTest {
 
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+            Response response = interceptor.intercept(chain);
 
-            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
+            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
+            org.mockito.InOrder order = inOrder(service, chain);
+            order.verify(service).rebuildPins();
+            order.verify(chain).proceed(any());
+            verify(service).rebuildPins();
+            approov.verify(Approov::fetchConfig, never());
+        }
+    }
 
-            assertTrue(error.getMessage().contains("Approov pins need to be updated"));
+    @Test
+    public void simultaneousConfigAndForceFlagsRebuildPinsOnlyOnce() throws Exception {
+        when(chain.request()).thenReturn(request("https://api.example.com/data"));
+        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
+        when(tokenResult.isConfigChanged()).thenReturn(true);
+        when(tokenResult.isForceApplyPins()).thenReturn(true);
+        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            Response response = interceptor.intercept(chain);
+            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
+            approov.verify(Approov::fetchConfig);
             verify(service).rebuildPins();
         }
+    }
+
+    @Test
+    public void forcedPinRefreshFailureStillBlocksTheRequest() throws Exception {
+        when(chain.request()).thenReturn(request("https://api.example.com/data"));
+        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
+        when(tokenResult.isForceApplyPins()).thenReturn(true);
+        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        IllegalStateException failure = new IllegalStateException("pins unavailable");
+        doThrow(failure).when(service).rebuildPins();
+        assertSame(failure, assertThrows(IllegalStateException.class, () -> interceptor.intercept(chain)));
+        verify(chain, never()).proceed(any());
+    }
+
+    @Test
+    public void forcedPinRefreshDoesNotBypassTokenFailurePolicy() throws Exception {
+        when(chain.request()).thenReturn(request("https://api.example.com/data"));
+        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_NETWORK);
+        when(tokenResult.isForceApplyPins()).thenReturn(true);
+        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        assertThrows(IOException.class, () -> interceptor.intercept(chain));
+        verify(service).rebuildPins();
+        verify(chain, never()).proceed(any());
     }
 
     @Test

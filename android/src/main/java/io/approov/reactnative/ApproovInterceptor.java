@@ -120,26 +120,17 @@ public class ApproovInterceptor implements Interceptor {
                 || (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL))
             Log.d(TAG, "token for " + url + ": " + approovResults.getLoggableToken());
 
-        // force a pinning change if there is any dynamic config update, calling
-        // fetchConfig to
-        // clear the update flag
-        if (approovResults.isConfigChanged()) {
+        // Acknowledge configuration changes before reading the latest pins. Refresh only once
+        // if both flags are set. The shared network interceptor will check this same request
+        // against the new pins, so no client rebuild or forced retry is needed.
+        boolean configChanged = approovResults.isConfigChanged();
+        if (configChanged) {
             Log.d(TAG, "dynamic config update received");
             Approov.fetchConfig();
-            approovService.rebuildPins();
         }
-
-        // we cannot proceed if the pins need to be updated. We notify any certificate
-        // pinners that
-        // they need to update. This might occur on first use after initial app install
-        // if the
-        // initial network fetch was unable to obtain the dynamic configuration for the
-        // account if
-        // there was poor network connectivity at that point.
-        if (approovResults.isForceApplyPins()) {
-            Log.d(TAG, "force apply pins asserted so aborting request");
+        if (configChanged || approovResults.isForceApplyPins()) {
+            Log.d(TAG, "refreshing shared pins before network verification");
             approovService.rebuildPins();
-            throw new IOException("Approov pins need to be updated");
         }
 
         // check if the request should proceed based on the token fetch result

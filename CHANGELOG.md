@@ -2,6 +2,7 @@
 
 ## [3.5.19] - 2026-09-10
 
+- **Fixed: forced pin updates no longer abort Android requests**: Refresh shared pins once when configuration-change or force-apply flags are set, then continue the same request through token policy and network pin verification. Pin-refresh failures and certificate mismatches still block the request.
 - **Changed: hybrid Android interception with shared pins**: Application interception handles tokens and substitutions; network interception checks TLS pins. All clients of a service share pin state, including recovery and `fetchWithApproov` clients. Initialization and SDK configuration updates refresh pins without fetching them during client construction. The bounded handshake cache is scoped to the host and pin snapshot. Customer pins are not merged.
 - **Changed: initialization must be awaited (Android and iOS)**: Removed the 2.5-second startup grace periods. Protected request paths must await successful `initialize()` completion; early requests can proceed unprotected. HTTP timeouts are unchanged.
 - **Fixed: fresh-client recovery preserves React Native cookie handling (Android)**: `updateClientFactory(false)` keeps the active NetworkingModule's cookie container, or supplies and connects one when needed. Cookies continue to flow through React Native after recovery and reload, avoiding the RN 0.76 cookie-container cast failure. Plain OkHttp timeout defaults are unchanged.

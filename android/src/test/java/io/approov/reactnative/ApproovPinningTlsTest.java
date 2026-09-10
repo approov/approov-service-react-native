@@ -162,6 +162,45 @@ public class ApproovPinningTlsTest {
         assertEquals(3, targetRequests.get());
     }
 
+    private void forcePinsOnNextTokenFetch(String pin) {
+        when(service.isInitialized()).thenReturn(true);
+        when(service.getTokenHeader()).thenReturn("Approov-Token");
+        when(service.getTokenPrefix()).thenReturn("");
+        when(service.getExclusionURLRegexs()).thenReturn(Collections.emptyMap());
+        when(service.getSubstitutionHeaders()).thenReturn(Collections.emptyMap());
+        when(service.getSubstitutionQueryParams()).thenReturn(Collections.emptyMap());
+        Approov.TokenFetchResult result = mock(Approov.TokenFetchResult.class);
+        when(result.getStatus()).thenReturn(Approov.TokenFetchStatus.SUCCESS);
+        when(result.getToken()).thenReturn("jwt-token");
+        when(result.isForceApplyPins()).thenReturn(true);
+        when(service.fetchApproovTokenAndWait(anyString())).thenReturn(result);
+        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(
+                Collections.singletonMap("127.0.0.1", Collections.singletonList(pin)));
+        doAnswer(invocation -> {
+            pinning.rebuildPins(service);
+            return null;
+        }).when(service).rebuildPins();
+        client = client.newBuilder().addInterceptor(new ApproovInterceptor(service)).build();
+    }
+
+    @Test
+    public void forcedPinUpdateProtectsSameRequestWithoutClientRebuildOrRetry() throws Exception {
+        pins(Collections.singletonMap("127.0.0.1", Collections.singletonList(WRONG_PIN)));
+        forcePinsOnNextTokenFetch(matchingPin);
+        get("127.0.0.1", "/target");
+        assertEquals(1, targetRequests.get());
+        verify(service).rebuildPins();
+    }
+
+    @Test
+    public void forcedPinUpdateStillRejectsMismatchingCertificateBeforeHttp() throws Exception {
+        pins(Collections.singletonMap("127.0.0.1", Collections.singletonList(matchingPin)));
+        forcePinsOnNextTokenFetch(WRONG_PIN);
+        assertThrows(SSLPeerUnverifiedException.class, () -> get("127.0.0.1", "/target"));
+        assertEquals(0, targetRequests.get());
+        verify(service).rebuildPins();
+    }
+
     @Test
     public void redirectedHostMustPassItsOwnPinPolicy() throws Exception {
         Map<String, List<String>> pins = new HashMap<>();

@@ -96,17 +96,17 @@ static id initializerLock = nil;
 static id configLock = nil;
 
 // keeps track of whether Approov is initialized
-BOOL isInitialized = NO;
+static BOOL isInitialized = NO;
 
 // the current shared ApproovService instance
 static ApproovService *sharedApproovService = nil;
 
 // original config string used during initialization
-NSString *initialConfigString = nil;
+static NSString *initialConfigString = nil;
 
 // keeps track of whether a prefetch request has been made prior to
 // initialization
-BOOL pendingPrefetch = NO;
+static BOOL pendingPrefetch = NO;
 
 static BOOL ApproovIsEnabled(void) {
   // Read under initializerLock so the request path never observes a torn/partial
@@ -122,36 +122,36 @@ static BOOL ApproovIsEnabled(void) {
 
 // YES if the status should be used as the token header value if the token is
 // empty
-BOOL useApproovStatusIfNoToken = NO;
+static BOOL useApproovStatusIfNoToken = NO;
 
 // YES if no logging should be output on unknown (or excluded) URLs
-BOOL suppressLoggingUnknownURL = NO;
+static BOOL suppressLoggingUnknownURL = NO;
 
 // header that will be added to Approov enabled requests
-NSString *approovTokenHeader = @"Approov-Token";
+static NSString *approovTokenHeader = @"Approov-Token";
 
 // default header that will carry any optional Approov TraceID debug value from
 // the SDK
-NSString *approovTraceIDHeader = @"Approov-TraceID";
+static NSString *approovTraceIDHeader = @"Approov-TraceID";
 
 // any prefix to be added before the Approov token, such as "Bearer "
-NSString *approovTokenPrefix = @"";
+static NSString *approovTokenPrefix = @"";
 
 // any header to be used for binding in Approov tokens or empty string if not
 // set
-NSString *bindingHeader = @"";
+static NSString *bindingHeader = @"";
 
 // map of headers that should have their values substituted for secure strings,
 // mapped to their required prefixes
-NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
+static NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
 
 // set of query parameter keys whose values may be substituted for secure
 // strings
-NSMutableSet<NSString *> *substitutionQueryParams = nil;
+static NSMutableSet<NSString *> *substitutionQueryParams = nil;
 
 // set of URL regular expressions that should be excluded from Approov
 // protection
-NSMutableSet<NSString *> *exclusionURLRegexs = nil;
+static NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 
 /**
  * Indicates that this module must initialize before any Javascript is run.
@@ -1728,7 +1728,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
 // Subject Public Key Info (SPKI) headers for public keys' type and size. Only
 // RSA-2048, RSA-4096, EC-256 and EC-384 are supported
-NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
+static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 /**
  * Initialize the SPKI header constants.

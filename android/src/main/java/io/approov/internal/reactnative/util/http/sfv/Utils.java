@@ -1,4 +1,4 @@
-package io.approov.util.http.sfv;
+package io.approov.internal.reactnative.util.http.sfv;
 
 import java.util.Map;
 import java.util.Objects;

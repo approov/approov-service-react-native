@@ -1,15 +1,15 @@
-package io.approov.util.sig;
+package io.approov.internal.reactnative.util.sig;
 
 import java.util.List;
 import java.util.regex.Pattern;
 
-import io.approov.util.http.sfv.Dictionary;
-import io.approov.util.http.sfv.Item;
-import io.approov.util.http.sfv.ListElement;
-import io.approov.util.http.sfv.ParseException;
-import io.approov.util.http.sfv.Parser;
-import io.approov.util.http.sfv.StringItem;
-import io.approov.util.http.sfv.Type;
+import io.approov.internal.reactnative.util.http.sfv.Dictionary;
+import io.approov.internal.reactnative.util.http.sfv.Item;
+import io.approov.internal.reactnative.util.http.sfv.ListElement;
+import io.approov.internal.reactnative.util.http.sfv.ParseException;
+import io.approov.internal.reactnative.util.http.sfv.Parser;
+import io.approov.internal.reactnative.util.http.sfv.StringItem;
+import io.approov.internal.reactnative.util.http.sfv.Type;
 
 /**
  * @author jricher

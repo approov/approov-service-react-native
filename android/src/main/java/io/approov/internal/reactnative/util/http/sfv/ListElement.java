@@ -1,4 +1,4 @@
-package io.approov.util.http.sfv;
+package io.approov.internal.reactnative.util.http.sfv;
 
 /**
  * Marker interface for things that can be elements of Outer Lists.

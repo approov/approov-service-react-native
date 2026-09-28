@@ -1,4 +1,4 @@
-package io.approov.util.sig;
+package io.approov.internal.reactnative.util.sig;
 
 import androidx.annotation.NonNull;
 
@@ -8,13 +8,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import io.approov.util.http.sfv.Dictionary;
-import io.approov.util.http.sfv.InnerList;
-import io.approov.util.http.sfv.Item;
-import io.approov.util.http.sfv.ListElement;
-import io.approov.util.http.sfv.NumberItem;
-import io.approov.util.http.sfv.Parameters;
-import io.approov.util.http.sfv.StringItem;
+import io.approov.internal.reactnative.util.http.sfv.Dictionary;
+import io.approov.internal.reactnative.util.http.sfv.InnerList;
+import io.approov.internal.reactnative.util.http.sfv.Item;
+import io.approov.internal.reactnative.util.http.sfv.ListElement;
+import io.approov.internal.reactnative.util.http.sfv.NumberItem;
+import io.approov.internal.reactnative.util.http.sfv.Parameters;
+import io.approov.internal.reactnative.util.http.sfv.StringItem;
 
 /**
  * Carrier class for signature parameters.

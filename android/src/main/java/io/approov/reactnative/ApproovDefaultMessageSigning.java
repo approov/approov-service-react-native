@@ -37,11 +37,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.approov.util.http.sfv.ByteSequenceItem;
-import io.approov.util.http.sfv.Dictionary;
-import io.approov.util.sig.ComponentProvider;
-import io.approov.util.sig.SignatureBaseBuilder;
-import io.approov.util.sig.SignatureParameters;
+import io.approov.internal.reactnative.util.http.sfv.ByteSequenceItem;
+import io.approov.internal.reactnative.util.http.sfv.Dictionary;
+import io.approov.internal.reactnative.util.sig.ComponentProvider;
+import io.approov.internal.reactnative.util.sig.SignatureBaseBuilder;
+import io.approov.internal.reactnative.util.sig.SignatureParameters;
 import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okhttp3.RequestBody;

@@ -1,6 +1,6 @@
-package io.approov.util.sig;
+package io.approov.internal.reactnative.util.sig;
 
-import io.approov.util.http.sfv.StringItem;
+import io.approov.internal.reactnative.util.http.sfv.StringItem;
 
 /**
  * @author jricher

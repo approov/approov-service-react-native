@@ -1,4 +1,4 @@
-package io.approov.util.http.sfv;
+package io.approov.internal.reactnative.util.http.sfv;
 
 import java.math.BigDecimal;
 import java.util.Collection;

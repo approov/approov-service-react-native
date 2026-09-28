@@ -1,41 +1,41 @@
-package io.approov.util.http.sfv;
+package io.approov.internal.reactnative.util.http.sfv;
 
 import java.util.Objects;
 
 /**
- * Represents a String.
+ * Represents a Token.
  * 
- * @see <a href= "https://www.rfc-editor.org/rfc/rfc8941.html#string">Section
- *      3.3.3 of RFC 8941</a>
+ * @see <a href= "https://www.rfc-editor.org/rfc/rfc8941.html#token">Section
+ *      3.3.4 of RFC 8941</a>
  */
-public class StringItem implements Item<String> {
+public class TokenItem implements Item<String> {
 
     private final String value;
     private final Parameters params;
 
-    private StringItem(String value, Parameters params) {
+    private TokenItem(String value, Parameters params) {
         this.value = checkParam(Objects.requireNonNull(value, "value must not be null"));
         this.params = Objects.requireNonNull(params, "params must not be null");
     }
 
     /**
-     * Creates a {@link StringItem} instance representing the specified
+     * Creates a {@link TokenItem} instance representing the specified
      * {@code String} value.
      * 
      * @param value
      *            a {@code String} value.
-     * @return a {@link StringItem} representing {@code value}.
+     * @return a {@link TokenItem} representing {@code value}.
      */
-    public static StringItem valueOf(String value) {
-        return new StringItem(value, Parameters.EMPTY);
+    public static TokenItem valueOf(String value) {
+        return new TokenItem(value, Parameters.EMPTY);
     }
 
     @Override
-    public StringItem withParams(Parameters params) {
+    public TokenItem withParams(Parameters params) {
         if (Objects.requireNonNull(params, "params must not be null").isEmpty()) {
             return this;
         } else {
-            return new StringItem(this.value, params);
+            return new TokenItem(this.value, params);
         }
     }
 
@@ -46,22 +46,14 @@ public class StringItem implements Item<String> {
 
     @Override
     public StringBuilder serializeTo(StringBuilder sb) {
-        sb.append('"');
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '\\' || c == '"') {
-                sb.append('\\');
-            }
-            sb.append(c);
-        }
-        sb.append('"');
+        sb.append(this.value);
         params.serializeTo(sb);
         return sb;
     }
 
     @Override
     public String serialize() {
-        return serializeTo(new StringBuilder(2 + value.length())).toString();
+        return serializeTo(new StringBuilder()).toString();
     }
 
     @Override
@@ -70,11 +62,14 @@ public class StringItem implements Item<String> {
     }
 
     private static String checkParam(String value) {
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException("Token can not be empty");
+        }
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if (c < 0x20 || c >= 0x7f) {
+            if ((i == 0 && (c != '*' && !Utils.isAlpha(c))) || (c <= ' ' || c >= 0x7f || "\"(),;<=>?@[\\]{}".indexOf(c) >= 0)) {
                 throw new IllegalArgumentException(
-                        String.format("Invalid character in String at position %d: '%c' (0x%04x)", i, c, (int) c));
+                        String.format("Invalid character in Token at position %d: '%c' (0x%04x)", i, c, (int) c));
             }
         }
         return value;

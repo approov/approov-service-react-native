@@ -1,4 +1,4 @@
-package io.approov.util.http.sfv;
+package io.approov.internal.reactnative.util.http.sfv;
 
 /**
  * Common interface for all {@link Type}s that can carry {@link Parameters}.

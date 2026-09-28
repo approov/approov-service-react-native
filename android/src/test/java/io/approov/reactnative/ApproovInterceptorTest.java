@@ -28,8 +28,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import io.approov.util.sig.ComponentProvider;
-import io.approov.util.sig.SignatureParameters;
+import io.approov.internal.reactnative.util.sig.ComponentProvider;
+import io.approov.internal.reactnative.util.sig.SignatureParameters;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.Protocol;

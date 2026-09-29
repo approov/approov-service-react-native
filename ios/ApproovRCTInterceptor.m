@@ -955,7 +955,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           }
         } else {
           // No delegate provided
-          NSLog(@"[Approov] WARNING: NSURLSession created with a nil delegate! Call stack: %@", [NSThread callStackSymbols]);
+          ApproovLogW(@"NSURLSession created with a nil delegate");
+          ApproovLogD(@"nil delegate session call stack: %@", [NSThread callStackSymbols]);
           session = RSSWCallOriginal(configuration, delegate, queue);
           [interceptor trackObservedSession:session
                           delegateClassName:@"<nil delegate>"

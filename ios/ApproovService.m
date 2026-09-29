@@ -614,7 +614,7 @@ RCT_EXPORT_METHOD(setInstallAttrsInToken : (NSString *)attrs resolver : (
  * handleInterceptorFetchTokenResult in a custom mutator.
  */
 RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
-  ApproovLogI(@"setProceedOnNetworkFail: deprecated no-op - use "
+  ApproovLogW(@"setProceedOnNetworkFail: deprecated no-op - use "
               @"ApproovServiceMutator instead");
 }
 
@@ -729,6 +729,8 @@ RCT_EXPORT_METHOD(addAllowedDelegate : (NSString *)delegatePattern) {
  */
 RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
   setApproovLogLevel((int)level);
+  // the Swift mutator bridge cannot call the C loggers, so it mirrors the level
+  ApproovServiceMutatorBridge.logLevel = level;
   ApproovLogI(@"setLogLevel %d", (int)level);
 }
 
@@ -1010,7 +1012,7 @@ RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
     return;
   }
   NSString *deviceID = [Approov getDeviceID];
-  ApproovLogI(@"getDeviceID: %@", deviceID);
+  ApproovLogD(@"getDeviceID: %@", deviceID);
   if (deviceID == nil) {
     NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                                 code:0
@@ -1467,13 +1469,13 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
   if (!suppressLoggingUnknownURL ||
       ([result status] != ApproovTokenFetchStatusUnknownURL))
-    ApproovLogI(@"token for %@: %@", url, [result loggableToken]);
+    ApproovLogD(@"token for %@: %@", url, [result loggableToken]);
 
   // log if a configuration update is received and call fetchConfig to clear the
   // update state
   if (result.isConfigChanged) {
     [Approov fetchConfig];
-    ApproovLogI(@"dynamic configuration update received");
+    ApproovLogD(@"dynamic configuration update received");
   }
 
   // process the token fetch result
@@ -1625,7 +1627,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
           fetchSecureStringAndWait:[value substringFromIndex:prefix.length
       ]:nil];
       status = [result status];
-      ApproovLogI(@"substituting header %@: %@", header,
+      ApproovLogD(@"substituting header %@: %@", header,
                   [Approov stringFromApproovTokenFetchStatus:status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
@@ -1693,7 +1695,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSString *matchText = [url substringWithRange:[match rangeAtIndex:1]];
       result = [Approov fetchSecureStringAndWait:matchText:nil];
       status = [result status];
-      ApproovLogI(@"substituting query parameter %@: %@", key,
+      ApproovLogD(@"substituting query parameter %@: %@", key,
                   [Approov stringFromApproovTokenFetchStatus:result.status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]

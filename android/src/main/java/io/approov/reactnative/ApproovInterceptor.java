@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.ArrayList;
 
 import android.content.Context;
-import android.util.Log;
 
 import okhttp3.Interceptor;
 import okhttp3.Request;
@@ -79,7 +78,7 @@ public class ApproovInterceptor implements Interceptor {
         String host = request.url().host();
         if (host.equals("localhost")) {
             if (!approovService.isSuppressLoggingUnknownURL())
-                Log.d(TAG, "localhost forwarded: " + url);
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "localhost forwarded: " + url);
             return chain.proceed(request);
         }
 
@@ -103,7 +102,7 @@ public class ApproovInterceptor implements Interceptor {
         if (!approovService.isApproovEnabled()) {
             // INFO (was DEBUG): bypass mode is security-relevant and should be visible in
             // production logs, matching the iOS layer. Message kept identical across platforms.
-            Log.i(TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
+            ApproovService.log(ApproovService.LOG_INFO, TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
             return chain.proceed(request);
         }
 
@@ -111,25 +110,25 @@ public class ApproovInterceptor implements Interceptor {
         String bindingHeader = approovService.getBindingHeader();
         if ((bindingHeader != null) && !bindingHeader.equals("") && request.headers().names().contains(bindingHeader)) {
             Approov.setDataHashInToken(request.header(bindingHeader));
-            Log.d(TAG, "setting data hash for binding header " + bindingHeader);
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "setting data hash for binding header " + bindingHeader);
         }
 
         // request an Approov token for the domain and log unless suppressed
         Approov.TokenFetchResult approovResults = approovService.fetchApproovTokenAndWait(url);
         if (!approovService.isSuppressLoggingUnknownURL()
                 || (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL))
-            Log.d(TAG, "token for " + url + ": " + approovResults.getLoggableToken());
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "token for " + url + ": " + approovResults.getLoggableToken());
 
         // Acknowledge configuration changes before reading the latest pins. Refresh only once
         // if both flags are set. The shared network interceptor will check this same request
         // against the new pins, so no client rebuild or forced retry is needed.
         boolean configChanged = approovResults.isConfigChanged();
         if (configChanged) {
-            Log.d(TAG, "dynamic config update received");
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "dynamic config update received");
             Approov.fetchConfig();
         }
         if (configChanged || approovResults.isForceApplyPins()) {
-            Log.d(TAG, "refreshing shared pins before network verification");
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "refreshing shared pins before network verification");
             approovService.rebuildPins();
         }
 
@@ -190,7 +189,7 @@ public class ApproovInterceptor implements Interceptor {
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
-                Log.d(TAG, "substituting header: " + header + ", " + approovResults.getStatus().toString());
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "substituting header: " + header + ", " + approovResults.getStatus().toString());
 
                 // check if the substitution should proceed
                 try {
@@ -223,7 +222,7 @@ public class ApproovInterceptor implements Interceptor {
                 // Note: we can only support one occurrence of the query parameter
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
-                Log.d(TAG, "substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
 
                 // check if the substitution should proceed
                 try {

@@ -17,6 +17,10 @@ static BOOL gIsDefaultMutator = YES;
 
 @implementation ApproovServiceMutatorBridge
 
+static NSInteger sStubLogLevel = 2;
++ (NSInteger)logLevel { return sStubLogLevel; }
++ (void)setLogLevel:(NSInteger)logLevel { sStubLogLevel = logLevel; }
+
 + (instancetype)shared {
   static ApproovServiceMutatorBridge *sharedBridge = nil;
   static dispatch_once_t onceToken = 0;

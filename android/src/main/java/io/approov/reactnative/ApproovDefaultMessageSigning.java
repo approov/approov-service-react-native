@@ -18,7 +18,6 @@
 package io.approov.reactnative;
 
 import android.util.Base64;
-import android.util.Log;
 
 import io.approov.internal.reactnative.bouncycastle.asn1.ASN1InputStream;
 import io.approov.internal.reactnative.bouncycastle.asn1.ASN1Integer;
@@ -233,9 +232,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      */
     private Request proceedUnsigned(Request request, String reason, Throwable cause) {
         if (cause == null) {
-            Log.e(TAG, reason);
+            ApproovService.log(ApproovService.LOG_ERROR, TAG, reason);
         } else {
-            Log.e(TAG, reason, cause);
+            ApproovService.log(ApproovService.LOG_ERROR, TAG, reason, cause);
         }
         return request;
     }
@@ -394,7 +393,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
                 signedBuilder.header("Signature-Base-Digest", digestHeader);
             } catch (RuntimeException | NoSuchAlgorithmException e) {
-                Log.e(TAG, "Failed to add debug signature base digest", e);
+                ApproovService.log(ApproovService.LOG_ERROR, TAG, "Failed to add debug signature base digest", e);
             }
         } else {
             signedBuilder.removeHeader("Signature-Base-Digest");

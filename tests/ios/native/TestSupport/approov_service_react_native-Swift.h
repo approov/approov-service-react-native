@@ -24,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign useAccountSigning:(BOOL)useAccountSigning;
 - (void)resetToDefault;
 @property (nonatomic, readonly) BOOL isDefaultMutator;
+@property (class, nonatomic) NSInteger logLevel;
 
 @end
 

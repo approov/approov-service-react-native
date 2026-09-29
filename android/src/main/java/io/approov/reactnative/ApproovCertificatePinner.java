@@ -21,7 +21,6 @@
 
 package io.approov.reactnative;
 
-import android.util.Log;
 
 import java.io.IOException;
 import java.util.List;
@@ -74,7 +73,7 @@ public class ApproovCertificatePinner {
                         pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
 
                     // log the number of pins applied
-                    Log.d(TAG, "applied " + String.valueOf(pins.size()) + " pins to host domain " + domain);
+                    ApproovService.log(ApproovService.LOG_DEBUG, TAG, "applied " + String.valueOf(pins.size()) + " pins to host domain " + domain);
                 }
             }
         }

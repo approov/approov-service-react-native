@@ -1,8 +1,20 @@
 import Foundation
 import Approov
+import os.log
 
 @objc public class ApproovServiceMutatorBridge: NSObject {
     @objc public static let shared = ApproovServiceMutatorBridge()
+
+    /// Mirrors the level set through ApproovService.setLogLevel, pushed from ApproovService.m,
+    /// so bridge messages follow the same gate, prefix and os_log types as ApproovUtils.m.
+    /// Values match ApproovService.Log in JS: EXTREME 0, DEBUG 1, INFO 2, WARN 3, ERROR 4, NONE 5.
+    @objc public static var logLevel: Int = 2
+
+    /// Error-level logging for the Swift sources of this layer, gated by logLevel.
+    static func logError(_ message: String, component: String = "MutatorBridge") {
+        guard logLevel <= 4 else { return }
+        os_log("%{public}@", log: .default, type: .error, "ApproovService ERROR: [\(component)] " + message)
+    }
     
     private let mutatorLock = NSLock()
     private var _serviceMutator: ApproovServiceMutator
@@ -131,7 +143,7 @@ import Approov
             request.allHTTPHeaderFields = processedRequest.allHTTPHeaderFields
             return true
         } catch {
-            NSLog("[ApproovServiceMutatorBridge] Error processing request: %@", error.localizedDescription)
+            ApproovServiceMutatorBridge.logError("Error processing request: \(error.localizedDescription)")
             if errorPointer != nil {
                 errorPointer?.pointee = error as NSError
             }
@@ -141,7 +153,7 @@ import Approov
     
     @objc public func handleInterceptorFetchTokenResult(_ result: Any, url: String, errorPointer: NSErrorPointer) -> Bool {
         guard let fetchResult = result as? ApproovTokenFetchResult else {
-            NSLog("[ApproovServiceMutatorBridge] Invalid result type passed to handleInterceptorFetchTokenResult")
+            ApproovServiceMutatorBridge.logError("Invalid result type passed to handleInterceptorFetchTokenResult")
             return false
         }
         
@@ -159,7 +171,7 @@ import Approov
                                                                 header: String,
                                                                 errorPointer: NSErrorPointer) -> Bool {
         guard let fetchResult = result as? ApproovTokenFetchResult else {
-            NSLog("[ApproovServiceMutatorBridge] Invalid result type passed to handleInterceptorHeaderSubstitutionResult")
+            ApproovServiceMutatorBridge.logError("Invalid result type passed to handleInterceptorHeaderSubstitutionResult")
             return false
         }
 
@@ -177,7 +189,7 @@ import Approov
                                                                     queryKey: String,
                                                                     errorPointer: NSErrorPointer) -> Bool {
         guard let fetchResult = result as? ApproovTokenFetchResult else {
-            NSLog("[ApproovServiceMutatorBridge] Invalid result type passed to handleInterceptorQueryParamSubstitutionResult")
+            ApproovServiceMutatorBridge.logError("Invalid result type passed to handleInterceptorQueryParamSubstitutionResult")
             return false
         }
 

@@ -172,13 +172,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // no reference back to the service or ReactContext and does no SDK work in its constructor.
     private final ApproovPinningInterceptor pinningInterceptor = new ApproovPinningInterceptor();
 
-    // Log levels matching iOS/ApproovUtils
-    private static final int LOG_EXTREME = 0;
-    private static final int LOG_DEBUG = 1;
-    private static final int LOG_INFO = 2;
-    private static final int LOG_WARN = 3;
-    private static final int LOG_ERROR = 4;
-    private static final int LOG_NONE = 5;
+    // Log levels matching iOS/ApproovUtils and ApproovService.Log in JS
+    static final int LOG_EXTREME = 0;
+    static final int LOG_DEBUG = 1;
+    static final int LOG_INFO = 2;
+    static final int LOG_WARN = 3;
+    static final int LOG_ERROR = 4;
+    static final int LOG_NONE = 5;
 
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
@@ -227,9 +227,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             mutator = buildDefaultServiceMutator();
         }
         serviceMutator = mutator;
-        if (currentLogLevel <= LOG_DEBUG) {
-            Log.d(TAG, "Applied ApproovServiceMutator: " + mutator.toString());
-        }
+        log(LOG_DEBUG, TAG, "Applied ApproovServiceMutator: " + mutator.toString());
     }
 
     /**
@@ -299,8 +297,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             } else {
                 setServiceMutator(new PolicyMutator(mask, sign, "account".equals(signatureMode)));
             }
-            if (currentLogLevel <= LOG_DEBUG)
-                Log.d(TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
+            log(LOG_DEBUG, TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
             promise.resolve(null);
         } catch (Exception e) {
             promise.reject("setServiceMutatorType", e.getMessage(), e);
@@ -328,7 +325,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(LOG_INFO, TAG, "setLogLevel " + level);
     }
 
-    private void log(int level, String tag, String msg) {
+    static void log(int level, String tag, String msg) {
         log(level, tag, msg, null);
     }
 
@@ -364,7 +361,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             log(LOG_DEBUG, tag, "uninitialized forwarded: " + url);
     }
 
-    private void log(int level, String tag, String msg, Throwable tr) {
+    /**
+     * The single level-gated sink for every native log line in this layer, so setLogLevel
+     * controls all of them. Other classes call it instead of android.util.Log.
+     */
+    static void log(int level, String tag, String msg, Throwable tr) {
         if (level < currentLogLevel)
             return;
 
@@ -645,7 +646,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 log(LOG_DEBUG, TAG, "setCustomClientBuilder not available");
             }
         } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "setCustomClientBuilder failed: " + e.getMessage());
+            log(LOG_WARN, TAG, "setCustomClientBuilder failed: " + e.getMessage());
         }
 
         // add the Approov client builder to any rn-fetch-blob instances
@@ -707,7 +708,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             return (OkHttpClientFactory) readClassLevelField(OkHttpClientProvider.class, "factory", "sFactory");
         } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "could not read the installed OkHttpClientFactory: " + e.getMessage());
+            log(LOG_WARN, TAG, "could not read the installed OkHttpClientFactory: " + e.getMessage());
             return null;
         }
     }
@@ -722,7 +723,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             return readClassLevelField(NetworkingModule.class, "customClientBuilder", "mCustomClientBuilder");
         } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "could not read the registered custom client builder: " + e.getMessage());
+            log(LOG_WARN, TAG, "could not read the registered custom client builder: " + e.getMessage());
             return null;
         }
     }
@@ -1065,12 +1066,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 // binding ceasing to apply is the security-relevant one, so it is called
                 // out separately from the rest.
                 if (bindingHeader != null)
-                    Log.w(TAG, "initialization is discarding the binding header - re-apply " +
+                    log(LOG_WARN, TAG, "initialization is discarding the binding header - re-apply " +
                             "setBindingHeader after initialize or tokens will no longer be " +
                             "bound to that header value");
                 if (!substitutionHeaders.isEmpty() || !substitutionQueryParams.isEmpty()
                         || !exclusionURLRegexs.isEmpty())
-                    Log.w(TAG, "initialization is discarding runtime configuration " +
+                    log(LOG_WARN, TAG, "initialization is discarding runtime configuration " +
                             "(substitution headers/query params and exclusion regexes) - " +
                             "re-apply it after initialize if it is still required");
                 isInitialized = false;
@@ -1086,7 +1087,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 suppressLoggingUnknownURL = false;
                 sessionMetadataCollectionEnabled = true;
                 if ((serviceMutator != null) && (serviceMutator != ApproovServiceMutator.DEFAULT))
-                    Log.w(TAG, "initialization is discarding a custom service mutator - re-apply " +
+                    log(LOG_WARN, TAG, "initialization is discarding a custom service mutator - re-apply " +
                             "setServiceMutatorType (or setServiceMutator) after initialize if a " +
                             "custom policy is still required");
                 serviceMutator = buildDefaultServiceMutator();
@@ -1262,7 +1263,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public synchronized void setProceedOnNetworkFail() {
-        log(LOG_DEBUG, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
+        log(LOG_WARN, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
     }
 
     /**
@@ -1311,7 +1312,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         try {
             Approov.setDevKey(devKey);
-            log(LOG_DEBUG, TAG, "setDevKey");
+            log(LOG_INFO, TAG, "setDevKey");
             promise.resolve(null);
         } catch (IllegalStateException e) {
             promise.reject("setDevKey", "IllegalState: " + e.getMessage(), getErrorUserInfo(false));

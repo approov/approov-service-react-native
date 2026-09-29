@@ -434,6 +434,24 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
+    public void initializeCommitsNoStateWhenPinsCannotBeBuilt() {
+        ApproovService service = newService();
+        approovStatic.when(() -> Approov.getPins("public-key-sha256"))
+            .thenThrow(new IllegalStateException("pins unavailable"));
+        Promise promise = mock(Promise.class);
+
+        service.initialize("config-one", null, promise);
+
+        // rejected, and for the pin failure, not some other reason
+        verify(promise).reject(org.mockito.ArgumentMatchers.eq("initialize"),
+            org.mockito.ArgumentMatchers.contains("pins unavailable"), (com.facebook.react.bridge.WritableMap) any());
+        // the service must not report initialized while holding the previous (empty) pins,
+        // or requests would carry tokens over connections Approov does not pin
+        assertFalse(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+    }
+
+    @Test
     public void updateClientFactoryWrapExistingStripsDuplicateApproovInterceptors() {
         ApproovService service = newService();
         Promise promise = mock(Promise.class);

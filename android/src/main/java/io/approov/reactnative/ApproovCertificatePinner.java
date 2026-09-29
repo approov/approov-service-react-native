@@ -43,8 +43,19 @@ public class ApproovCertificatePinner {
      * @return CertificatePinner with Approov pins
      */
     public static CertificatePinner build(ApproovService approovService) {
+        return build(approovService.isApproovEnabled());
+    }
+
+    /**
+     * Builds a certificate pinner from the Approov SDK pins without reading service state, so
+     * initialization can build the pins for a new configuration before committing it.
+     *
+     * @param approovEnabled true if the Approov SDK is active and its pins should be applied
+     * @return CertificatePinner with Approov pins, or an empty pinner if not enabled
+     */
+    static CertificatePinner build(boolean approovEnabled) {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
-        if (approovService.isApproovEnabled()) {
+        if (approovEnabled) {
             // add pins if Approov has been initialized
             Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
             for (Map.Entry<String, List<String>> entry: allPins.entrySet()) {

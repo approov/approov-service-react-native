@@ -1055,6 +1055,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // without an Approov token. The platform SDK call above is intentionally left
             // outside the lock so its network work never blocks those getters. iOS performs
             // the equivalent reset inside @synchronized(initializerLock).
+            // Build the pins for the new configuration before committing any state. If they
+            // cannot be built, nothing is committed and the promise rejects: the service must
+            // never report initialized while still holding the previous pins, or requests
+            // would carry tokens over connections Approov does not pin.
+            CertificatePinner pins = ApproovCertificatePinner.build(!config.isEmpty());
             synchronized (this) {
                 // Warn about runtime configuration that is about to be discarded. Token
                 // binding ceasing to apply is the security-relevant one, so it is called
@@ -1085,6 +1090,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                             "setServiceMutatorType (or setServiceMutator) after initialize if a " +
                             "custom policy is still required");
                 serviceMutator = buildDefaultServiceMutator();
+                pinningInterceptor.installPins(pins);
                 initialConfig = config;
                 isInitialized = true;
             }
@@ -1094,7 +1100,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
             } else {
                 log(LOG_INFO, TAG, "initialized without Approov SDK");
             }
-            rebuildPins();
             if (pendingPrefetch) {
                 prefetch();
                 pendingPrefetch = false;

@@ -48,6 +48,11 @@ public final class ApproovPinningInterceptor implements Interceptor {
         certificatePinner = ApproovCertificatePinner.build(service);
     }
 
+    // Installs a pin set built in advance, so initialization can publish pins and state together.
+    synchronized void installPins(CertificatePinner pins) {
+        certificatePinner = pins;
+    }
+
     CertificatePinner getCertificatePinner() {
         return certificatePinner;
     }

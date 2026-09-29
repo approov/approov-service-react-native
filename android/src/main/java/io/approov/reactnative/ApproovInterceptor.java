@@ -96,7 +96,7 @@ public class ApproovInterceptor implements Interceptor {
 
         // Protected request paths MUST await initialize(). There is no startup grace period.
         if (!approovService.isInitialized()) {
-            Log.e(TAG, "uninitialized forwarded (await ApproovService.initialize() before protected requests): " + url);
+            approovService.logUninitializedForward(TAG, url);
             return chain.proceed(request);
         }
 

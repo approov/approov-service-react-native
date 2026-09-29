@@ -1399,8 +1399,15 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
   // Protected request paths MUST await initialize(). There is no startup grace period.
   if (!isInitialized) {
-    ApproovLogE(@"Uninitialized request: await ApproovService.initialize() before protected requests");
-    ApproovLogI(@"uninitialized forwarded: %@", url);
+    // Warn once with the guidance; later early requests (Metro's own traffic included) log
+    // at debug so the warning is not repeated for every request.
+    static dispatch_once_t uninitializedForwardReported;
+    __block BOOL firstUninitializedForward = NO;
+    dispatch_once(&uninitializedForwardReported, ^{ firstUninitializedForward = YES; });
+    if (firstUninitializedForward)
+      ApproovLogW(@"uninitialized forwarded (await ApproovService.initialize() before protected requests): %@", url);
+    else
+      ApproovLogD(@"uninitialized forwarded: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed

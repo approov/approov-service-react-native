@@ -64,6 +64,7 @@ import java.lang.reflect.Modifier;
 import java.net.CookieHandler;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Properties;
 import java.util.Map;
@@ -343,6 +344,24 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     void logInfo(String tag, String msg) {
         log(LOG_INFO, tag, msg);
+    }
+
+    // set once the first request forwarded before initialize() has been reported, so the
+    // warning is not repeated for every early request (including Metro's own dev traffic)
+    private final AtomicBoolean uninitializedForwardReported = new AtomicBoolean(false);
+
+    /**
+     * Reports a request forwarded before initialize() completed, through the level-gated
+     * logger: a WARN with the guidance for the first such request, DEBUG for the rest.
+     *
+     * @param tag the logging tag
+     * @param url the forwarded URL
+     */
+    void logUninitializedForward(String tag, String url) {
+        if (uninitializedForwardReported.compareAndSet(false, true))
+            log(LOG_WARN, tag, "uninitialized forwarded (await ApproovService.initialize() before protected requests): " + url);
+        else
+            log(LOG_DEBUG, tag, "uninitialized forwarded: " + url);
     }
 
     private void log(int level, String tag, String msg, Throwable tr) {

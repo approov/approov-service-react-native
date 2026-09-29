@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'io.approov.reproduction'
+    compileSdk = rootProject.ext.compileSdkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+    defaultConfig {
+        applicationId = 'io.approov.reproduction'
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = 1
+        versionName = '1.0'
+    }
+    buildTypes {
+        release {
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    def integration = providers.gradleProperty('integration').getOrElse('both')
+    if (integration != 'okhttp') {
+        implementation project(':approov-react-native')
+    }
+    if (integration != 'react-native') {
+        implementation 'io.approov:service.okhttp:3.5.8'
+    }
+}

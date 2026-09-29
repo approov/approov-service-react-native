@@ -134,6 +134,15 @@ jobs:
           TESTING_REPLY_URL: ${{ env.TESTING_REPLY_URL }}
           TESTING_REPLY_URL_UNPROTECTED: ${{ env.TESTING_REPLY_URL_UNPROTECTED }}
 
+      - name: Set up Gradle for combined-service packaging check
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.0.0'
+
+      - name: Check release packaging with both Android service layers
+        working-directory: approov-service-react-native/tests/combined-packaging
+        run: gradle :app:assembleRelease -Pintegration=both --console=plain
+
       - name: Run iOS native tests
         working-directory: approov-service-react-native
         run: npm run test:ios

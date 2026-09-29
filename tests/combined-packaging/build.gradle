@@ -1,0 +1,23 @@
+plugins {
+    id 'com.android.application' version '8.13.0' apply false
+    id 'com.android.library' version '8.13.0' apply false
+}
+
+ext {
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+    minSdkVersion = 24
+    buildToolsVersion = '35.0.0'
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    configurations.configureEach {
+        // The service declares react-android:+. Pin the reported React Native
+        // version at the consuming app level without changing the service.
+        resolutionStrategy.force 'com.facebook.react:react-android:0.83.10'
+    }
+}

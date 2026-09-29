@@ -53,3 +53,8 @@
     *** INSTANCE;
     public static void setCustomClientBuilder(...);
 }
+
+# getPinningDiagnostics reports interceptor class names; keep Approov's own readable in
+# minified builds. Shrinking is still allowed.
+-keepnames class io.approov.reactnative.ApproovInterceptor
+-keepnames class io.approov.reactnative.ApproovPinningInterceptor

@@ -17,3 +17,23 @@
 -keepnames class com.criticalblue.approovsdk.** {
     native <methods>;
 }
+
+# ApproovService resolves these React Native members by name at runtime. Keep both
+# Java and Kotlin layouts: R8 cannot infer the names through resolveField().
+-keepclassmembers class com.facebook.react.modules.network.OkHttpClientProvider {
+    *** sFactory;
+    *** factory;
+    *** INSTANCE;
+}
+-keepclassmembers class com.facebook.react.modules.network.NetworkingModule {
+    *** mCustomClientBuilder;
+    *** customClientBuilder;
+    *** mClient;
+    *** client;
+    *** mCookieJarContainer;
+    *** cookieJarContainer;
+    *** mCookieHandler;
+    *** cookieHandler;
+    *** INSTANCE;
+    public static void setCustomClientBuilder(...);
+}

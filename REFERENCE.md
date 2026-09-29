@@ -500,6 +500,6 @@ Manually forces the Approov SDK to rebuild and re-register its network client ho
 ApproovService.updateClientFactory(wrapExisting: boolean);
 ```
 
-* `wrapExisting` (boolean): If `true`, Approov will copy the existing client and its interceptors, preserving the functionality of the other SDK. If `false`, a completely fresh OkHttpClient is built. Usually, you should pass `true`.
+* `wrapExisting` (boolean): If `true`, Approov will copy the existing client and its interceptors, preserving the functionality of the other SDK. If `false`, a completely fresh OkHttpClient is built. Usually, you should pass `true`. On Android, when another SDK installed its own `OkHttpClientFactory` after React Native built its network client, `true` builds the new client from that factory, as the next reload would, so the other SDK's settings take precedence over settings present only on the previous client. React Native's cookie handling is kept either way.
 
 This function returns a `Promise` that resolves to a boolean `true` when the operation is successfully completed.

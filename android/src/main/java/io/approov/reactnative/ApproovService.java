@@ -2199,6 +2199,28 @@ public class ApproovService extends ReactContextBaseJavaModule {
             if (currentClient == null)
                 currentClient = OkHttpClientProvider.getOkHttpClient();
 
+            // Another SDK may have replaced the factory after React Native built its live
+            // client, which is the case this recovery is documented for. The live client
+            // cannot contain that factory's settings, so build from the factory, as the next
+            // context recreation would, keeping React Native's cookie bridge from the live
+            // client. When the installed factory is our own, fall through and copy the live
+            // client, which already carries anything registered before Approov.
+            OkHttpClientFactory installedFactory = wrapExisting ? readInstalledOkHttpClientFactory() : null;
+            if ((installedFactory != null) && !(installedFactory instanceof ApproovOwnedFactory)) {
+                ApproovOkHttpClientFactory factory = new ApproovOkHttpClientFactory(installedFactory,
+                        new ApproovClientBuilder(this, null));
+                OkHttpClient newClient = factory.createNewNetworkModuleClient().newBuilder()
+                        .cookieJar(currentClient.cookieJar())
+                        .build();
+                OkHttpClientProvider.setOkHttpClientFactory(factory);
+                retirePreviousFactory(factory);
+                setNetworkingModuleClient(networkingModule, newClient);
+                log(LOG_INFO, TAG, "updateClientFactory: success (wrapped factory "
+                        + installedFactory.getClass().getName() + ")");
+                promise.resolve(true);
+                return;
+            }
+
             // if we are wrapping the existing client then we use it as the basis for the
             // new one
             OkHttpClient.Builder builder;
@@ -2234,20 +2256,25 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClientProvider.setOkHttpClientFactory(factory);
             retirePreviousFactory(factory);
 
-            // we also need to use reflection to set the client on the NetworkingModule
-            // since it has already grasped a reference to the previous client
-            try {
-                networkingModuleClientField().set(networkingModule, newClient);
-            } catch (Exception e) {
-                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
-                // we determine this is not a fatal error as the provider update should work for
-                // future requests
-            }
+            setNetworkingModuleClient(networkingModule, newClient);
 
             log(LOG_INFO, TAG, "updateClientFactory: success");
             promise.resolve(true);
         } catch (Exception e) {
             promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
+     * Sets the client on the NetworkingModule by reflection, since it has already grasped a
+     * reference to the previous client. A failure is logged but not fatal: the provider
+     * update still applies to clients created later.
+     */
+    private void setNetworkingModuleClient(NetworkingModule networkingModule, OkHttpClient newClient) {
+        try {
+            networkingModuleClientField().set(networkingModule, newClient);
+        } catch (Exception e) {
+            log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
         }
     }
 

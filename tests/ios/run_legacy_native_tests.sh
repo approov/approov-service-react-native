@@ -54,7 +54,7 @@ xcrun clang \
   -I"$REPO_ROOT" \
   -I"$REPO_ROOT/ios" \
   -I"$TEST_ROOT/TestSupport" \
-  "$TEST_ROOT/ApproovNativeTests.m" \
+  "$TEST_ROOT/ApproovNativeTestsCombined.m" \
   "$TEST_ROOT/TestSupport/Approov/Approov.m" \
   "$TEST_ROOT/TestSupport/ApproovServiceMutatorBridgeStub.m" \
   "$TEST_ROOT/TestSupport/ApproovPinningDelegateStub.m" \
@@ -63,7 +63,6 @@ xcrun clang \
   "$REPO_ROOT/ios/ApproovMockURLProtocol.m" \
   "$REPO_ROOT/ios/RSSwizzle.m" \
   "$REPO_ROOT/ios/ApproovRCTInterceptor.m" \
-  "$REPO_ROOT/ios/ApproovService.m" \
   -framework Foundation \
   -framework Security \
   -o "$BINARY"

@@ -379,6 +379,8 @@ If you call `ApproovService.initialize()` yourself rather than through `ApproovP
 
 > **iOS note:** `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status on iOS, so those two bits are inert there (harmless if included).
 
+**Cleartext `http://` is not supported.** The Approov SDK only accepts `https://` URLs; `localhost` is the one exception and is passed through untouched. After initialization, an `http://` request to any other host is reported as `BAD_URL` and the default policy blocks it, whether or not the host is one of your protected API domains. Use `https://`, or exclude a host that must stay cleartext with `addExclusionURLRegex`.
+
 **Development-only: let Metro's cleartext bundle through.** Metro serves the dev bundle over cleartext `http://`, which the SDK reports as `BAD_URL`. In development builds you can forward it with the dedicated preset (issue #30):
 
 ```javascript

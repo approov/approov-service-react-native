@@ -1271,6 +1271,27 @@ static void TestInterceptRequestForwardsLocalhost(void) {
                      @"localhost should be forwarded unchanged");
 }
 
+static void TestInterceptRequestForwardsDevelopmentHostsInDebug(void) {
+  // The suite compiles with -DDEBUG=1, so this exercises the debug-only path.
+  ApproovService *service = FreshService();
+  for (NSString *url in @[ @"http://127.0.0.1:8081/status", @"http://[::1]:8081/status" ]) {
+    NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
+
+    ApproovInterceptorResult *result = [service interceptRequest:request];
+
+    AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                        @"development host should proceed in a debug build");
+    AssertEqualObjects(@"development host forwarded", result.message,
+                       @"development host should be forwarded before any Approov processing");
+  }
+
+  NSURLRequest *lan =
+      [NSURLRequest requestWithURL:[NSURL URLWithString:@"http://192.168.1.10:8081/status"]];
+  ApproovInterceptorResult *lanResult = [service interceptRequest:lan];
+  AssertTrue(![@"development host forwarded" isEqualToString:lanResult.message],
+             @"a LAN address is not a development host and must not be skipped");
+}
+
 static void TestInterceptRequestForwardsWhenUninitialized(void) {
   ApproovService *service = FreshService();
   NSURLRequest *request =
@@ -1589,6 +1610,7 @@ int main(void) {
       ^{ TestSetBindingHeaderEmpty(); },
       ^{ TestInterceptRequestFailsOnBadURL(); },
       ^{ TestInterceptRequestForwardsLocalhost(); },
+      ^{ TestInterceptRequestForwardsDevelopmentHostsInDebug(); },
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
       ^{ TestInterceptRequestAddsTokenTrace(); },
       ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },

@@ -1399,6 +1399,26 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
               withMessage:@"localhost forwarded"];
   }
 
+#if DEBUG
+  // In a debug build, also forward the loopback addresses used to reach the development
+  // machine, such as Metro on 127.0.0.1. They are never Approov-protected and, being
+  // cleartext, would otherwise cost a token fetch that returns BAD_URL. Release builds
+  // do not skip them.
+  static NSSet<NSString *> *debugDevelopmentHosts;
+  static dispatch_once_t debugDevelopmentHostsOnce;
+  dispatch_once(&debugDevelopmentHostsOnce, ^{
+    debugDevelopmentHosts = [NSSet setWithObjects:@"127.0.0.1", @"::1", nil];
+  });
+  if ([debugDevelopmentHosts containsObject:host]) {
+    if (!suppressLoggingUnknownURL)
+      ApproovLogD(@"development host forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"development host forwarded"];
+  }
+#endif
+
   // Protected request paths MUST await initialize(). There is no startup grace period.
   if (!isInitialized) {
     // Warn once with the guidance; later early requests (Metro's own traffic included) log

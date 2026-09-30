@@ -31,6 +31,10 @@ import java.util.regex.Matcher;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import android.content.Context;
 
@@ -44,6 +48,11 @@ import com.criticalblue.approovsdk.Approov;
 public class ApproovInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovService";
+
+    // loopback and emulator aliases for the development machine, forwarded untouched only in
+    // debuggable apps: 10.0.2.2 is the Android emulator, 10.0.3.2 is Genymotion
+    static final Set<String> DEBUG_DEVELOPMENT_HOSTS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("127.0.0.1", "::1", "10.0.2.2", "10.0.3.2")));
 
     // service wrapping Approov SDK
     private ApproovService approovService;
@@ -91,6 +100,15 @@ public class ApproovInterceptor implements Interceptor {
         if (host.equals("localhost")) {
             if (!approovService.isSuppressLoggingUnknownURL())
                 ApproovService.log(ApproovService.LOG_DEBUG, TAG, "localhost forwarded: " + url);
+            return chain.proceed(request);
+        }
+
+        // In a debug build, also forward the other addresses used to reach the development
+        // machine, such as Metro on the emulator at 10.0.2.2. They are never Approov-protected
+        // and, being cleartext, would otherwise cost a token fetch that returns BAD_URL.
+        if (DEBUG_DEVELOPMENT_HOSTS.contains(host) && approovService.isAppDebuggable()) {
+            if (!approovService.isSuppressLoggingUnknownURL())
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "development host forwarded: " + url);
             return chain.proceed(request);
         }
 

@@ -22,6 +22,7 @@
 package io.approov.reactnative;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
@@ -105,6 +106,9 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     // the application context used for certain framework calls
     private Context applicationContext;
+
+    // true if the host app is debuggable, which gates forwarding of local development hosts
+    private final boolean appDebuggable;
 
     // flag indicating if there is a pending prefetch to be executed upon
     // initialization
@@ -501,6 +505,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // initialize the service state
         super(reactContext);
         applicationContext = reactContext;
+        appDebuggable = isDebuggable(reactContext);
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
         sessionMetadataCollectionEnabled = true;
@@ -1378,6 +1383,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
         diagnostics.putBoolean("enabled", sessionMetadataCollectionEnabled);
         diagnostics.putString("message", "Android does not retain an extended session ledger.");
         promise.resolve(diagnostics);
+    }
+
+    /**
+     * Reads the debuggable flag of the host app. This reflects the app's build type, not this
+     * library's, so it is true for a React Native debug build and false for a release build.
+     *
+     * @param context the context of the host app, which may be null in tests
+     * @return true if the app is debuggable
+     */
+    private static boolean isDebuggable(Context context) {
+        if (context == null)
+            return false;
+        ApplicationInfo info = context.getApplicationInfo();
+        return (info != null) && ((info.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
+    }
+
+    /**
+     * Gets whether the host app is debuggable. The interceptor only forwards local development
+     * hosts, such as the Android emulator alias for the development machine, when this is true.
+     *
+     * @return true if the host app is debuggable
+     */
+    boolean isAppDebuggable() {
+        return appDebuggable;
     }
 
     /**

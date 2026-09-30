@@ -8,6 +8,7 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -227,6 +228,46 @@ public class ApproovInterceptorTest {
             assertEquals(request, response.request());
             approov.verifyNoInteractions();
         }
+    }
+
+    @Test
+    public void debugBuildForwardsDevelopmentHostsWithoutApproov() throws Exception {
+        when(service.isAppDebuggable()).thenReturn(true);
+        String[] urls = {
+            "http://10.0.2.2:8081/symbolicate",
+            "http://10.0.3.2:8081/index.bundle?platform=android",
+            "http://127.0.0.1:8081/status",
+            "http://[::1]:8081/status"
+        };
+
+        for (String url : urls) {
+            Request request = request(url);
+            when(chain.request()).thenReturn(request);
+
+            try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+                Response response = interceptor.intercept(chain);
+
+                assertEquals(url, 200, response.code());
+                assertSame(url, request, response.request());
+                approov.verifyNoInteractions();
+            }
+        }
+        verify(service, never()).fetchApproovTokenAndWait(anyString());
+    }
+
+    @Test
+    public void releaseBuildStillProcessesDevelopmentHosts() throws Exception {
+        when(service.isAppDebuggable()).thenReturn(false);
+        String url = "http://10.0.2.2:8081/symbolicate";
+        when(chain.request()).thenReturn(request(url));
+        Approov.TokenFetchResult unknownUrl = result(Approov.TokenFetchStatus.UNKNOWN_URL);
+
+        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+            when(service.fetchApproovTokenAndWait(url)).thenReturn(unknownUrl);
+
+            interceptor.intercept(chain);
+        }
+        verify(service).fetchApproovTokenAndWait(url);
     }
 
     @Test(timeout = 1000)

@@ -13,6 +13,10 @@
   return [[self alloc] initWithDelegate:delegate approovService:approovService];
 }
 
++ (void)recordPreApproovRequest:(NSURLRequest *)original
+             onProcessedRequest:(NSMutableURLRequest *)processed {
+}
+
 - (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
                   approovService:(ApproovService *)approovService {
   self = [super init];

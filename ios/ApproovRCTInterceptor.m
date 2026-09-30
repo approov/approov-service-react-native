@@ -745,6 +745,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                               withAction:ApproovInterceptorActionFail
                                              withMessage:message];
     }
+    // Remember the app's own headers and URL so a redirect can take back out
+    // everything Approov added for this destination.
+    [PinningURLSessionDelegate recordPreApproovRequest:request
+                                    onProcessedRequest:finalRequest];
   }
 
   NSString *tokenAfterMutator =

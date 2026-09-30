@@ -1526,6 +1526,236 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
                @"Original config should remain functional after a different-config rejection");
 }
 
+// A caller delegate implementing only two optional callbacks, as an app's (or a
+// networking library's) delegate may. It implements neither
+// didReceiveResponse:completionHandler: nor willPerformHTTPRedirection:, so the
+// pinning delegate must complete those handlers itself.
+@interface ApproovPartialRedirectProbeDelegate : NSObject <NSURLSessionDataDelegate>
+@property(nonatomic, strong) NSMutableData *data;
+@property(nonatomic, strong) dispatch_semaphore_t done;
+@property(nonatomic, strong) NSError *error;
+@end
+
+@implementation ApproovPartialRedirectProbeDelegate
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _data = [NSMutableData data];
+    _done = dispatch_semaphore_create(0);
+  }
+  return self;
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
+  [_data appendData:data];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+  _error = error;
+  dispatch_semaphore_signal(_done);
+}
+@end
+
+// A caller delegate that does implement the redirect callback and records the
+// request it is offered.
+@interface ApproovFullRedirectProbeDelegate : ApproovPartialRedirectProbeDelegate
+@property(nonatomic, strong) NSURLRequest *offeredRedirect;
+@end
+
+@implementation ApproovFullRedirectProbeDelegate
+- (void)URLSession:(NSURLSession *)session
+                          task:(NSURLSessionTask *)task
+    willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+                    newRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSURLRequest *))completionHandler {
+  _offeredRedirect = request;
+  completionHandler(request);
+}
+@end
+
+// Initializes a protected service with header and query substitution and an
+// interceptor that wraps sessions of the probe delegates.
+static ApproovService *RedirectTestService(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@"\"initialSecureStrings\":{\"header-key\":\"header-secret\",\"query-key\":\"query-secret\"}");
+  InitializeService(service, @"reinit");
+  [service addSubstitutionHeader:@"Api-Key" requiredPrefix:@""];
+  [service addSubstitutionQueryParam:@"api_key"];
+  [ApproovRCTInterceptor startWithApproovService:service];
+  [ApproovRCTInterceptor addAllowedDelegate:@"ApproovPartialRedirectProbeDelegate"];
+  [ApproovRCTInterceptor addAllowedDelegate:@"ApproovFullRedirectProbeDelegate"];
+  return service;
+}
+
+static NSMutableURLRequest *AppRedirectRequest(NSString *url, NSString *method) {
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+  request.HTTPMethod = method;
+  if ([method isEqualToString:@"POST"]) {
+    request.HTTPBody = [@"{\"a\":1}" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  }
+  [request setValue:@"header-key" forHTTPHeaderField:@"Api-Key"];
+  [request setValue:@"mine" forHTTPHeaderField:@"X-App"];
+  return request;
+}
+
+// Offers the session's (pinning) delegate a redirect of the task's current
+// request, built the way URLSession builds one: the previous attempt's headers
+// and NSURLProtocol properties carried over, with the new URL and method, and
+// the body dropped when the method becomes GET. Returns the request the
+// delegate completes with, failing if it never completes.
+static NSURLRequest *OfferRedirect(NSURLSession *session, NSURLSessionTask *task, NSInteger status,
+                                   NSString *location, NSString *method) {
+  NSMutableURLRequest *redirect = [task.currentRequest mutableCopy];
+  redirect.URL = [NSURL URLWithString:location];
+  if (method != nil && ![method isEqualToString:redirect.HTTPMethod]) {
+    redirect.HTTPMethod = method;
+    redirect.HTTPBody = nil;
+    [redirect setValue:nil forHTTPHeaderField:@"Content-Type"];
+  }
+  NSHTTPURLResponse *response =
+      [[NSHTTPURLResponse alloc] initWithURL:task.currentRequest.URL
+                                  statusCode:status
+                                 HTTPVersion:@"HTTP/1.1"
+                                headerFields:@{@"Location": location}];
+  dispatch_semaphore_t done = dispatch_semaphore_create(0);
+  __block NSURLRequest *followUp = nil;
+  id<NSURLSessionTaskDelegate> delegate = (id<NSURLSessionTaskDelegate>)session.delegate;
+  [delegate URLSession:session
+                        task:task
+  willPerformHTTPRedirection:response
+                  newRequest:redirect
+           completionHandler:^(NSURLRequest *request) {
+             followUp = request;
+             dispatch_semaphore_signal(done);
+           }];
+  if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC))) != 0) {
+    Fail(@"Redirect completion handler was never called (task would stall)");
+  }
+  return followUp;
+}
+
+// TESTING_REQUIREMENTS 4b: a caller delegate without
+// didReceiveResponse:completionHandler: must not stall a delegate-routed task.
+// Before the fix the pinning delegate forwarded that callback unconditionally,
+// so the handler was never called and every such task timed out.
+static void TestPartialCallerDelegateDoesNotStallTask(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  AssertTrue([session.delegate isKindOfClass:[PinningURLSessionDelegate class]],
+             @"Allowlisted delegate should be wrapped by the pinning delegate");
+  [[session dataTaskWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]]] resume];
+  BOOL completed = dispatch_semaphore_wait(caller.done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC))) == 0;
+  [session invalidateAndCancel];
+  AssertTrue(completed, @"Task stalled: didReceiveResponse completion handler was not called");
+  AssertNil(caller.error, @"Task should complete without error");
+  NSDictionary *reply = [NSJSONSerialization JSONObjectWithData:caller.data options:0 error:nil];
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"), @"Protected request should carry a token");
+}
+
+// TESTING_REQUIREMENTS 2 (Redirect Followups Are Reclassified) case 1 and 4b:
+// a redirect from a protected API to a host Approov does not protect carries
+// nothing Approov added, the secure string goes back to its placeholder, and the
+// handler completes although the caller delegate does not implement redirects.
+static void TestRedirectToUnprotectedHostStripsApproovState(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start?api_key=query-key", TargetURL()], @"POST")];
+  AssertNotNil([task.currentRequest valueForHTTPHeaderField:@"Approov-Token"], @"First attempt should carry a token");
+  AssertEqualObjects(@"header-secret", [task.currentRequest valueForHTTPHeaderField:@"Api-Key"],
+                     @"First attempt should carry the substituted header");
+
+  NSURLRequest *followUp = OfferRedirect(session, task, 307, [NSString stringWithFormat:@"%@/final", UnprotectedURL()], nil);
+  AssertNotNil(followUp, @"Redirect to an unprotected host should be followed");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"No token may reach an unprotected redirect target");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-TraceID"], @"No trace ID may reach an unprotected redirect target");
+  AssertNil([followUp valueForHTTPHeaderField:@"Signature"], @"No signature may reach an unprotected redirect target");
+  AssertNil([followUp valueForHTTPHeaderField:@"Signature-Input"], @"No signature input may reach an unprotected redirect target");
+  AssertEqualObjects(@"header-key", [followUp valueForHTTPHeaderField:@"Api-Key"],
+                     @"Substituted secret should be restored to its placeholder");
+  AssertEqualObjects(@"mine", [followUp valueForHTTPHeaderField:@"X-App"], @"App headers should be kept");
+  AssertEqualObjects(@"POST", followUp.HTTPMethod, @"307 should keep the method");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// Redirect Followups Are Reclassified cases 3 and 6: a 303 to the same URL
+// after a POST is a GET with a fresh token, and the substituted query parameter
+// and header are taken back to their placeholders and substituted again rather
+// than carried. The secure strings are rotated between the two attempts, so a
+// follow-up that carried the first attempt's values would show the old ones.
+static void TestRedirect303ToSameURLIsReprocessedAsGet(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start?api_key=query-key", TargetURL()], @"POST")];
+  NSString *processedURL = task.currentRequest.URL.absoluteString;
+  AssertTrue([processedURL containsString:@"api_key=query-secret"], @"First attempt should carry the substituted query");
+
+  [Approov fetchSecureStringAndWait:@"query-key" :@"query-rotated"];
+  [Approov fetchSecureStringAndWait:@"header-key" :@"header-rotated"];
+
+  NSURLRequest *followUp = OfferRedirect(session, task, 303, processedURL, @"GET");
+  AssertNotNil(followUp, @"303 to a protected URL should be followed");
+  AssertEqualObjects(@"GET", followUp.HTTPMethod, @"303 follow-up should be a GET");
+  AssertNil([followUp valueForHTTPHeaderField:@"Content-Digest"], @"GET follow-up should carry no Content-Digest");
+  AssertNotNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"Protected follow-up should carry a token");
+  AssertEqualObjects(@"header-rotated", [followUp valueForHTTPHeaderField:@"Api-Key"],
+                     @"Header should be substituted afresh from the restored placeholder");
+  AssertEqualObjects([processedURL stringByReplacingOccurrencesOfString:@"query-secret" withString:@"query-rotated"],
+                     followUp.URL.absoluteString,
+                     @"Query should be substituted afresh from the restored placeholder");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A redirect from a host Approov does not protect to a protected API gets a
+// token for the protected target.
+static void TestRedirectFromUnprotectedToProtectedAddsToken(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", UnprotectedURL()], @"GET")];
+  AssertNil([task.currentRequest valueForHTTPHeaderField:@"Approov-Token"], @"Unprotected first attempt has no token");
+
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", TargetURL()], nil);
+  AssertNotNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"Protected redirect target should get a token");
+  AssertEqualObjects(@"header-secret", [followUp valueForHTTPHeaderField:@"Api-Key"],
+                     @"Protected redirect target should get the substituted header");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A caller delegate that implements the redirect callback is offered the
+// reprocessed follow-up, not the one carrying the previous attempt's token.
+static void TestRedirectOffersReprocessedRequestToCallerDelegate(void) {
+  RedirectTestService();
+  ApproovFullRedirectProbeDelegate *caller = [ApproovFullRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", UnprotectedURL()], nil);
+  AssertNotNil(caller.offeredRedirect, @"Caller delegate should be offered the redirect");
+  AssertNil([caller.offeredRedirect valueForHTTPHeaderField:@"Approov-Token"],
+            @"Caller delegate should be offered the follow-up without the previous token");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"Follow-up should carry no token");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
 static void TestLogMessageDoesNotCrashAtAnyLevel(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1619,6 +1849,11 @@ int main(void) {
       ^{ TestInterceptRequestRetriesOnNetworkFailure(); },
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
       ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
+      ^{ TestPartialCallerDelegateDoesNotStallTask(); },
+      ^{ TestRedirectToUnprotectedHostStripsApproovState(); },
+      ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
+      ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },
+      ^{ TestRedirectOffersReprocessedRequestToCallerDelegate(); },
       ^{ TestLogMessageDoesNotCrashAtAnyLevel(); },
 
     ];

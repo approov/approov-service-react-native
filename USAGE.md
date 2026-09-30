@@ -96,6 +96,23 @@ async function bootstrapAppAndFetch() {
 }
 ```
 
+### Configuration Is Reset By Initialization
+
+Every successful `ApproovService.initialize()` call resets the runtime configuration to its defaults, on both Android and iOS. This includes same-config re-initialization, an `ApproovProvider` remount and a React Native hot restart. The reset covers the token header and prefix (`setTokenHeader`), the trace ID header (`setTraceIDHeader`), the binding header (`setBindingHeader`), substitution headers and query parameters, exclusion URL regexes, `setSuppressLoggingUnknownURL` and any custom service mutator. A warning is logged when a binding header, substitutions, exclusions or a custom mutator are discarded this way.
+
+Apply this configuration **after** initialization has completed. `ApproovProvider`'s `onInit` callback runs *before* `initialize`, so anything set there is discarded immediately. A binding header set in `onInit` is the security-relevant case: the tokens are then not bound to that header. With the provider, apply the configuration in an effect keyed on `approovInitCount`, so it is re-applied after every re-initialization:
+
+```javascript
+const { approovReady, approovInitCount } = useApproov();
+useEffect(() => {
+    if (!approovReady) return;
+    ApproovService.setBindingHeader('Authorization');
+    if (__DEV__) ApproovService.addExclusionURLRegex('^http://[^/]+:8081/');
+}, [approovReady, approovInitCount]);
+```
+
+Gate protected requests on the same effect having run. If you call `ApproovService.initialize()` yourself (*Option 2*), apply the configuration after each successful `await`. Settings that are not listed above, such as `setLogLevel`, survive initialization and can stay in `onInit`.
+
 ### Recommended Early Diagnostics Metadata Capture
 During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
 

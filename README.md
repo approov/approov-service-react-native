@@ -86,7 +86,7 @@ async function startProtectedRequests() {
 }
 ```
 
-If you prefer component-wrapped startup, wrap your application with `ApproovProvider` after applying any setup calls. The same initialization requirement applies: protected requests must remain blocked until initialization completes successfully, including requests started outside the provider's children:
+If you prefer component-wrapped startup, wrap your application with `ApproovProvider`. The same initialization requirement applies: protected requests must remain blocked until initialization completes successfully, including requests started outside the provider's children. The `onInit` callback runs *before* initialization, and initialization resets the token, binding and substitution headers, exclusion regexes and any service mutator, so apply those after initialization instead, as shown in [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization):
 
 ```javascript
 const approovSetup = () => {

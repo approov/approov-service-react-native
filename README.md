@@ -109,6 +109,8 @@ On Android, token processing uses an application interceptor and certificate pin
 
 Once initialization succeeds, network requests may have Approov tokens, message signatures, dynamic pinning, or secure substitutions applied. Initially you will not have set which API domains to protect, so requests are unchanged, but the service will contact the Approov cloud and log `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
 
+**WebSockets are not supported.** A WebSocket connection, including GraphQL subscriptions carried over one, is passed through without an Approov token, secure string substitution or message signature, and Approov does not pin it. Protect only HTTPS requests with Approov; GraphQL queries and mutations sent over HTTPS are protected like any other request. See [USAGE.md](USAGE.md#websockets-are-not-supported).
+
 Support is provided for the [rn-fetch-blob](https://github.com/joltup/rn-fetch-blob) networking stack through the [@approov/rn-fetch-blob](https://www.npmjs.com/package/@approov/rn-fetch-blob) fork:
 
 ```shell

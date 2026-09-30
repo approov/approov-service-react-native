@@ -76,6 +76,18 @@ public class ApproovInterceptor implements Interceptor {
         Request request = chain.request();
         String url = request.url().toString();
         String host = request.url().host();
+
+        // WebSockets are not supported. OkHttp runs application interceptors on the upgrade
+        // request (it sets "Upgrade: websocket" before the call starts) but skips network
+        // interceptors, so ApproovPinningInterceptor never checks the connection. Forward the
+        // upgrade untouched: no token, no secure string substitution and no signature, so
+        // nothing Approov issues travels over a connection Approov has not pinned.
+        if ("websocket".equalsIgnoreCase(request.header("Upgrade"))) {
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG,
+                    "WebSocket upgrade forwarded without Approov processing (not supported): " + url);
+            return chain.proceed(request);
+        }
+
         if (host.equals("localhost")) {
             if (!approovService.isSuppressLoggingUnknownURL())
                 ApproovService.log(ApproovService.LOG_DEBUG, TAG, "localhost forwarded: " + url);

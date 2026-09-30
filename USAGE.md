@@ -154,6 +154,15 @@ React Native heavily optimizes Android networking by using a single, globally sh
 
 For robust Android deployments, it is **highly recommended** to perform the `ApproovService.getPinningDiagnostics()` health-check exactly once, just before you execute the very first API request of the application session, as demonstrated in Option 2 above. If the interceptor is missing, calling `ApproovService.updateClientFactory(true)` will instantly heal the active client, preserving the foreign SDK's hooks while adding the Approov protection back on top.
 
+## WebSockets Are Not Supported
+
+The service layer protects HTTPS requests only. WebSocket connections (`ws://`, `wss://`), including GraphQL subscriptions carried over them, are not supported, and any behaviour you observe on them is not part of the service layer's contract:
+
+* **Android:** React Native opens WebSockets through the same OkHttp client, but OkHttp does not run Approov's pin check on a WebSocket upgrade. So that a token can never travel over a connection Approov has not pinned, the service layer forwards the upgrade request untouched: no Approov token, no secure string substitution and no message signature. It logs `WebSocket upgrade forwarded without Approov processing (not supported)` at DEBUG level.
+* **iOS:** React Native opens WebSockets with SocketRocket, which does not use `NSURLSession`, so the service layer never sees them.
+
+Do not put secure string placeholders in WebSocket URLs or headers, and do not rely on an Approov token to authorize a WebSocket at your backend. GraphQL queries and mutations sent as ordinary HTTPS requests (`POST` with a JSON body, or `GET` with the query in the URL) are protected like any other request: they carry the token, are pinned, and are signed when message signing is enabled.
+
 ## Message Signing
 
 It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:

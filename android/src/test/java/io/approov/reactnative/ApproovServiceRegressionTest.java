@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -489,4 +490,48 @@ public class ApproovServiceRegressionTest {
         }
     }
 
+
+    // initialize() installs the new pins while holding the service monitor. A pin refresh,
+    // triggered by a token fetch on an OkHttp thread reporting a configuration change or forced
+    // pins, must not hold the pinning interceptor's monitor while it waits for the service
+    // monitor, or the two threads block each other for good: initialization never completes and
+    // every request then waits on the service monitor in the interceptor.
+    @Test
+    public void pinRefreshDuringInitializationCommitDoesNotDeadlock() throws Exception {
+        ApproovService service = newService();
+        ApproovPinningInterceptor interceptor = service.getPinningInterceptor();
+        Thread refresh = new Thread(service::rebuildPins, "pin-refresh");
+        refresh.setDaemon(true);
+        java.util.concurrent.CountDownLatch commitHoldsService = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService commit = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "init-commit");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            // the shape of the commit in initialize(): service monitor, then installPins
+            java.util.concurrent.Future<?> committed = commit.submit(() -> {
+                synchronized (service) {
+                    commitHoldsService.countDown();
+                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                    while (refresh.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline)
+                        Thread.yield();
+                    interceptor.installPins(okhttp3.CertificatePinner.DEFAULT);
+                }
+                return null;
+            });
+            assertTrue(commitHoldsService.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            refresh.start();
+
+            try {
+                committed.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                fail("initialization commit and pin refresh deadlocked");
+            }
+            refresh.join(5000);
+            assertFalse("pin refresh did not complete", refresh.isAlive());
+        } finally {
+            commit.shutdownNow();
+        }
+    }
 }

@@ -490,10 +490,14 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
  * issued for that URL. Processing may fetch a token, so it runs off the
  * delegate queue, and the result is delivered back on it.
  *
- * The follow-up is then passed to the original delegate if it implements this
- * callback. Otherwise the completion handler is called here: this delegate
- * implements the method, so URLSession waits for the handler, and leaving it
- * uncalled would stall the task indefinitely.
+ * The original delegate, if it implements this callback, decides where the
+ * redirect goes, so it is offered the follow-up with Approov's changes taken
+ * out, and the request it completes with is the one processed: a delegate that
+ * sends the redirect elsewhere gets protection decided for that destination,
+ * and one that refuses the redirect (nil) is honoured. Without such a delegate
+ * the follow-up is processed directly. Either way the completion handler is
+ * called here: this delegate implements the method, so URLSession waits for
+ * the handler, and leaving it uncalled would stall the task indefinitely.
  *
  * https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411626-urlsession?language=objc
  */
@@ -509,60 +513,72 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
   ApproovService *service = [self currentApproovService];
   id<NSURLSessionDataDelegate> originalDelegate = _originalDelegate;
 
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    NSURLRequest *prepared = followUp;
-    NSString *failure = nil;
-    if (service != nil) {
-      ApproovInterceptorResult *result = [service interceptRequest:followUp];
-      if (result.action == ApproovInterceptorActionProceed) {
-        NSMutableURLRequest *processed = [result.request mutableCopy];
-        NSError *mutatorError = nil;
-        if ([[ApproovServiceMutatorBridge shared]
-                processRequest:processed
-                   tokenHeader:[ApproovService sharedTokenHeader]
-                 traceIDHeader:[ApproovService sharedTraceIDHeader]
-                  errorPointer:&mutatorError]) {
-          [PinningURLSessionDelegate recordPreApproovRequest:followUp
-                                          onProcessedRequest:processed];
-          prepared = processed;
-        } else {
-          failure = mutatorError.localizedDescription ?:
-              @"mutator processing failed";
-        }
-      } else {
-        failure = result.message ?: @"request rejected";
-      }
+  void (^protectAndComplete)(NSURLRequest *) = ^(NSURLRequest *chosen) {
+    if (chosen == nil) {
+      completionHandler(nil);
+      return;
     }
+    // A delegate may build its request from the task's current request, which
+    // still carries what Approov applied, so take that out again.
+    NSMutableURLRequest *clean =
+        [PinningURLSessionDelegate requestByUndoingApproovChangesIn:chosen
+                                                    previousAttempt:previous];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+      NSURLRequest *prepared = clean;
+      NSString *failure = nil;
+      if (service != nil) {
+        ApproovInterceptorResult *result = [service interceptRequest:clean];
+        if (result.action == ApproovInterceptorActionProceed) {
+          NSMutableURLRequest *processed = [result.request mutableCopy];
+          NSError *mutatorError = nil;
+          if ([[ApproovServiceMutatorBridge shared]
+                  processRequest:processed
+                     tokenHeader:[ApproovService sharedTokenHeader]
+                   traceIDHeader:[ApproovService sharedTraceIDHeader]
+                    errorPointer:&mutatorError]) {
+            [PinningURLSessionDelegate recordPreApproovRequest:clean
+                                            onProcessedRequest:processed];
+            prepared = processed;
+          } else {
+            failure = mutatorError.localizedDescription ?:
+                @"mutator processing failed";
+          }
+        } else {
+          failure = result.message ?: @"request rejected";
+        }
+      }
 
-    void (^deliver)(void) = ^{
-      if (failure != nil) {
-        // Fail the task rather than hand the app the redirect response as if
-        // it were the final one.
-        ApproovLogE(@"redirect to %@ not followed: %@", request.URL, failure);
-        [task cancel];
-        completionHandler(nil);
-        return;
-      }
-      ApproovLogD(@"redirect %@ -> %@ reprocessed", previous.URL, prepared.URL);
-      if ([originalDelegate respondsToSelector:@selector
-                            (URLSession:
-                                   task:willPerformHTTPRedirection:newRequest
-                                       :completionHandler:)]) {
-        [originalDelegate URLSession:session
-                                task:task
-          willPerformHTTPRedirection:response
-                          newRequest:prepared
-                   completionHandler:completionHandler];
-      } else {
+      void (^deliver)(void) = ^{
+        if (failure != nil) {
+          // Fail the task rather than hand the app the redirect response as
+          // if it were the final one.
+          ApproovLogE(@"redirect to %@ not followed: %@", clean.URL, failure);
+          [task cancel];
+          completionHandler(nil);
+          return;
+        }
+        ApproovLogD(@"redirect %@ -> %@ reprocessed", previous.URL, prepared.URL);
         completionHandler(prepared);
-      }
-    };
-    NSOperationQueue *queue = session.delegateQueue;
-    if (queue != nil)
-      [queue addOperationWithBlock:deliver];
-    else
-      deliver();
-  });
+      };
+      NSOperationQueue *queue = session.delegateQueue;
+      if (queue != nil)
+        [queue addOperationWithBlock:deliver];
+      else
+        deliver();
+    });
+  };
+
+  if ([originalDelegate respondsToSelector:@selector
+                        (URLSession:
+                               task:willPerformHTTPRedirection:newRequest
+                                   :completionHandler:)])
+    [originalDelegate URLSession:session
+                            task:task
+      willPerformHTTPRedirection:response
+                      newRequest:followUp
+               completionHandler:protectAndComplete];
+  else
+    protectAndComplete(followUp);
 }
 
 /**

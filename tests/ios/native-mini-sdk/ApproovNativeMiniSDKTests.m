@@ -1621,6 +1621,32 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
 }
 @end
 
+// A caller delegate that redirects somewhere else: it completes with the
+// request it is offered, sent to retargetURL instead, or refuses the redirect
+// when refuse is set. Built from the offered request, as a delegate would.
+@interface ApproovRetargetingRedirectProbeDelegate : ApproovPartialRedirectProbeDelegate
+@property(nonatomic, copy) NSString *retargetURL;
+@property(nonatomic) BOOL refuse;
+@property(nonatomic, strong) NSURLRequest *offeredRedirect;
+@end
+
+@implementation ApproovRetargetingRedirectProbeDelegate
+- (void)URLSession:(NSURLSession *)session
+                          task:(NSURLSessionTask *)task
+    willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+                    newRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSURLRequest *))completionHandler {
+  _offeredRedirect = request;
+  if (_refuse) {
+    completionHandler(nil);
+    return;
+  }
+  NSMutableURLRequest *chosen = [request mutableCopy];
+  chosen.URL = [NSURL URLWithString:_retargetURL];
+  completionHandler(chosen);
+}
+@end
+
 // Initializes a protected service with header and query substitution and an
 // interceptor that wraps sessions of the probe delegates.
 static ApproovService *RedirectTestService(void) {
@@ -1632,6 +1658,7 @@ static ApproovService *RedirectTestService(void) {
   [ApproovRCTInterceptor startWithApproovService:service];
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovPartialRedirectProbeDelegate"];
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovFullRedirectProbeDelegate"];
+  [ApproovRCTInterceptor addAllowedDelegate:@"ApproovRetargetingRedirectProbeDelegate"];
   return service;
 }
 
@@ -1806,6 +1833,64 @@ static void TestRedirectOffersReprocessedRequestToCallerDelegate(void) {
   [session invalidateAndCancel];
 }
 
+// The caller delegate decides where a redirect goes, so Approov processes the
+// request it chooses, not the one it is offered. Here the redirect targets a
+// protected API but the delegate sends it to a host Approov does not protect:
+// the token, trace ID, signature and substituted secret must not go with it.
+static void TestRedirectRetargetedByCallerDelegateIsProcessedForItsChoice(void) {
+  RedirectTestService();
+  ApproovRetargetingRedirectProbeDelegate *caller = [ApproovRetargetingRedirectProbeDelegate new];
+  caller.retargetURL = [NSString stringWithFormat:@"%@/elsewhere", UnprotectedURL()];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", TargetURL()], nil);
+  AssertNotNil(followUp, @"The redirect the caller delegate chose should be followed");
+  AssertEqualObjects(caller.retargetURL, followUp.URL.absoluteString, @"The caller delegate's destination should be kept");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"No token may reach the host the delegate chose");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-TraceID"], @"No trace ID may reach the host the delegate chose");
+  AssertNil([followUp valueForHTTPHeaderField:@"Signature"], @"No signature may reach the host the delegate chose");
+  AssertEqualObjects(@"header-key", [followUp valueForHTTPHeaderField:@"Api-Key"],
+                     @"Substituted secret should be restored to its placeholder");
+  AssertEqualObjects(@"mine", [followUp valueForHTTPHeaderField:@"X-App"], @"App headers should be kept");
+  [task cancel];
+  [session invalidateAndCancel];
+
+  // and the other way round: retargeted to a protected API, it is protected for that URL
+  RedirectTestService();
+  caller = [ApproovRetargetingRedirectProbeDelegate new];
+  caller.retargetURL = [NSString stringWithFormat:@"%@/chosen", TargetURL()];
+  session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                          delegate:caller
+                                     delegateQueue:nil];
+  task = [session dataTaskWithRequest:AppRedirectRequest([NSString stringWithFormat:@"%@/start", UnprotectedURL()], @"GET")];
+  followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", UnprotectedURL()], nil);
+  AssertNotNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"The protected API the delegate chose should get a token");
+  AssertEqualObjects(@"header-secret", [followUp valueForHTTPHeaderField:@"Api-Key"],
+                     @"The protected API the delegate chose should get the substituted header");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A caller delegate that refuses a redirect still refuses it.
+static void TestRedirectRefusedByCallerDelegateIsNotFollowed(void) {
+  RedirectTestService();
+  ApproovRetargetingRedirectProbeDelegate *caller = [ApproovRetargetingRedirectProbeDelegate new];
+  caller.refuse = YES;
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", UnprotectedURL()], nil);
+  AssertNotNil(caller.offeredRedirect, @"Caller delegate should be offered the redirect");
+  AssertNil(followUp, @"A redirect the caller delegate refused must not be followed");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
 static void TestLogMessageDoesNotCrashAtAnyLevel(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1906,6 +1991,8 @@ int main(void) {
       ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
       ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },
       ^{ TestRedirectOffersReprocessedRequestToCallerDelegate(); },
+      ^{ TestRedirectRetargetedByCallerDelegateIsProcessedForItsChoice(); },
+      ^{ TestRedirectRefusedByCallerDelegateIsNotFollowed(); },
       ^{ TestLogMessageDoesNotCrashAtAnyLevel(); },
 
     ];

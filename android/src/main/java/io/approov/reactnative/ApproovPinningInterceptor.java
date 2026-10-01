@@ -44,8 +44,14 @@ public final class ApproovPinningInterceptor implements Interceptor {
 
     // Serialize rebuilds so an earlier fetch cannot overwrite a later update. A failed fetch
     // leaves the previous complete snapshot intact and propagates to the caller.
-    synchronized void rebuildPins(ApproovService service) {
-        certificatePinner = ApproovCertificatePinner.build(service);
+    // Lock order is service monitor, then this monitor, as in initialize(), which installs pins
+    // while holding the service monitor. Service state is read before taking this monitor so a
+    // refresh never waits for the service while holding it, which would deadlock with that commit.
+    void rebuildPins(ApproovService service) {
+        boolean approovEnabled = service.isApproovEnabled();
+        synchronized (this) {
+            certificatePinner = ApproovCertificatePinner.build(approovEnabled);
+        }
     }
 
     // Installs a pin set built in advance, so initialization can publish pins and state together.

@@ -947,8 +947,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
     }
 
-    /** Refresh shared pins on initialization or an SDK configuration update. */
-    public void rebuildPins() {
+    /**
+     * Refresh shared pins on initialization or an SDK configuration update. Holds the service
+     * monitor, like the commit in initialize(), so a refresh cannot interleave with that commit
+     * and install pins for the enabled state it is replacing.
+     */
+    public synchronized void rebuildPins() {
         pinningInterceptor.rebuildPins(this);
     }
 

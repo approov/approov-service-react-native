@@ -81,10 +81,7 @@ public class ApproovInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
-        // if there are any accesses to localhost then they are just passed through
         Request request = chain.request();
-        String url = request.url().toString();
-        String host = request.url().host();
 
         // WebSockets are not supported. OkHttp runs application interceptors on the upgrade
         // request (it sets "Upgrade: websocket" before the call starts) but skips network
@@ -93,14 +90,42 @@ public class ApproovInterceptor implements Interceptor {
         // nothing Approov issues travels over a connection Approov has not pinned.
         if ("websocket".equalsIgnoreCase(request.header("Upgrade"))) {
             ApproovService.log(ApproovService.LOG_DEBUG, TAG,
-                    "WebSocket upgrade forwarded without Approov processing (not supported): " + url);
+                    "WebSocket upgrade forwarded without Approov processing (not supported): " + request.url());
             return chain.proceed(request);
         }
+
+        // proceed with the rest of the chain
+        return chain.proceed(protect(request));
+    }
+
+    /**
+     * Applies Approov processing to a request and tags the result with what was applied, so
+     * that ApproovPinningInterceptor can recognise a redirect or retry that OkHttp builds from
+     * it after this interceptor has run, and reprocess that attempt for its own URL. Called for
+     * the original request here and for rebuilt attempts from the network interceptor.
+     *
+     * @param original the request as the app (or a rebuilt attempt) presents it
+     * @return the request to send, carrying an ApproovAppliedRequest tag
+     * @throws IOException if processing must fail the request
+     */
+    Request protect(Request original) throws IOException {
+        Request applied = process(original);
+        return applied.newBuilder()
+                .tag(ApproovAppliedRequest.class, new ApproovAppliedRequest(this, original, applied))
+                .build();
+    }
+
+    // Adds the Approov token, trace ID, secure string substitutions and any signature to a
+    // request, or returns it unchanged if it must not be protected.
+    private Request process(Request request) throws IOException {
+        // if there are any accesses to localhost then they are just passed through
+        String url = request.url().toString();
+        String host = request.url().host();
 
         if (host.equals("localhost")) {
             if (!approovService.isSuppressLoggingUnknownURL())
                 ApproovService.log(ApproovService.LOG_DEBUG, TAG, "localhost forwarded: " + url);
-            return chain.proceed(request);
+            return request;
         }
 
         // In a debug build, also forward the other addresses used to reach the development
@@ -109,7 +134,7 @@ public class ApproovInterceptor implements Interceptor {
         if (DEBUG_DEVELOPMENT_HOSTS.contains(host) && approovService.isAppDebuggable()) {
             if (!approovService.isSuppressLoggingUnknownURL())
                 ApproovService.log(ApproovService.LOG_DEBUG, TAG, "development host forwarded: " + url);
-            return chain.proceed(request);
+            return request;
         }
 
         // obtain the mutator to use for this request - this is always non-null
@@ -118,7 +143,7 @@ public class ApproovInterceptor implements Interceptor {
         // check if we should intercept this request
         try {
             if (!mutator.handleInterceptorShouldProcessRequest(approovService, request))
-                return chain.proceed(request);
+                return request;
         } catch (ApproovException e) {
             throw new IOException(e);
         }
@@ -126,14 +151,14 @@ public class ApproovInterceptor implements Interceptor {
         // Protected request paths MUST await initialize(). There is no startup grace period.
         if (!approovService.isInitialized()) {
             approovService.logUninitializedForward(TAG, url);
-            return chain.proceed(request);
+            return request;
         }
 
         if (!approovService.isApproovEnabled()) {
             // INFO (was DEBUG): bypass mode is security-relevant and should be visible in
             // production logs, matching the iOS layer. Message kept identical across platforms.
             ApproovService.log(ApproovService.LOG_INFO, TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
-            return chain.proceed(request);
+            return request;
         }
 
         // update the data hash based on any token binding header (presence is optional)
@@ -165,7 +190,7 @@ public class ApproovInterceptor implements Interceptor {
         // check if the request should proceed based on the token fetch result
         try {
             if (!mutator.handleInterceptorFetchTokenResult(approovService, approovResults, url))
-                return chain.proceed(request);
+                return request;
         } catch (ApproovException e) {
             throw new IOException(e);
         }
@@ -290,7 +315,6 @@ public class ApproovInterceptor implements Interceptor {
             throw new IOException(e);
         }
 
-        // proceed with the rest of the chain
-        return chain.proceed(request);
+        return request;
     }
 }

@@ -216,6 +216,15 @@ public class ApproovInterceptorTest {
         return result;
     }
 
+    // Forwarded untouched means the same request on the wire. It may carry the in-process
+    // ApproovAppliedRequest tag, which redirect reclassification uses and which is never sent.
+    private static void assertForwardedUntouched(Request expected, Request actual) {
+        assertEquals(expected.url(), actual.url());
+        assertEquals(expected.method(), actual.method());
+        assertEquals(expected.headers(), actual.headers());
+        assertSame(expected.body(), actual.body());
+    }
+
     @Test
     public void localhostRequestsBypassApproov() throws Exception {
         Request request = request("https://localhost/health");
@@ -225,7 +234,7 @@ public class ApproovInterceptorTest {
             Response response = interceptor.intercept(chain);
 
             assertEquals(200, response.code());
-            assertEquals(request, response.request());
+            assertForwardedUntouched(request, response.request());
             approov.verifyNoInteractions();
         }
     }
@@ -248,7 +257,7 @@ public class ApproovInterceptorTest {
                 Response response = interceptor.intercept(chain);
 
                 assertEquals(url, 200, response.code());
-                assertSame(url, request, response.request());
+                assertForwardedUntouched(request, response.request());
                 approov.verifyNoInteractions();
             }
         }
@@ -280,7 +289,7 @@ public class ApproovInterceptorTest {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Response response = interceptor.intercept(chain);
 
-            assertEquals(request, response.request());
+            assertForwardedUntouched(request, response.request());
             approov.verifyNoInteractions();
         }
     }
@@ -295,7 +304,7 @@ public class ApproovInterceptorTest {
         try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
             Response response = interceptor.intercept(chain);
 
-            assertEquals(request, response.request());
+            assertForwardedUntouched(request, response.request());
             approov.verifyNoInteractions();
         }
     }

@@ -60,6 +60,14 @@ public final class ApproovPinningInterceptor implements Interceptor {
     @Override
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
+
+        // A redirect or retry reaches only network interceptors. Reprocess an attempt OkHttp
+        // rebuilt from an Approov-processed request, so it carries nothing issued for the
+        // previous URL, before deciding how to pin it.
+        ApproovAppliedRequest applied = request.tag(ApproovAppliedRequest.class);
+        if (applied != null)
+            request = applied.reclassifyIfRebuilt(request);
+
         if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request))
             return chain.proceed(request);
         if (!request.url().isHttps())

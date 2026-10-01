@@ -6,6 +6,7 @@ static void (^gProcessRequestHandler)(NSMutableURLRequest *, NSString *, NSStrin
 static BOOL (^gFetchTokenHandler)(id, NSString *, NSError **);
 static BOOL (^gHeaderSubstitutionHandler)(id, NSString *, NSError **);
 static BOOL (^gQueryParamSubstitutionHandler)(id, NSString *, NSError **);
+static BOOL (^gPinningHandler)(NSURLRequest *);
 
 // Call records for the mutator-selection helpers, so tests can assert that
 // ApproovService.m actually reaches them.
@@ -28,6 +29,10 @@ static NSInteger sStubLogLevel = 2;
     sharedBridge = [[ApproovServiceMutatorBridge alloc] init];
   });
   return sharedBridge;
+}
+
+- (BOOL)handlePinningShouldProcessRequest:(NSURLRequest *)request {
+  return (gPinningHandler != nil) ? gPinningHandler(request) : YES;
 }
 
 - (void)processRequest:(NSMutableURLRequest *)request
@@ -189,6 +194,7 @@ void ApproovMutatorBridgeReset(void) {
   gFetchTokenHandler = nil;
   gHeaderSubstitutionHandler = nil;
   gQueryParamSubstitutionHandler = nil;
+  gPinningHandler = nil;
   gResetToDefaultCount = 0;
   gSetPolicyMutatorCount = 0;
   gLastPolicyMutatorMask = 0;
@@ -230,4 +236,8 @@ void ApproovMutatorBridgeSetHeaderSubstitutionHandler(
 void ApproovMutatorBridgeSetQueryParamSubstitutionHandler(
     BOOL (^handler)(id, NSString *, NSError **)) {
   gQueryParamSubstitutionHandler = [handler copy];
+}
+
+void ApproovMutatorBridgeSetPinningHandler(BOOL (^handler)(NSURLRequest *)) {
+  gPinningHandler = [handler copy];
 }

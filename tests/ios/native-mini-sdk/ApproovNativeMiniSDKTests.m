@@ -648,6 +648,56 @@ static void TestDirectPinningBlocksInvalidPins(void) {
   AssertEqualObjects(@(ApproovTrustDecisionBlock), @(decision), @"Pinning delegate should block invalid pins");
 }
 
+// handlePinningShouldProcessRequest: iOS checks pins per TLS connection, so the delegate asks the
+// mutator with a request for the connection's origin. A mutator that skips pinning for the host
+// must let the connection through even when the pins would block it, and the hook must see the host.
+static void TestPinningMutatorSkipBypassesPinCheck(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  __block NSURL *askedURL = nil;
+  ApproovMutatorBridgeSetPinningHandler(^BOOL(NSURLRequest *request) {
+    askedURL = request.URL;
+    return NO;
+  });
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"shouldFail\": true}"];
+
+  ApproovTrustDecision decision = ApproovTrustDecisionNotPinned;
+  NSError *error = nil;
+  NSDictionary *reply = PerformPinnedRequest(service, TargetURL(), &decision, &error);
+  ApproovMutatorBridgeReset();
+
+  AssertNil(error, @"A mutator that skips pinning must let the connection through despite failing pins");
+  AssertNotNil(reply, @"A mutator that skips pinning must return the worker reply");
+  AssertTrue(decision != ApproovTrustDecisionBlock, @"Skipped pinning must not report a block");
+  AssertEqualObjects(TargetHost(), askedURL.host, @"The pinning hook must be asked about the connection's host");
+  AssertEqualObjects(@"https", askedURL.scheme, @"The pinning hook must be asked with an https origin");
+}
+
+static void TestPinningMutatorConsultedWhenItKeepsPinning(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  __block NSUInteger calls = 0;
+  ApproovMutatorBridgeSetPinningHandler(^BOOL(NSURLRequest *request) {
+    (void)request;
+    calls++;
+    return YES;
+  });
+  [MiniSDKAttesterProxyController setNextPinningDirectiveJSON:@"{\"operation\": \"getPins\", \"shouldFail\": true}"];
+
+  ApproovTrustDecision decision = ApproovTrustDecisionNotPinned;
+  NSError *error = nil;
+  NSDictionary *reply = PerformPinnedRequest(service, TargetURL(), &decision, &error);
+  ApproovMutatorBridgeReset();
+
+  AssertTrue(calls > 0, @"The pinning hook must be consulted for a server-trust challenge");
+  AssertNil(reply, @"Keeping pinning with failing pins must still block the request");
+  AssertEqualObjects(@(ApproovTrustDecisionBlock), @(decision), @"Keeping pinning must report a block");
+}
+
 static void TestFetchWithApproovAllowsValidPins(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1799,6 +1849,8 @@ int main(void) {
       ^{ TestExcludedProtectedURLLeavesRequestUnmodified(); },
       ^{ TestDirectPinningAllowsValidPins(); },
       ^{ TestDirectPinningBlocksInvalidPins(); },
+      ^{ TestPinningMutatorSkipBypassesPinCheck(); },
+      ^{ TestPinningMutatorConsultedWhenItKeepsPinning(); },
       ^{ TestFetchWithApproovAllowsValidPins(); },
       ^{ TestFetchWithApproovRejectsInvalidPins(); },
       ^{ TestExcludedProtectedURLUsesPinningOnlyWithoutTokenTraceOrSigning(); },

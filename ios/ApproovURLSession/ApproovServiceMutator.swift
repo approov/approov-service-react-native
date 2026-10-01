@@ -91,8 +91,12 @@ public protocol ApproovServiceMutator {
                                            changes: ApproovRequestMutations) throws -> URLRequest
 
     /**
-     * Decides whether certificate pinning should be applied to a request or not.
-     * Called at the start of the ApproovService pinning processing.
+     * Decides whether Approov certificate pinning should be applied or not. Called by the
+     * pinning delegate when a server-trust challenge arrives, which happens once per TLS
+     * connection. No single request is usually in scope then, so the request passed is the
+     * connection's origin (https, host and port, no path, headers or body): decide by host.
+     * Returning false skips the Approov pin check for that connection; the normal TLS trust
+     * evaluation still applies. Android asks per request, with the full request.
      */
     func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool
 }

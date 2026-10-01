@@ -23,6 +23,7 @@ NS_ASSUME_NONNULL_BEGIN
                                          errorPointer:(NSError *_Nullable *_Nullable)errorPointer;
 - (void)setPolicyMutator:(int32_t)mask sign:(BOOL)sign useAccountSigning:(BOOL)useAccountSigning;
 - (void)resetToDefault;
+- (BOOL)handlePinningShouldProcessRequest:(NSURLRequest *)request;
 @property (nonatomic, readonly) BOOL isDefaultMutator;
 @property (class, nonatomic) NSInteger logLevel;
 
@@ -42,6 +43,9 @@ FOUNDATION_EXPORT void ApproovMutatorBridgeSetHeaderSubstitutionHandler(
 FOUNDATION_EXPORT void ApproovMutatorBridgeSetQueryParamSubstitutionHandler(
     BOOL (^_Nullable handler)(id result, NSString *queryKey,
                               NSError *_Nullable *_Nullable errorPointer));
+
+FOUNDATION_EXPORT void ApproovMutatorBridgeSetPinningHandler(
+    BOOL (^_Nullable handler)(NSURLRequest *request));
 
 // Call records for the mutator-selection helpers, reset by ApproovMutatorBridgeReset.
 FOUNDATION_EXPORT NSUInteger ApproovMutatorBridgeResetToDefaultCount(void);

@@ -201,6 +201,32 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
  * swizzling may be initialized before the native module exists, so pinning
  * must recover the live service at challenge time.
  */
+/**
+ * Asks the service mutator whether Approov pinning applies (handlePinningShouldProcessRequest).
+ * Server trust is a connection-level challenge on iOS, so pins are checked once per TLS
+ * connection and usually no single request is in scope: unless the task is known, the mutator
+ * is asked with a request for the connection's origin (https, host and port, no path, headers or
+ * body). If no origin can be built, pinning is kept.
+ */
+- (BOOL)shouldPinForChallenge:(NSURLAuthenticationChallenge *)challenge
+                         task:(NSURLSessionTask *_Nullable)task {
+  NSURLRequest *request = task.currentRequest ?: task.originalRequest;
+  if (request == nil) {
+    NSURLComponents *origin = [[NSURLComponents alloc] init];
+    origin.scheme = @"https";
+    origin.host = challenge.protectionSpace.host;
+    NSInteger port = challenge.protectionSpace.port;
+    if ((port > 0) && (port != 443))
+      origin.port = @(port);
+    origin.path = @"/";
+    NSURL *url = origin.URL;
+    if (url == nil)
+      return YES;
+    request = [NSURLRequest requestWithURL:url];
+  }
+  return [[ApproovServiceMutatorBridge shared] handlePinningShouldProcessRequest:request];
+}
+
 - (ApproovService *_Nullable)currentApproovService {
   ApproovService *service = _approovService ?: [ApproovService sharedService];
   if (_approovService == nil && service != nil) {
@@ -303,6 +329,17 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
       return;
     }
 
+    if (![self shouldPinForChallenge:challenge task:dataTask]) {
+      ApproovLogI(@"pinning skipped by the service mutator for %@", host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:dataTask
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(pinning skipped)"];
+      return;
+    }
+
     ApproovTrustDecision trustDecision =
         [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
 
@@ -370,6 +407,18 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
                                            challengeType:@"server-trust "
                                                          @"(service "
                                                          @"unavailable)"];
+      return;
+    }
+
+    if (![self shouldPinForChallenge:challenge task:nil]) {
+      ApproovLogI(@"pinning skipped by the service mutator for %@ (session-level)",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:nil
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(pinning skipped)"];
       return;
     }
 

@@ -151,6 +151,13 @@ import os.log
         }
     }
     
+    /// Asks the active service mutator whether Approov pinning applies. iOS checks pins per TLS
+    /// connection, so the pinning delegate usually passes a request for the connection's origin
+    /// (https, host and port) rather than an individual request.
+    @objc public func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
+        return serviceMutator.handlePinningShouldProcessRequest(request)
+    }
+
     @objc public func handleInterceptorFetchTokenResult(_ result: Any, url: String, errorPointer: NSErrorPointer) -> Bool {
         guard let fetchResult = result as? ApproovTokenFetchResult else {
             ApproovServiceMutatorBridge.logError("Invalid result type passed to handleInterceptorFetchTokenResult")

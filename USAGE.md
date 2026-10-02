@@ -184,9 +184,6 @@ Do not put secure string placeholders in WebSocket URLs or headers, and do not r
 
 Approov credentials never follow a redirect to another host. A redirect from a protected API to a different host carries no Approov token, trace ID, message signature or substituted secure string, whether or not that host is Approov-protected, so a CDN or third party your API redirects to never receives them.
 
-* **Android:** the redirected request is not protected again. If your API redirects to another Approov-protected API, call that API directly instead. A redirect within the same host keeps the original token, secure strings and signature; the signature covers the original URL, so avoid same-host redirects on signed requests if your backend verifies signatures strictly.
-* **iOS:** the redirected request is processed again for its own URL, so a redirect to another Approov-protected API gets its own token, substitutions and signature.
-
 ## Message Signing
 
 It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:

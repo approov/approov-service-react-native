@@ -10,8 +10,8 @@ import static org.junit.Assert.fail;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 import android.content.res.AssetManager;
 import android.content.Context;
@@ -59,6 +59,7 @@ import java.lang.reflect.Field;
 public class ApproovServiceMiniSdkTest {
     private static final MediaType APPLICATION_JSON = MediaType.get("application/json");
     private final String validInitialConfig = "#cb-ivol#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
+    private static final String MALFORMED_CONFIG = "not-an-approov-config";
 
     private ReactApplicationContext reactContext;
     private ApproovService service;
@@ -196,19 +197,13 @@ public class ApproovServiceMiniSdkTest {
 
     @Test
     public void initializeFailureRejectsAndKeepsLayerUninitialized() throws Exception {
-        try (org.mockito.MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            // nullable() is required because comment=null does not match any(String.class) in Mockito 2+
-            approov.when(() -> Approov.initialize(any(Context.class), any(String.class), any(String.class),
-                    org.mockito.ArgumentMatchers.nullable(String.class)))
-                .thenThrow(new IllegalArgumentException("bad config"));
+        // the mini-SDK, like the SDK, rejects a malformed config with IllegalArgumentException
+        PromiseResult rejected = awaitPromise(promise -> service.initialize(MALFORMED_CONFIG, null, promise));
 
-            PromiseResult rejected = awaitPromise(promise -> service.initialize(validInitialConfig, null, promise));
-
-            assertEquals("initialize", rejected.code);
-            assertEquals("initialize IllegalArgument: bad config", rejected.message);
-            assertFalse(service.isInitialized());
-            assertFalse(service.isApproovEnabled());
-        }
+        assertEquals("initialize", rejected.code);
+        assertEquals("initialize IllegalArgument: Approov initial configuration is malformed", rejected.message);
+        assertFalse(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
     }
 
     @Test
@@ -249,20 +244,13 @@ public class ApproovServiceMiniSdkTest {
         assertTrue(service.isInitialized());
         assertFalse(service.isApproovEnabled());
 
-        try (org.mockito.MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            // nullable() is required because comment=null does not match any(String.class) in Mockito 2+
-            approov.when(() -> Approov.initialize(any(Context.class), any(String.class), any(String.class),
-                    org.mockito.ArgumentMatchers.nullable(String.class)))
-                .thenThrow(new IllegalArgumentException("server unreachable"));
+        PromiseResult rejected = awaitPromise(promise -> service.initialize(MALFORMED_CONFIG, null, promise));
 
-            PromiseResult rejected = awaitPromise(promise -> service.initialize(validInitialConfig, null, promise));
-
-            assertEquals("initialize", rejected.code);
-            assertTrue(rejected.message.contains("IllegalArgument"));
-            // Per TESTING_REQUIREMENTS §20: failure after empty bootstrap preserves bypass mode.
-            assertTrue(service.isInitialized());
-            assertFalse(service.isApproovEnabled());
-        }
+        assertEquals("initialize", rejected.code);
+        assertTrue(rejected.message.contains("IllegalArgument"));
+        // Per TESTING_REQUIREMENTS §20: failure after empty bootstrap preserves bypass mode.
+        assertTrue(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
     }
 
     @Test

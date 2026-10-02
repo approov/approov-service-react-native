@@ -5,6 +5,7 @@
 #import "Approov.h"
 #import "MiniSDKTestSupport.h"
 #import "approov_service_react_native-Swift.h"
+#import "ios/ApproovMockURLProtocol.h"
 #import "ios/ApproovPinningDelegate.h"
 #import "ios/ApproovRCTInterceptor.h"
 #import "ios/ApproovService.h"
@@ -67,6 +68,11 @@ extern NSMutableSet<NSString *> *exclusionURLRegexs;
 - (void)addSubstitutionQueryParam:(NSString *)key;
 - (void)addExclusionURLRegex:(NSString *)urlRegex;
 - (void)logMessage:(NSString *)message level:(NSInteger)level;
+- (void)setServiceMutatorType:(double)mask
+                         sign:(BOOL)sign
+                signatureMode:(NSString *)signatureMode
+                     resolver:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject;
 @end
 
 static NSUInteger gFailureCount = 0;
@@ -2036,6 +2042,530 @@ static void TestLogMessageDoesNotCrashAtAnyLevel(void) {
 }
 
 
+// ---------------------------------------------------------------------------
+// Initialization edge cases. The mini-SDK keeps its initialized state for the
+// whole run, as the SDK does across a React Native bridge reload, so a fresh
+// service layer meets an SDK that is already initialized with kValidInitialConfig.
+// ---------------------------------------------------------------------------
+
+static void EnsureSDKInitialized(void) {
+  NSDictionary *result = [MiniSDKAttesterProxyController initializeApproovResult:kValidInitialConfig
+                                                                    updateConfig:@"auto"
+                                                                         comment:@"reinit"];
+  AssertEqualObjects(@(YES), result[@"result"], @"The mini-SDK should accept the test config");
+}
+
+// A native SDK initialization failure (here a malformed config) rejects the
+// promise and leaves the layer uninitialized, so requests do not silently
+// proceed without attestation.
+static void TestInitializeFailureRejectsAndKeepsLayerUninitialized(void) {
+  ApproovService *service = FreshService();
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"bad-config" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"initialize", rejected[@"code"],
+                     @"Failed initialization should reject with initialize");
+  AssertEqualObjects(@"initialization failed: Approov initial configuration is malformed",
+                     rejected[@"message"],
+                     @"Failed initialization should surface the SDK error");
+  AssertTrue(!isInitialized, @"Failed initialization should leave the layer uninitialized");
+}
+
+// After a bridge reload the SDK is already initialized with the same config and
+// returns NO with no error. That resolves and marks the new layer initialized.
+static void TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(void) {
+  EnsureSDKInitialized();
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:kValidInitialConfig comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertTrue(isInitialized, @"An already initialized SDK should still mark the layer initialized");
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+  AssertNotNil([result.request valueForHTTPHeaderField:@"Approov-Token"],
+               @"The layer should protect requests with the already initialized SDK");
+}
+
+// The SDK rejects a well-formed but different config once initialized. A layer
+// that was not yet initialized surfaces that and stays uninitialized.
+static void TestInitializeRejectsNativeDifferentConfigurationError(void) {
+  EnsureSDKInitialized();
+  ApproovService *service = FreshService();
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"#other-account#AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                comment:nil
+               resolver:resolve
+               rejecter:reject];
+  });
+
+  AssertEqualObjects(@"initialize", rejected[@"code"],
+                     @"Different-configuration native SDK error should reject with initialize");
+  AssertEqualObjects(@"initialization failed: Approov SDK already initialized with a different configuration",
+                     rejected[@"message"],
+                     @"Different-configuration native SDK error should preserve the platform message");
+  AssertTrue(!isInitialized,
+             @"Different-configuration native SDK error should leave the layer uninitialized");
+}
+
+// Per TESTING_REQUIREMENTS.md §20: an SDK failure after an empty-config bootstrap
+// rejects and leaves the layer in bypass mode (initialized, Approov disabled).
+static void TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(void) {
+  ApproovService *service = FreshService();
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"" comment:nil resolver:resolve rejecter:reject];
+  });
+  AssertTrue(isInitialized, @"Empty-config bootstrap should mark the layer initialized");
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"bad-config" comment:nil resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"initialize", rejected[@"code"],
+                     @"SDK failure after empty bootstrap should reject with initialize");
+  AssertTrue(isInitialized,
+             @"SDK failure after empty bootstrap should preserve the bypass initialized state");
+  NSDictionary *enabled = AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service isApproovEnabled:resolve rejecter:reject];
+  });
+  AssertEqualObjects(@(NO), enabled[@"value"], @"Approov should stay disabled after the failure");
+}
+
+// Re-initializing with the same config is forwarded to the SDK and, after the SDK
+// accepts it, resets the layer's runtime configuration.
+static void TestInitializeWithSameConfigResetsRuntimeConfiguration(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service addSubstitutionHeader:@"Authorization" requiredPrefix:@"Bearer "];
+  [service addExclusionURLRegex:@"https://example.com/excluded/.*"];
+  [service setTokenHeader:@"X-Custom-Token" prefix:@"Bearer "];
+
+  InitializeService(service, nil);
+
+  AssertTrue([substitutionHeaders objectForKey:@"Authorization"] == nil,
+             @"Substitution header should be cleared across same-config re-init");
+  AssertTrue(![exclusionURLRegexs containsObject:@"https://example.com/excluded/.*"],
+             @"Exclusion URL regex should be cleared across same-config re-init");
+  AssertEqualObjects(@"Approov-Token", approovTokenHeader,
+                     @"Token header should reset across same-config re-init");
+  AssertEqualObjects(@"", approovTokenPrefix,
+                     @"Token prefix should reset across same-config re-init");
+}
+
+// Any successful re-initialization resets the service mutator; a rejected one
+// keeps it, with the rest of the operating state.
+static void TestInitializeResetsServiceMutatorOnReinitialization(void) {
+  ApproovService *service = FreshService();
+  ApproovMutatorBridgeReset();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  AwaitResolved(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service setServiceMutatorType:8.0  // BIT_NO_NETWORK (1 << 3)
+                              sign:NO
+                     signatureMode:@"install"
+                          resolver:resolve
+                          rejecter:reject];
+  });
+  AssertTrue(ApproovMutatorBridgeSetPolicyMutatorCount() == 1,
+             @"setServiceMutatorType should install a PolicyMutator via the bridge");
+  AssertTrue(ApproovMutatorBridgeLastPolicyMutatorMask() == 8,
+             @"the bridge should receive the mask supplied by the caller");
+  AssertTrue(!ApproovMutatorBridgeLastPolicyMutatorSign(),
+             @"the bridge should receive the sign flag supplied by the caller");
+
+  NSUInteger resetsAfterFirstInit = ApproovMutatorBridgeResetToDefaultCount();
+  InitializeService(service, nil);
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 1,
+             @"Same-config re-initialization must reset the service mutator");
+
+  AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service initialize:@"#other-account#AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                comment:@"reinit"
+               resolver:resolve
+               rejecter:reject];
+  });
+  AssertTrue(ApproovMutatorBridgeResetToDefaultCount() == resetsAfterFirstInit + 1,
+             @"A rejected different-config initialization must not reset the service mutator");
+  AssertTrue(isInitialized, @"A rejected initialization should keep the layer initialized");
+  ApproovMutatorBridgeReset();
+}
+
+static void TestSetTokenHeaderTreatsNilPrefixAsEmptyString(void) {
+  ApproovService *service = FreshService();
+
+  [service setTokenHeader:@"X-Approov-Token" prefix:nil];
+
+  AssertEqualObjects(@"X-Approov-Token", approovTokenHeader, @"Token header should update");
+  AssertEqualObjects(@"", approovTokenPrefix,
+                     @"Nil token prefix should be stored as an empty string");
+}
+
+// Regression for the setServiceMutatorType mask validation (Copilot review, PR #32).
+// The proceed bitmask is bridged from JavaScript as a double; a non-finite, fractional,
+// or out-of-32-bit-range value must be rejected before it is narrowed, so it can never be
+// silently coerced into an unintended (security-relevant) proceed policy. A well-formed
+// mask (including the DEFAULT sentinel -1) must still be accepted. This mirrors the Android
+// ApproovServicePublicApiTest coverage so both platforms enforce identical behaviour.
+static void TestSetServiceMutatorTypeValidatesMask(void) {
+  const double invalidMasks[] = {
+      1.5,           // fractional
+      NAN,           // not a number
+      INFINITY,      // +infinity
+      -INFINITY,     // -infinity
+      2147483648.0,  // 2^31, above the signed 32-bit range
+      -2147483649.0, // -(2^31) - 1, below the signed 32-bit range
+      // Undefined bits: only bits 0-10 name a token-fetch status, so a mask carrying any
+      // other bit grants PROCEED to nothing and would install a silent block-everything
+      // policy. Mirrors setServiceMutatorTypeRejectsMasksWithUndefinedBits on Android.
+      2048.0,        // 1 << 11, first bit above BIT_DISABLED
+      1073741824.0,  // 1 << 30, far above the defined range
+      2056.0,        // BIT_NO_NETWORK (1 << 3) plus an undefined bit (1 << 11)
+      2147483647.0,  // INT32_MAX — in range, but mostly undefined bits
+      -2.0           // negative, but not the DEFAULT sentinel
+  };
+  for (size_t i = 0; i < sizeof(invalidMasks) / sizeof(invalidMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    ApproovMutatorBridgeReset();
+    double mask = invalidMasks[i];
+    NSDictionary *result = AwaitPromise(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+      [service setServiceMutatorType:mask
+                                sign:YES
+                       signatureMode:@"install"
+                            resolver:resolve
+                            rejecter:reject];
+    });
+    AssertEqualObjects(@"setServiceMutatorType", result[@"code"],
+               [NSString stringWithFormat:@"invalid mask %g should reject with setServiceMutatorType",
+                                          invalidMasks[i]]);
+  }
+
+  const double validMasks[] = {
+      -1.0,   // MutatorPreset.DEFAULT — restore the built-in signing default
+      0.0,    // block every maskable failure status
+      20.0,   // BIT_NO_NETWORK (1 << 3) | BIT_POOR_NETWORK (1 << 4)
+      2047.0  // every defined bit (0-10) — the permissive extreme
+  };
+  for (size_t i = 0; i < sizeof(validMasks) / sizeof(validMasks[0]); i++) {
+    ApproovService *service = FreshService();
+    ApproovMutatorBridgeReset();
+    double mask = validMasks[i];
+    NSDictionary *result = AwaitPromise(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+      [service setServiceMutatorType:mask
+                                sign:YES
+                       signatureMode:@"install"
+                            resolver:resolve
+                            rejecter:reject];
+    });
+    AssertEqualObjects([NSNull null], result[@"code"],
+               [NSString stringWithFormat:@"valid mask %g should resolve", validMasks[i]]);
+  }
+  ApproovMutatorBridgeReset();
+}
+
+// fetchWithApproov rejects non-HTTP URLs (e.g. file://) with a clear error code
+// rather than crashing or proceeding with a nil host.
+static void TestFetchWithApproovRejectsNonHTTPURLs(void) {
+  ApproovService *service = FreshService();
+
+  NSDictionary *rejected = AwaitRejected(^(RCTPromiseResolveBlock resolve, RCTPromiseRejectBlock reject) {
+    [service fetchWithApproov:@"file:///tmp/no-host" options:@{} resolver:resolve rejecter:reject];
+  });
+
+  AssertEqualObjects(@"bad_url", rejected[@"code"],
+                     @"fetchWithApproov should reject invalid URLs with bad_url");
+  AssertTrue([rejected[@"message"] containsString:@"invalid URL supplied to fetchWithApproov"],
+             @"fetchWithApproov should provide a descriptive invalid URL error");
+}
+
+// ---------------------------------------------------------------------------
+// ApproovMockURLProtocol and the swizzled React Native task creation paths
+// (CHANGELOG 3.5.12 "iOS Mock Completion Handlers" and "iOS Mock Response
+// Recursion Fix").
+// ---------------------------------------------------------------------------
+
+// The name matches the default RCT* allow list, so sessions with it are intercepted.
+@interface RCTTestNetworkDelegate : NSObject <NSURLSessionDataDelegate>
+@property(nonatomic, strong) NSMutableData *receivedData;
+@property(nonatomic, strong, nullable) NSError *error;
+@property(nonatomic, strong) dispatch_semaphore_t semaphore;
+@end
+
+@implementation RCTTestNetworkDelegate
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _receivedData = [[NSMutableData alloc] init];
+    _semaphore = dispatch_semaphore_create(0);
+  }
+  return self;
+}
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+didReceiveResponse:(NSURLResponse *)response
+ completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
+  (void)session;
+  (void)dataTask;
+  (void)response;
+  completionHandler(NSURLSessionResponseAllow);
+}
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+    didReceiveData:(NSData *)data {
+  (void)session;
+  (void)dataTask;
+  [self.receivedData appendData:data];
+}
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didCompleteWithError:(NSError *)error {
+  (void)session;
+  (void)task;
+  self.error = error;
+  dispatch_semaphore_signal(self.semaphore);
+}
+@end
+
+static NSURLSession *MockSession(void) {
+  NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+  configuration.protocolClasses = @[ [ApproovMockURLProtocol class] ];
+  return [NSURLSession sessionWithConfiguration:configuration];
+}
+
+// Status-code mock tasks invoke the completion handler; before the fix it was
+// dropped and callers hung.
+static void TestMockStatusCompletionHandlersFire(void) {
+  NSURLSession *session = MockSession();
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSInteger statusCode = 0;
+  __block NSError *capturedError = nil;
+
+  NSURLSessionDataTask *task = [ApproovMockURLProtocol
+      createMockTaskForSession:session
+                withStatusCode:503
+                   withMessage:@"retry please"
+             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+               (void)data;
+               statusCode = ((NSHTTPURLResponse *)response).statusCode;
+               capturedError = error;
+               dispatch_semaphore_signal(semaphore);
+             }];
+  [task resume];
+
+  long waitResult = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"Mock status task should finish in time");
+  AssertEqualIntegers(503, statusCode, @"Mock status task should surface the status code");
+  AssertTrue(capturedError == nil, @"Mock status tasks should complete without an NSError");
+  [session finishTasksAndInvalidate];
+}
+
+// Error mock tasks invoke the completion handler with the encoded NSError.
+static void TestMockErrorCompletionHandlersFire(void) {
+  NSURLSession *session = MockSession();
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSError *capturedError = nil;
+
+  NSURLSessionDataTask *task = [ApproovMockURLProtocol
+      createMockTaskForSession:session
+                 withErrorCode:499
+                   withMessage:@"mock failure"
+             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+               (void)data;
+               (void)response;
+               capturedError = error;
+               dispatch_semaphore_signal(semaphore);
+             }];
+  [task resume];
+
+  long waitResult = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"Mock error task should finish in time");
+  AssertTrue(capturedError != nil, @"Mock error tasks should surface an NSError");
+  AssertTrue([capturedError.localizedDescription containsString:@"mock failure"],
+             @"Mock error tasks should preserve the encoded message");
+  [session finishTasksAndInvalidate];
+}
+
+// Upload mock tasks are real upload tasks and invoke the completion handler.
+static void TestMockUploadCompletionHandlersFire(void) {
+  NSURLSession *session = MockSession();
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSInteger statusCode = 0;
+
+  NSURLSessionUploadTask *task = [ApproovMockURLProtocol
+      createMockUploadTaskForSession:session
+                      withStatusCode:503
+                         withMessage:@"retry upload"
+                   completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                     (void)data;
+                     (void)error;
+                     statusCode = ((NSHTTPURLResponse *)response).statusCode;
+                     dispatch_semaphore_signal(semaphore);
+                   }];
+  [task resume];
+
+  long waitResult = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"Mock upload task should finish in time");
+  AssertTrue([task isKindOfClass:[NSURLSessionUploadTask class]], @"Mock upload task should be an upload task");
+  AssertEqualIntegers(503, statusCode, @"Mock upload tasks should preserve the status code");
+  [session finishTasksAndInvalidate];
+}
+
+// A POOR_NETWORK token fetch on a swizzled React Native task becomes a synthetic
+// 503 without recursing through the interceptor: the mutator is consulted once.
+// The scenario answers POOR_NETWORK for this one path, so a token fetch still in
+// flight from an earlier test cannot take the result.
+static void RunSyntheticPoorNetworkResponse(BOOL useURLSelector) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@"\"fetchApproovToken\":[{\"urlRegex\":\"/poor-network$\",\"status\":\"POOR_NETWORK\"}]");
+  InitializeService(service, @"reinit");
+
+  __block NSInteger fetchTokenHandlerCalls = 0;
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url, NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    (void)errorPointer;
+    fetchTokenHandlerCalls += 1;
+    return NO;
+  });
+
+  RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration ephemeralSessionConfiguration]
+                                                        delegate:delegate
+                                                   delegateQueue:nil];
+  NSURL *url = [NSURL URLWithString:[TargetURL() stringByAppendingString:@"/poor-network"]];
+  NSURLSessionDataTask *task = useURLSelector
+      ? [session dataTaskWithURL:url]
+      : [session dataTaskWithRequest:[NSURLRequest requestWithURL:url]];
+  [task resume];
+
+  NSString *path = useURLSelector ? @"dataTaskWithURL" : @"dataTaskWithRequest";
+  long waitResult = dispatch_semaphore_wait(delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, [path stringByAppendingString:@": synthetic retry response should complete in time"]);
+  AssertTrue(delegate.error != nil, [path stringByAppendingString:@": synthetic retry response should fail with an NSError"]);
+  AssertEqualIntegers(503, delegate.error.code, [path stringByAppendingString:@": synthetic retry response should surface 503"]);
+  AssertEqualIntegers(0, (NSInteger)delegate.receivedData.length,
+                      [path stringByAppendingString:@": synthetic retry response should not include a body"]);
+  AssertEqualIntegers(1, fetchTokenHandlerCalls, [path stringByAppendingString:@": the mutator should be consulted once"]);
+
+  [session finishTasksAndInvalidate];
+  ApproovMutatorBridgeReset();
+}
+
+static void TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(void) {
+  RunSyntheticPoorNetworkResponse(YES);
+}
+
+static void TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(void) {
+  RunSyntheticPoorNetworkResponse(NO);
+}
+
+// Answers requests to the protected test host locally and records the last one.
+static NSURLRequest *gCapturedRequest = nil;
+
+@interface ApproovCaptureProtocol : NSURLProtocol
+@end
+
+@implementation ApproovCaptureProtocol
++ (BOOL)canInitWithRequest:(NSURLRequest *)request {
+  return [request.URL.host isEqualToString:TargetHost()];
+}
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
+  return request;
+}
+- (void)startLoading {
+  @synchronized([ApproovCaptureProtocol class]) {
+    gCapturedRequest = self.request;
+  }
+  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
+                                                            statusCode:200
+                                                           HTTPVersion:@"HTTP/1.1"
+                                                          headerFields:@{}];
+  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+  [self.client URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {
+}
+@end
+
+// useApproovStatusIfNoToken also works on the swizzled NSURLSession path: when a
+// MITM is detected and the mutator proceeds, the request carries the status.
+static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(@"\"fetchApproovToken\":[{\"urlRegex\":\"/mitm-status$\",\"status\":\"MITM_DETECTED\"}]");
+  InitializeService(service, @"reinit");
+  [service setTokenHeader:@"Approov-Token" prefix:@"Bearer "];
+  useApproovStatusIfNoToken = YES;
+  @synchronized([ApproovCaptureProtocol class]) {
+    gCapturedRequest = nil;
+  }
+  ApproovMutatorBridgeSetFetchTokenHandler(^BOOL(id result, NSString *url, NSError **errorPointer) {
+    (void)result;
+    (void)url;
+    (void)errorPointer;
+    return YES;
+  });
+
+  RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
+  NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+  config.protocolClasses = @[ [ApproovCaptureProtocol class] ];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:config delegate:delegate delegateQueue:nil];
+  NSURL *url = [NSURL URLWithString:[TargetURL() stringByAppendingString:@"/mitm-status"]];
+  [[session dataTaskWithRequest:[NSURLRequest requestWithURL:url]] resume];
+
+  long waitResult = dispatch_semaphore_wait(delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"Request should complete in time");
+  NSURLRequest *lastRequest = nil;
+  @synchronized([ApproovCaptureProtocol class]) {
+    lastRequest = gCapturedRequest;
+  }
+  AssertNotNil(lastRequest, @"The capture protocol should have seen the request");
+  AssertEqualObjects(@"Bearer mitm detected", [lastRequest valueForHTTPHeaderField:@"Approov-Token"],
+                     @"The status header should be on the outgoing request");
+  [session finishTasksAndInvalidate];
+  ApproovMutatorBridgeReset();
+}
+
+// A NO_APPROOV_SERVICE secure string result that the mutator masks leaves the
+// header placeholder in place and does not fail the request.
+static void TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+  [service addSubstitutionHeader:@"Api-Key" requiredPrefix:@""];
+
+  __block BOOL sawNoApproovService = NO;
+  ApproovMutatorBridgeSetHeaderSubstitutionHandler(^BOOL(id result, NSString *header, NSError **errorPointer) {
+    (void)errorPointer;
+    ApproovTokenFetchResult *fetchResult = (ApproovTokenFetchResult *)result;
+    sawNoApproovService = [header isEqualToString:@"Api-Key"]
+        && fetchResult.status == ApproovTokenFetchStatusNoApproovService;
+    return NO;
+  });
+  [MiniSDKAttesterProxyController setNextAttestationDirectiveJSON:@"{\"operation\":\"fetchSecureString\",\"response\":{\"status\":\"NO_APPROOV_SERVICE\"}}"];
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  [request setValue:@"header-key" forHTTPHeaderField:@"Api-Key"];
+  ApproovInterceptorResult *result = [service interceptRequest:request];
+
+  AssertTrue(sawNoApproovService,
+             @"Header substitution should consult the mutator for NO_APPROOV_SERVICE");
+  AssertEqualIntegers(ApproovInterceptorActionProceed, result.action,
+                      @"Masked NO_APPROOV_SERVICE substitution should not fail the request");
+  AssertEqualObjects(@"header-key", [result.request valueForHTTPHeaderField:@"Api-Key"],
+                     @"Masked NO_APPROOV_SERVICE should leave the header placeholder in place");
+  AssertNotNil([result.request valueForHTTPHeaderField:@"Approov-Token"],
+               @"The token fetch should still have succeeded");
+  ApproovMutatorBridgeReset();
+}
+
+
 int main(void) {
   @autoreleasepool {
     NSArray<void (^)(void)> *tests = @[
@@ -2121,6 +2651,22 @@ int main(void) {
       ^{ TestRedirectRetargetedByCallerDelegateIsProcessedForItsChoice(); },
       ^{ TestRedirectRefusedByCallerDelegateIsNotFollowed(); },
       ^{ TestLogMessageDoesNotCrashAtAnyLevel(); },
+      ^{ TestInitializeFailureRejectsAndKeepsLayerUninitialized(); },
+      ^{ TestInitializeTreatsFalseNilErrorAsAlreadyInitialized(); },
+      ^{ TestInitializeRejectsNativeDifferentConfigurationError(); },
+      ^{ TestInitializeWithEmptyConfigThenSdkFailurePreservesBootstrapState(); },
+      ^{ TestInitializeWithSameConfigResetsRuntimeConfiguration(); },
+      ^{ TestInitializeResetsServiceMutatorOnReinitialization(); },
+      ^{ TestSetTokenHeaderTreatsNilPrefixAsEmptyString(); },
+      ^{ TestSetServiceMutatorTypeValidatesMask(); },
+      ^{ TestFetchWithApproovRejectsNonHTTPURLs(); },
+      ^{ TestMockStatusCompletionHandlersFire(); },
+      ^{ TestMockErrorCompletionHandlersFire(); },
+      ^{ TestMockUploadCompletionHandlersFire(); },
+      ^{ TestReactFetchStyleDataTaskWithURLReturnsSyntheticResponse(); },
+      ^{ TestReactFetchStylePoorNetworkReturnsSyntheticResponseWithoutRecursion(); },
+      ^{ TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(); },
+      ^{ TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(); },
 
     ];
 

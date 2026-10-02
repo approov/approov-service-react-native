@@ -1,5 +1,6 @@
 package io.approov.reactnative;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,9 +10,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
-import android.content.res.AssetManager;
 
 import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
@@ -22,89 +23,78 @@ import com.facebook.react.modules.network.OkHttpClientProvider;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 import org.mockito.MockedStatic;
 
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovServicePublicApiTest {
+    private static final String PIN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    private static final String PIN_B = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=";
 
     private ReactApplicationContext reactContext;
     private MockedStatic<NetworkingModule> networkingModuleStatic;
 
     @Before
     public void setUp() throws Exception {
-        reactContext = mock(ReactApplicationContext.class);
-        AssetManager assetManager = mock(AssetManager.class);
-        when(reactContext.getAssets()).thenReturn(assetManager);
-        when(assetManager.open(anyString())).thenThrow(new IOException("missing"));
-
+        reactContext = MiniSdkHarness.reactContext();
+        MiniSdkHarness.resetServiceState();
         networkingModuleStatic = mockStatic(NetworkingModule.class);
     }
 
     @After
-    public void tearDown() {
+    public void tearDown() throws Exception {
         networkingModuleStatic.close();
+        MiniSdkHarness.tearDown();
     }
 
     private ApproovService newService() {
         return new ApproovService(reactContext);
     }
 
-    private void setStaticField(String name, Object value) throws Exception {
-        Field field = ApproovService.class.getDeclaredField(name);
-        field.setAccessible(true);
-        field.set(null, value);
+    // a mini-SDK scenario protecting example.com with a single leaf pin
+    private static void loadExampleScenario(String pin) {
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"example.com\"],"
+            + "\"pins\": {\"public-key-sha256\": {\"example.com\": [\"" + pin + "\"]}}");
     }
 
     @Test
     public void getLastArcReturnsArcOnlyAfterSuccessfulFetch() throws Exception {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            ApproovService service = newService();
-            setStaticField("isInitialized", true);
-            setStaticField("initialConfig", "test-config");
-            Promise promise = mock(Promise.class);
+        loadExampleScenario(PIN_B);
+        ApproovService service = MiniSdkHarness.initializedService(reactContext);
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Object> arc = new AtomicReference<>();
+        Promise promise = mock(Promise.class);
+        doAnswer(invocation -> {
+            arc.set(invocation.getArgument(0));
+            done.countDown();
+            return null;
+        }).when(promise).resolve(any());
 
-            approov.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(Collections.singletonMap("example.com", Collections.singletonList("pin")));
+        service.getLastARC(promise);
 
-            Approov.TokenFetchResult success = mock(Approov.TokenFetchResult.class);
-            when(success.getToken()).thenReturn("jwt-token");
-            when(success.getARC()).thenReturn("ARC123");
-            approov.when(() -> Approov.fetchApproovToken(any(Approov.TokenFetchCallback.class), anyString()))
-                .thenAnswer(invocation -> {
-                    Approov.TokenFetchCallback callback = invocation.getArgument(0);
-                    callback.approovCallback(success);
-                    return null;
-                });
-
-            service.getLastARC(promise);
-
-            org.mockito.Mockito.verify(promise).resolve("ARC123");
-        }
+        assertTrue("getLastARC did not resolve", done.await(5, TimeUnit.SECONDS));
+        // the ARC the mini-SDK puts on a successful token fetch for the pinned host
+        assertEquals("IXPSB7TRK26LXE3M", arc.get());
     }
 
     @Test
     public void getPinningDiagnosticsResolvesExpectedFlagsAndInterceptorNames() throws Exception {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
-             MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
-            ApproovService service = newService();
+        loadExampleScenario(PIN_A);
+        ApproovService service = MiniSdkHarness.initializedService(reactContext);
+        try (MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
             Promise promise = mock(Promise.class);
             AtomicReference<Object> resolvedValue = new AtomicReference<>();
-
-            setStaticField("isInitialized", true);
-            setStaticField("initialConfig", "test-config");
-            approov.when(() -> Approov.getPins(anyString())).thenReturn(Collections.singletonMap(
-                "example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
-            service.rebuildPins();
             doAnswer(invocation -> {
                 resolvedValue.set(invocation.getArgument(0));
                 return null;
@@ -142,71 +132,51 @@ public class ApproovServicePublicApiTest {
 
     @Test
     public void existingClientRefreshesCertificatePinsWhenConfigurationChanges() throws Exception {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            ApproovService service = newService();
-            setStaticField("isInitialized", true);
-            setStaticField("initialConfig", "test-config");
+        loadExampleScenario(PIN_B);
+        ApproovService service = MiniSdkHarness.initializedService(reactContext);
+        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
+        OkHttpClient.Builder firstBuilder = new OkHttpClient.Builder();
+        clientBuilder.apply(firstBuilder);
+        ApproovPinningInterceptor installed = (ApproovPinningInterceptor) firstBuilder.build().networkInterceptors().get(0);
+        CertificatePinner firstPinner = installed.getCertificatePinner();
 
-            Map<String, List<String>> initialPins = Collections.singletonMap(
-                "example.com",
-                Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
-            );
-            Map<String, List<String>> updatedPins = Collections.singletonMap(
-                "example.com",
-                Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-            );
+        assertTrue("expected initial pinner to contain BBB... pin but was " + firstPinner.getPins(),
+            hasPinHash(firstPinner, PIN_B));
 
-            approov.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(initialPins)
-                .thenReturn(updatedPins);
+        // a token fetch delivers a dynamic configuration update carrying new pins
+        AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\": \"fetchApproovToken\","
+            + "\"response\": {\"status\": \"SUCCESS\", \"configChanged\": true},"
+            + "\"attesterConfig\": {\"protectedDomains\": [\"example.com\"],"
+            + "\"pins\": {\"public-key-sha256\": {\"example.com\": [\"" + PIN_A + "\"]}}}}");
+        Approov.TokenFetchResult update = Approov.fetchApproovTokenAndWait("https://example.com/");
+        assertTrue("the fetch should report the configuration change", update.isConfigChanged());
+        service.rebuildPins();
 
-            service.rebuildPins();
-            ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
-            OkHttpClient.Builder firstBuilder = new OkHttpClient.Builder();
-            clientBuilder.apply(firstBuilder);
-            ApproovPinningInterceptor installed = (ApproovPinningInterceptor) firstBuilder.build().networkInterceptors().get(0);
-            CertificatePinner firstPinner = installed.getCertificatePinner();
+        CertificatePinner secondPinner = installed.getCertificatePinner();
 
-            assertTrue("expected initial pinner to contain BBB... pin but was " + firstPinner.getPins(),
-                hasPinHash(firstPinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
-
-            service.rebuildPins();
-
-            CertificatePinner secondPinner = installed.getCertificatePinner();
-
-            assertTrue("expected refreshed pinner to contain AAA... pin but was " + secondPinner.getPins(),
-                hasPinHash(secondPinner, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
-        }
+        assertTrue("expected refreshed pinner to contain AAA... pin but was " + secondPinner.getPins(),
+            hasPinHash(secondPinner, PIN_A));
     }
 
     @Test
     public void exclusionRegexDoesNotDisableCertificatePinning() throws Exception {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            ApproovService service = newService();
-            setStaticField("isInitialized", true);
-            setStaticField("initialConfig", "test-config");
-            service.addExclusionURLRegex("^.*excluded.*$");
+        loadExampleScenario(PIN_B);
+        ApproovService service = MiniSdkHarness.initializedService(reactContext);
+        // runtime configuration is reset by initialize, so apply it afterwards
+        service.addExclusionURLRegex("^.*excluded.*$");
 
-            approov.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(Collections.singletonMap(
-                    "example.com",
-                    Collections.singletonList("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")
-                ));
+        ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        clientBuilder.apply(builder);
+        CertificatePinner pinner = ((ApproovPinningInterceptor) builder.build().networkInterceptors().get(0)).getCertificatePinner();
 
-            service.rebuildPins();
-            ApproovClientBuilder clientBuilder = new ApproovClientBuilder(service, null);
-            OkHttpClient.Builder builder = new OkHttpClient.Builder();
-            clientBuilder.apply(builder);
-            CertificatePinner pinner = ((ApproovPinningInterceptor) builder.build().networkInterceptors().get(0)).getCertificatePinner();
-
-            assertTrue("expected exclusion regex to leave certificate pinning active",
-                hasPinHash(pinner, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="));
-        }
+        assertTrue("expected exclusion regex to leave certificate pinning active",
+            hasPinHash(pinner, PIN_B));
     }
 
     @Test
     public void logMessageDoesNotCrashAtAnyLevel() {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+        {
             ApproovService service = newService();
 
             // All defined levels: EXTREME(0), DEBUG(1), INFO(2), WARN(3), ERROR(4)
@@ -225,8 +195,7 @@ public class ApproovServicePublicApiTest {
 
     @Test
     public void isInterceptorActiveReturnsTrueWhenApproovInterceptorIsPresent() {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
-             MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
             ApproovService service = newService();
             Promise promise = mock(Promise.class);
 
@@ -243,8 +212,7 @@ public class ApproovServicePublicApiTest {
 
     @Test
     public void isInterceptorActiveReturnsFalseWhenNoApproovInterceptorIsPresent() {
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class);
-             MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
+        try (MockedStatic<OkHttpClientProvider> okProvider = mockStatic(OkHttpClientProvider.class)) {
             ApproovService service = newService();
             Promise promise = mock(Promise.class);
 
@@ -273,7 +241,7 @@ public class ApproovServicePublicApiTest {
             (double) Integer.MAX_VALUE + 1.0, // above the signed 32-bit range
             (double) Integer.MIN_VALUE - 1.0, // below the signed 32-bit range
         };
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+        {
             for (double mask : invalidMasks) {
                 Promise promise = mock(Promise.class);
 
@@ -299,7 +267,7 @@ public class ApproovServicePublicApiTest {
             (double) Integer.MAX_VALUE,                           // in 32-bit range, mostly undefined bits
             -2.0,                                                 // negative, but not the DEFAULT sentinel
         };
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+        {
             for (double mask : invalidMasks) {
                 Promise promise = mock(Promise.class);
 
@@ -323,7 +291,7 @@ public class ApproovServicePublicApiTest {
             (double) (PolicyMutator.BIT_NO_NETWORK | PolicyMutator.BIT_POOR_NETWORK),
             (double) PolicyMutator.ALL_BITS, // every defined bit — the permissive extreme
         };
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
+        {
             for (double mask : validMasks) {
                 Promise promise = mock(Promise.class);
 

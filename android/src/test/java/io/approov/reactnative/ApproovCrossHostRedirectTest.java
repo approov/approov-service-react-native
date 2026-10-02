@@ -1,29 +1,27 @@
 package io.approov.reactnative;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.startsWith;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
+import java.security.KeyStore;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +29,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
@@ -40,7 +44,10 @@ import okhttp3.Response;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.mockito.MockedStatic;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 /**
  * OkHttp follows a redirect after the application interceptors ran and builds the follow-up from
@@ -50,12 +57,14 @@ import org.mockito.MockedStatic;
  * follow-up is not protected again, and a redirect within the same host is left as it is
  * (core-service-layers-testing TESTING_REQUIREMENTS, "Approov Credentials Never Cross Hosts").
  */
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovCrossHostRedirectTest {
     private static final String PROTECTED = "protected.test";
     private static final String OTHER_PROTECTED = "other-protected.test";
     private static final String UNPROTECTED = "unprotected.test";
 
-    private ServerSocket server;
+    private SSLServerSocket server;
     private final ExecutorService threads = Executors.newCachedThreadPool();
     // each request head the server received, in order of arrival
     private final List<Map<String, String>> received = Collections.synchronizedList(new ArrayList<>());
@@ -68,7 +77,21 @@ public class ApproovCrossHostRedirectTest {
     @Before
     public void setUp() throws Exception {
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
-        server = new ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
+        // a local TLS server answering for every test host (the mini-SDK only issues tokens
+        // for https URLs); the test-only certificate names localhost, so the client accepts
+        // the synthetic host names
+        KeyStore keys = KeyStore.getInstance("PKCS12");
+        try (InputStream in = getClass().getResourceAsStream("/pinning-test.p12")) {
+            assertNotNull(in);
+            keys.load(in, "test-password".toCharArray());
+        }
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(keys, "test-password".toCharArray());
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(keys);
+        SSLContext tls = SSLContext.getInstance("TLS");
+        tls.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+        server = (SSLServerSocket) tls.getServerSocketFactory().createServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
         threads.execute(() -> {
             while (!server.isClosed()) {
                 try {
@@ -79,37 +102,24 @@ public class ApproovCrossHostRedirectTest {
                 }
             }
         });
-        sdk = mockStatic(Approov.class);
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.emptyMap());
-        Approov.TokenFetchResult secret = result(Approov.TokenFetchStatus.SUCCESS, null, "real-secret");
-        sdk.when(() -> Approov.fetchSecureStringAndWait("placeholder-key", null)).thenReturn(secret);
-        Approov.TokenFetchResult unknownKey = result(Approov.TokenFetchStatus.UNKNOWN_KEY, null, null);
-        sdk.when(() -> Approov.fetchSecureStringAndWait("real-secret", null)).thenReturn(unknownKey);
 
-        service = mock(ApproovService.class);
-        when(service.isApproovEnabled()).thenReturn(true);
-        when(service.isInitialized()).thenReturn(true);
-        when(service.getTokenHeader()).thenReturn("Approov-Token");
-        when(service.getTokenPrefix()).thenReturn("");
-        when(service.getTraceIDHeader()).thenReturn("Approov-TraceID");
-        when(service.getExclusionURLRegexs()).thenReturn(Collections.emptyMap());
-        Map<String, String> substitution = new HashMap<>();
-        substitution.put("Api-Key", "");
-        when(service.getSubstitutionHeaders()).thenReturn(substitution);
-        when(service.getSubstitutionQueryParams()).thenReturn(Collections.emptyMap());
-        Approov.TokenFetchResult protectedToken = result(Approov.TokenFetchStatus.SUCCESS, "jwt-protected", null);
-        Approov.TokenFetchResult otherToken = result(Approov.TokenFetchStatus.SUCCESS, "jwt-other", null);
-        Approov.TokenFetchResult unknownUrl = result(Approov.TokenFetchStatus.UNKNOWN_URL, null, null);
-        when(service.fetchApproovTokenAndWait(startsWith("http://" + PROTECTED))).thenReturn(protectedToken);
-        when(service.fetchApproovTokenAndWait(startsWith("http://" + OTHER_PROTECTED))).thenReturn(otherToken);
-        when(service.fetchApproovTokenAndWait(startsWith("http://" + UNPROTECTED))).thenReturn(unknownUrl);
+        // the mini-SDK protects two of the hosts and holds the secure string for the placeholder
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"" + PROTECTED + "\", \"" + OTHER_PROTECTED + "\"],"
+                + "\"initialSecureStrings\": {\"placeholder-key\": \"real-secret\"}");
+        service = MiniSdkHarness.initializedService(MiniSdkHarness.reactContext());
+        service.addSubstitutionHeader("Api-Key", "");
+        // every SDK call from here on is answered by the mini-SDK and recorded
+        sdk = mockStatic(Approov.class, CALLS_REAL_METHODS);
 
         Dns local = hostname -> Collections.singletonList(InetAddress.getByName("127.0.0.1"));
+        java.util.Set<String> testHosts = new java.util.HashSet<>(java.util.Arrays.asList(PROTECTED, OTHER_PROTECTED, UNPROTECTED));
         client = new OkHttpClient.Builder()
                 .dns(local)
+                .sslSocketFactory(tls.getSocketFactory(), (X509TrustManager) tmf.getTrustManagers()[0])
+                .hostnameVerifier((hostname, session) -> testHosts.contains(hostname))
                 .callTimeout(5, TimeUnit.SECONDS)
                 .addInterceptor(new ApproovInterceptor(service))
-                .addNetworkInterceptor(new ApproovPinningInterceptor())
+                .addNetworkInterceptor(service.getPinningInterceptor())
                 .build();
     }
 
@@ -123,17 +133,16 @@ public class ApproovCrossHostRedirectTest {
         threads.shutdownNow();
         if (sdk != null)
             sdk.close();
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        MiniSdkHarness.tearDown();
     }
 
-    private static Approov.TokenFetchResult result(Approov.TokenFetchStatus status, String token, String secure) {
-        Approov.TokenFetchResult r = mock(Approov.TokenFetchResult.class);
-        when(r.getStatus()).thenReturn(status);
-        when(r.getToken()).thenReturn(token == null ? "" : token);
-        when(r.getSecureString()).thenReturn(secure);
-        when(r.getTraceID()).thenReturn(token == null ? null : "trace-" + token);
-        when(r.getLoggableToken()).thenReturn("{}");
-        return r;
+    // the host a mini-SDK token was issued for (its aud claim)
+    private static String audienceOf(String jwt) throws Exception {
+        assertNotNull("a token should be present", jwt);
+        String[] parts = jwt.split("\\.");
+        assertEquals("a JWT has three parts", 3, parts.length);
+        String body = new String(java.util.Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+        return new org.json.JSONObject(body).getString("aud");
     }
 
     private void serve(Socket socket) {
@@ -164,7 +173,7 @@ public class ApproovCrossHostRedirectTest {
     }
 
     private String url(String host, String path) {
-        return "http://" + host + ":" + server.getLocalPort() + path;
+        return "https://" + host + ":" + server.getLocalPort() + path;
     }
 
     private void redirect(String path, String location) {
@@ -194,7 +203,7 @@ public class ApproovCrossHostRedirectTest {
         }
 
         assertEquals(2, received.size());
-        assertEquals("jwt-protected", received.get(0).get("approov-token"));
+        assertEquals(PROTECTED, audienceOf(received.get(0).get("approov-token")));
         assertEquals("real-secret", received.get(0).get("api-key"));
         assertEquals(UNPROTECTED + ":" + server.getLocalPort(), received.get(1).get("host"));
         assertNoApproovCredentials(received.get(1));
@@ -208,7 +217,7 @@ public class ApproovCrossHostRedirectTest {
         }
 
         assertNoApproovCredentials(received.get(1));
-        verify(service, times(1)).fetchApproovTokenAndWait(anyString());
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), times(1));
     }
 
     @Test
@@ -218,10 +227,10 @@ public class ApproovCrossHostRedirectTest {
             assertEquals(200, r.code());
         }
 
-        assertEquals("jwt-protected", received.get(1).get("approov-token"));
-        assertEquals("trace-jwt-protected", received.get(1).get("approov-traceid"));
+        assertEquals("the same-host follow-up keeps the token", received.get(0).get("approov-token"), received.get(1).get("approov-token"));
+        assertEquals(received.get(0).get("approov-traceid"), received.get(1).get("approov-traceid"));
         assertEquals("real-secret", received.get(1).get("api-key"));
-        verify(service, times(1)).fetchApproovTokenAndWait(anyString());
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), times(1));
     }
 
     @Test
@@ -285,7 +294,7 @@ public class ApproovCrossHostRedirectTest {
         }
 
         assertEquals(3, received.size());
-        assertEquals("jwt-protected", received.get(1).get("approov-token"));
+        assertEquals(PROTECTED, audienceOf(received.get(1).get("approov-token")));
         assertNoApproovCredentials(received.get(2));
         assertEquals("Bearer refreshed", received.get(1).get("authorization"));
     }
@@ -312,8 +321,8 @@ public class ApproovCrossHostRedirectTest {
         }
 
         assertEquals(1, received.size());
-        assertEquals("jwt-protected", received.get(0).get("approov-token"));
+        assertEquals(PROTECTED, audienceOf(received.get(0).get("approov-token")));
         assertEquals("real-secret", received.get(0).get("api-key"));
-        verify(service, times(1)).fetchApproovTokenAndWait(anyString());
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), times(1));
     }
 }

@@ -8,26 +8,26 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import io.approov.internal.reactnative.util.sig.ComponentProvider;
 import io.approov.internal.reactnative.util.sig.SignatureParameters;
@@ -42,17 +42,30 @@ import okhttp3.ResponseBody;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.runner.RunWith;
 import org.mockito.MockedStatic;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
+/**
+ * Runs the application interceptor against the Approov mini-SDK. Token, secure string and pin
+ * refresh results come from the mini-SDK, with failure statuses set by its attestation directives.
+ * The OkHttp chain is a mock that answers 200 with the request it was given.
+ */
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovInterceptorTest {
 
     private static final MediaType TEXT_PLAIN = MediaType.get("text/plain");
     private static final MediaType APPLICATION_JSON = MediaType.get("application/json");
     private static final long FIXED_CREATED = 1_717_171_717L;
     private static final long FIXED_EXPIRES_LIFETIME = 15L;
+    private static final String API = "https://api.example.com/data";
 
+    // a spy over a real service initialized with the mini-SDK
     private ApproovService service;
+    // every Approov SDK call, answered by the mini-SDK and recorded
+    private MockedStatic<Approov> sdk;
     private Interceptor.Chain chain;
     private ApproovInterceptor interceptor;
     private RecordingMutator mutator;
@@ -154,23 +167,14 @@ public class ApproovInterceptorTest {
 
     @Before
     public void setUp() throws Exception {
-        service = mock(ApproovService.class);
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"api.example.com\"],"
+                + "\"initialSecureStrings\": {\"header-secret\": \"live-header-secret\", \"query-secret\": \"live-query-secret\"}");
+        ApproovService initialized = MiniSdkHarness.initializedService(MiniSdkHarness.reactContext());
+        initialized.setTokenHeader("Approov-Token", "Bearer ");
+        service = spy(initialized);
         chain = mock(Interceptor.Chain.class);
         interceptor = new ApproovInterceptor(service);
         mutator = new RecordingMutator();
-
-        when(service.isSuppressLoggingUnknownURL()).thenReturn(false);
-        when(service.getBindingHeader()).thenReturn(null);
-        when(service.getTokenHeader()).thenReturn("Approov-Token");
-        when(service.getTokenPrefix()).thenReturn("Bearer ");
-        when(service.getTraceIDHeader()).thenReturn("Approov-TraceID");
-        when(service.getSubstitutionHeaders()).thenReturn(new HashMap<>());
-        when(service.getSubstitutionQueryParams()).thenReturn(new HashMap<>());
-        when(service.getExclusionURLRegexs()).thenReturn(new HashMap<>());
-        when(service.getUseApproovStatusIfNoToken()).thenReturn(false);
-        when(service.isInitialized()).thenReturn(true);
-        when(service.isApproovEnabled()).thenReturn(true);
-        doNothing().when(service).rebuildPins();
         when(chain.proceed(any())).thenAnswer(invocation -> {
             Request proceeded = invocation.getArgument(0);
             return new Response.Builder()
@@ -183,11 +187,14 @@ public class ApproovInterceptorTest {
         });
 
         ApproovService.setServiceMutator(mutator);
+        sdk = mockStatic(Approov.class, CALLS_REAL_METHODS);
     }
 
     @After
-    public void tearDown() {
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+    public void tearDown() throws Exception {
+        if (sdk != null)
+            sdk.close();
+        MiniSdkHarness.tearDown();
     }
 
     private Request request(String url) {
@@ -197,23 +204,15 @@ public class ApproovInterceptorTest {
             .build();
     }
 
-    private Approov.TokenFetchResult result(Approov.TokenFetchStatus status) {
-        return result(status, "jwt-token", "trace-123", "secret-value");
+    // the next mini-SDK attestation for the operation answers with the given response members
+    private static void nextAttestation(String operation, String response) {
+        AttesterProxyController.setNextAttestationDirectiveJson(
+            "{\"operation\": \"" + operation + "\", \"response\": {" + response + "}}");
     }
 
-    private Approov.TokenFetchResult result(Approov.TokenFetchStatus status, String token, String traceId,
-            String secureString) {
-        Approov.TokenFetchResult result = mock(Approov.TokenFetchResult.class);
-        when(result.getStatus()).thenReturn(status);
-        when(result.getLoggableToken()).thenReturn("loggable-token");
-        when(result.getToken()).thenReturn(token);
-        when(result.getTraceID()).thenReturn(traceId);
-        when(result.getSecureString()).thenReturn(secureString);
-        when(result.getARC()).thenReturn("ARC123");
-        when(result.getRejectionReasons()).thenReturn("reason");
-        when(result.isConfigChanged()).thenReturn(false);
-        when(result.isForceApplyPins()).thenReturn(false);
-        return result;
+    private static void assertMiniSdkToken(String header) {
+        assertNotNull("a token header should be present", header);
+        assertTrue(header, header.startsWith("Bearer ey"));
     }
 
     // Forwarded untouched means the same request on the wire. It may carry the in-process
@@ -225,23 +224,31 @@ public class ApproovInterceptorTest {
         assertSame(expected.body(), actual.body());
     }
 
+    // a service that was never initialized, or initialized with the empty (bypass) config
+    private ApproovInterceptor interceptorForUnprotectedService(String config) throws Exception {
+        MiniSdkHarness.resetServiceState();
+        ApproovService fresh = new ApproovService(MiniSdkHarness.reactContext());
+        if (config != null)
+            MiniSdkHarness.initialize(fresh, config);
+        sdk.clearInvocations();
+        return new ApproovInterceptor(fresh);
+    }
+
     @Test
     public void localhostRequestsBypassApproov() throws Exception {
         Request request = request("https://localhost/health");
         when(chain.request()).thenReturn(request);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Response response = interceptor.intercept(chain);
+        Response response = interceptor.intercept(chain);
 
-            assertEquals(200, response.code());
-            assertForwardedUntouched(request, response.request());
-            approov.verifyNoInteractions();
-        }
+        assertEquals(200, response.code());
+        assertForwardedUntouched(request, response.request());
+        sdk.verifyNoInteractions();
     }
 
     @Test
     public void debugBuildForwardsDevelopmentHostsWithoutApproov() throws Exception {
-        when(service.isAppDebuggable()).thenReturn(true);
+        doReturn(true).when(service).isAppDebuggable();
         String[] urls = {
             "http://10.0.2.2:8081/symbolicate",
             "http://10.0.3.2:8081/index.bundle?platform=android",
@@ -253,84 +260,69 @@ public class ApproovInterceptorTest {
             Request request = request(url);
             when(chain.request()).thenReturn(request);
 
-            try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-                Response response = interceptor.intercept(chain);
+            Response response = interceptor.intercept(chain);
 
-                assertEquals(url, 200, response.code());
-                assertForwardedUntouched(request, response.request());
-                approov.verifyNoInteractions();
-            }
+            assertEquals(url, 200, response.code());
+            assertForwardedUntouched(request, response.request());
         }
-        verify(service, never()).fetchApproovTokenAndWait(anyString());
+        sdk.verifyNoInteractions();
     }
 
     @Test
     public void releaseBuildStillProcessesDevelopmentHosts() throws Exception {
-        when(service.isAppDebuggable()).thenReturn(false);
+        doReturn(false).when(service).isAppDebuggable();
         String url = "http://10.0.2.2:8081/symbolicate";
         when(chain.request()).thenReturn(request(url));
-        Approov.TokenFetchResult unknownUrl = result(Approov.TokenFetchStatus.UNKNOWN_URL);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait(url)).thenReturn(unknownUrl);
-
+        // the mini-SDK answers BAD_URL for a cleartext URL, which stops the request; what matters
+        // here is that the host was not skipped as a development host
+        try {
             interceptor.intercept(chain);
+        } catch (IOException expected) {
+            // BAD_URL
         }
-        verify(service).fetchApproovTokenAndWait(url);
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(url));
     }
 
-    @Test(timeout = 1000)
+    @Test(timeout = 5000)
     public void uninitializedRequestsForwardWithoutAStartupWait() throws Exception {
+        ApproovInterceptor uninitialized = interceptorForUnprotectedService(null);
         Request request = request("https://example.com/data");
         when(chain.request()).thenReturn(request);
-        when(service.isInitialized()).thenReturn(false);
-        when(service.isApproovEnabled()).thenReturn(false);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Response response = interceptor.intercept(chain);
+        Response response = uninitialized.intercept(chain);
 
-            assertForwardedUntouched(request, response.request());
-            approov.verifyNoInteractions();
-        }
+        assertForwardedUntouched(request, response.request());
+        sdk.verifyNoInteractions();
     }
 
     @Test
     public void initializedWithEmptyConfigForwardsWithoutApproovProcessing() throws Exception {
+        ApproovInterceptor bypass = interceptorForUnprotectedService("");
         Request request = request("https://example.com/data");
         when(chain.request()).thenReturn(request);
-        when(service.isInitialized()).thenReturn(true);
-        when(service.isApproovEnabled()).thenReturn(false);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Response response = interceptor.intercept(chain);
+        Response response = bypass.intercept(chain);
 
-            assertForwardedUntouched(request, response.request());
-            approov.verifyNoInteractions();
-        }
+        assertForwardedUntouched(request, response.request());
+        sdk.verifyNoInteractions();
     }
 
     @Test
     public void successWithEmptyTokenOmitsTokenAndTraceHeaders() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
-        when(service.getTraceIDHeader()).thenReturn("Approov-TraceID");
+        // the mini-SDK always issues a token on SUCCESS, so the empty result is stubbed
+        Approov.TokenFetchResult empty = mock(Approov.TokenFetchResult.class);
+        when(empty.getStatus()).thenReturn(Approov.TokenFetchStatus.SUCCESS);
+        when(empty.getToken()).thenReturn("");
+        when(empty.getTraceID()).thenReturn("");
+        when(empty.getLoggableToken()).thenReturn("");
+        sdk.when(() -> Approov.fetchApproovTokenAndWait(API)).thenReturn(empty);
+        when(chain.request()).thenReturn(request(API));
 
-        Approov.TokenFetchResult tokenResult = result(
-            Approov.TokenFetchStatus.SUCCESS,
-            "",
-            "",
-            "unused"
-        );
+        Response response = interceptor.intercept(chain);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(tokenResult);
-
-            Response response = interceptor.intercept(chain);
-
-            assertNull(response.request().header("Approov-Token"));
-            assertNull(response.request().header("Approov-TraceID"));
-        }
+        assertNull(response.request().header("Approov-Token"));
+        assertNull(response.request().header("Approov-TraceID"));
     }
 
     @Test
@@ -341,112 +333,63 @@ public class ApproovInterceptorTest {
             .header("Api-Key", "Bearer header-secret")
             .build();
         when(chain.request()).thenReturn(request);
-        when(service.getBindingHeader()).thenReturn("Authorization");
-
-        HashMap<String, String> substitutionHeaders = new HashMap<>();
-        substitutionHeaders.put("Api-Key", "Bearer ");
-        when(service.getSubstitutionHeaders()).thenReturn(substitutionHeaders);
-
-        HashMap<String, Pattern> substitutionQueryParams = new HashMap<>();
-        substitutionQueryParams.put("secret", Pattern.compile("[\\?&]secret=([^&;]+)"));
-        when(service.getSubstitutionQueryParams()).thenReturn(substitutionQueryParams);
-
+        service.setBindingHeader("Authorization");
+        service.addSubstitutionHeader("Api-Key", "Bearer ");
+        service.addSubstitutionQueryParam("secret");
         mutator.processedRequestMarker = "yes";
 
-        Approov.TokenFetchResult tokenResult = result(
-            Approov.TokenFetchStatus.SUCCESS,
-            "jwt-token",
-            "trace-123",
-            "unused"
-        );
-        Approov.TokenFetchResult headerResult = result(
-            Approov.TokenFetchStatus.SUCCESS,
-            "",
-            "",
-            "live-header-secret"
-        );
-        Approov.TokenFetchResult queryResult = result(
-            Approov.TokenFetchStatus.SUCCESS,
-            "",
-            "",
-            "live-query-secret"
-        );
+        Response response = interceptor.intercept(chain);
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/reply?secret=query-secret")).thenReturn(tokenResult);
-            approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null)).thenReturn(headerResult);
-            approov.when(() -> Approov.fetchSecureStringAndWait("query-secret", null)).thenReturn(queryResult);
+        Request proceeded = response.request();
+        assertMiniSdkToken(proceeded.header("Approov-Token"));
+        assertNotNull(proceeded.header("Approov-TraceID"));
+        assertFalse(proceeded.header("Approov-TraceID").isEmpty());
+        assertEquals("Bearer live-header-secret", proceeded.header("Api-Key"));
+        assertEquals("yes", proceeded.header("X-Mutated"));
+        assertTrue(proceeded.url().toString().contains("secret=live-query-secret"));
 
-            Response response = interceptor.intercept(chain);
+        assertNotNull(mutator.lastMutations);
+        assertEquals("Approov-Token", mutator.lastMutations.getTokenHeaderKey());
+        assertEquals("Approov-TraceID", mutator.lastMutations.getTraceIDHeaderKey());
+        assertEquals("https://api.example.com/reply?secret=live-query-secret",
+            mutator.lastMutations.getOriginalURL());
+        assertEquals(Arrays.asList("Api-Key"), mutator.lastMutations.getSubstitutionHeaderKeys());
+        assertEquals(Arrays.asList("secret"), mutator.lastMutations.getSubstitutionQueryParamKeys());
 
-            Request proceeded = response.request();
-            assertEquals("Bearer jwt-token", proceeded.header("Approov-Token"));
-            assertEquals("trace-123", proceeded.header("Approov-TraceID"));
-            assertEquals("Bearer live-header-secret", proceeded.header("Api-Key"));
-            assertEquals("yes", proceeded.header("X-Mutated"));
-            assertTrue(proceeded.url().toString().contains("secret=live-query-secret"));
-
-            assertNotNull(mutator.lastMutations);
-            assertEquals("Approov-Token", mutator.lastMutations.getTokenHeaderKey());
-            assertEquals("Approov-TraceID", mutator.lastMutations.getTraceIDHeaderKey());
-            assertEquals("https://api.example.com/reply?secret=live-query-secret",
-                mutator.lastMutations.getOriginalURL());
-            assertEquals(Arrays.asList("Api-Key"), mutator.lastMutations.getSubstitutionHeaderKeys());
-            assertEquals(Arrays.asList("secret"), mutator.lastMutations.getSubstitutionQueryParamKeys());
-
-            approov.verify(() -> Approov.setDataHashInToken("bind-me"));
-        }
+        sdk.verify(() -> Approov.setDataHashInToken("bind-me"));
     }
 
     @Test
     public void networkFailuresThrowIOExceptionWithTheApproovCause() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"NO_NETWORK\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_NETWORK);
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(tokenResult);
+        IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
-            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
-
-            assertTrue(error.getCause() instanceof ApproovNetworkException);
-            verify(chain, never()).proceed(any());
-        }
+        assertTrue(error.getCause() instanceof ApproovNetworkException);
+        verify(chain, never()).proceed(any());
     }
 
     @Test
     public void noApproovServiceFallsThroughWithoutAddingATokenByDefault() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"NO_APPROOV_SERVICE\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_APPROOV_SERVICE);
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(tokenResult);
+        Response response = interceptor.intercept(chain);
 
-            Response response = interceptor.intercept(chain);
-
-            assertFalse(response.request().headers().names().contains("Approov-Token"));
-        }
+        assertFalse(response.request().headers().names().contains("Approov-Token"));
     }
 
     @Test
     public void customMutatorCanProceedOnMitmAndExposeTheStatusHeader() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
-        when(service.getUseApproovStatusIfNoToken()).thenReturn(true);
+        when(chain.request()).thenReturn(request(API));
+        service.setUseApproovStatusIfNoToken(true);
         mutator.fetchTokenShouldContinue = Boolean.TRUE;
+        nextAttestation("fetchApproovToken", "\"status\": \"MITM_DETECTED\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.MITM_DETECTED, "", "", "");
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(tokenResult);
+        Response response = interceptor.intercept(chain);
 
-            Response response = interceptor.intercept(chain);
-
-            assertEquals("Bearer MITM_DETECTED", response.request().header("Approov-Token"));
-        }
+        assertEquals("Bearer MITM_DETECTED", response.request().header("Approov-Token"));
     }
 
     @Test
@@ -464,103 +407,78 @@ public class ApproovInterceptorTest {
             .build();
         when(chain.request()).thenReturn(request);
 
-        Approov.TokenFetchResult tokenResult = result(
-            Approov.TokenFetchStatus.SUCCESS,
-            "jwt-token",
-            "trace-123",
-            "unused"
-        );
+        Response response = interceptor.intercept(chain);
+        Request proceeded = response.request();
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/reply"))
-                .thenReturn(tokenResult);
-
-            Response response = interceptor.intercept(chain);
-            Request proceeded = response.request();
-
-            assertEquals("Bearer jwt-token", proceeded.header("Approov-Token"));
-            assertEquals("trace-123", proceeded.header("Approov-TraceID"));
-            assertNotNull(proceeded.header("Content-Digest"));
-            assertNotNull(proceeded.header("Signature"));
-            assertNotNull(proceeded.header("Signature-Input"));
-            assertTrue(proceeded.header("Signature").contains("install=:"));
-            assertEquals(1, signingMutator.getInstallMessages().size());
-            assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-token\""));
-            assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-traceid\""));
-        }
+        assertMiniSdkToken(proceeded.header("Approov-Token"));
+        assertNotNull(proceeded.header("Approov-TraceID"));
+        assertNotNull(proceeded.header("Content-Digest"));
+        assertNotNull(proceeded.header("Signature"));
+        assertNotNull(proceeded.header("Signature-Input"));
+        assertTrue(proceeded.header("Signature").contains("install=:"));
+        assertEquals(1, signingMutator.getInstallMessages().size());
+        assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-token\""));
+        assertTrue(signingMutator.getInstallMessages().get(0).contains("\"approov-traceid\""));
     }
 
     @Test
     public void configChangesRefreshSharedPins() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-        when(tokenResult.isConfigChanged()).thenReturn(true);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"SUCCESS\", \"configChanged\": true");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        interceptor.intercept(chain);
 
-            interceptor.intercept(chain);
-
-            approov.verify(Approov::fetchConfig);
-            verify(service).rebuildPins();
-        }
+        sdk.verify(Approov::fetchConfig);
+        verify(service).rebuildPins();
     }
 
     @Test
     public void forceApplyPinsRefreshesBeforeProceedingWithTheToken() throws Exception {
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-        when(tokenResult.isForceApplyPins()).thenReturn(true);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"SUCCESS\", \"forceApplyPins\": true");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
-            Response response = interceptor.intercept(chain);
+        Response response = interceptor.intercept(chain);
 
-            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
-            org.mockito.InOrder order = inOrder(service, chain);
-            order.verify(service).rebuildPins();
-            order.verify(chain).proceed(any());
-            verify(service).rebuildPins();
-            approov.verify(Approov::fetchConfig, never());
-        }
+        assertMiniSdkToken(response.request().header("Approov-Token"));
+        org.mockito.InOrder order = inOrder(service, chain);
+        order.verify(service).rebuildPins();
+        order.verify(chain).proceed(any());
+        verify(service).rebuildPins();
+        sdk.verify(Approov::fetchConfig, never());
     }
 
     @Test
     public void simultaneousConfigAndForceFlagsRebuildPinsOnlyOnce() throws Exception {
-        when(chain.request()).thenReturn(request("https://api.example.com/data"));
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-        when(tokenResult.isConfigChanged()).thenReturn(true);
-        when(tokenResult.isForceApplyPins()).thenReturn(true);
-        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Response response = interceptor.intercept(chain);
-            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
-            approov.verify(Approov::fetchConfig);
-            verify(service).rebuildPins();
-        }
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken",
+            "\"status\": \"SUCCESS\", \"configChanged\": true, \"forceApplyPins\": true");
+
+        Response response = interceptor.intercept(chain);
+
+        assertMiniSdkToken(response.request().header("Approov-Token"));
+        sdk.verify(Approov::fetchConfig);
+        verify(service).rebuildPins();
     }
 
     @Test
     public void forcedPinRefreshFailureStillBlocksTheRequest() throws Exception {
-        when(chain.request()).thenReturn(request("https://api.example.com/data"));
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-        when(tokenResult.isForceApplyPins()).thenReturn(true);
-        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"SUCCESS\", \"forceApplyPins\": true");
+        // the mini-SDK cannot fail a pin read, so the refresh failure is injected
         IllegalStateException failure = new IllegalStateException("pins unavailable");
         doThrow(failure).when(service).rebuildPins();
+
         assertSame(failure, assertThrows(IllegalStateException.class, () -> interceptor.intercept(chain)));
         verify(chain, never()).proceed(any());
     }
 
     @Test
     public void forcedPinRefreshDoesNotBypassTokenFailurePolicy() throws Exception {
-        when(chain.request()).thenReturn(request("https://api.example.com/data"));
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.NO_NETWORK);
-        when(tokenResult.isForceApplyPins()).thenReturn(true);
-        when(service.fetchApproovTokenAndWait("https://api.example.com/data")).thenReturn(tokenResult);
+        when(chain.request()).thenReturn(request(API));
+        nextAttestation("fetchApproovToken", "\"status\": \"NO_NETWORK\", \"forceApplyPins\": true");
+
         assertThrows(IOException.class, () -> interceptor.intercept(chain));
+
         verify(service).rebuildPins();
         verify(chain, never()).proceed(any());
     }
@@ -568,58 +486,45 @@ public class ApproovInterceptorTest {
     @Test
     public void headerSubstitutionNetworkFailureSkipsTheSubstitutionButStillProceeds() throws Exception {
         Request request = new Request.Builder()
-            .url("https://api.example.com/data")
+            .url(API)
             .header("Api-Key", "Bearer header-secret")
             .build();
         when(chain.request()).thenReturn(request);
-        when(service.getSubstitutionHeaders()).thenReturn(new HashMap<String, String>() {{
-            put("Api-Key", "Bearer ");
-        }});
+        service.addSubstitutionHeader("Api-Key", "Bearer ");
+        nextAttestation("fetchSecureString", "\"status\": \"NO_NETWORK\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult fetchTokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-            Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.NO_NETWORK);
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(fetchTokenResult);
-            approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
-                .thenReturn(substitutionResult);
+        Response response = interceptor.intercept(chain);
 
-            Response response = interceptor.intercept(chain);
-
-            assertEquals("Bearer header-secret", response.request().header("Api-Key"));
-            assertEquals("Bearer jwt-token", response.request().header("Approov-Token"));
-            verify(chain).proceed(any());
-        }
+        assertEquals("Bearer header-secret", response.request().header("Api-Key"));
+        assertMiniSdkToken(response.request().header("Approov-Token"));
+        verify(chain).proceed(any());
     }
 
     @Test
     public void policyMutatorSkipsMaskedNoApproovServiceHeaderSubstitution() throws Exception {
-        ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, false));
         Request request = new Request.Builder()
-            .url("https://api.example.com/data")
+            .url(API)
             .header("Api-Key", "header-secret")
             .build();
         when(chain.request()).thenReturn(request);
-        when(service.getUseApproovStatusIfNoToken()).thenReturn(true);
-        when(service.getSubstitutionHeaders()).thenReturn(new HashMap<String, String>() {{
-            put("Api-Key", "");
-        }});
+        service.setUseApproovStatusIfNoToken(true);
+        service.addSubstitutionHeader("Api-Key", "");
+        ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_APPROOV_SERVICE, false));
+        // the mini-SDK holds one directive at a time, so the token fetch queues the secure string's
+        sdk.when(() -> Approov.fetchApproovTokenAndWait(API)).thenAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            nextAttestation("fetchSecureString", "\"status\": \"NO_APPROOV_SERVICE\"");
+            return result;
+        });
+        sdk.clearInvocations();
+        nextAttestation("fetchApproovToken", "\"status\": \"NO_APPROOV_SERVICE\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult fetchTokenResult = result(
-                Approov.TokenFetchStatus.NO_APPROOV_SERVICE, "", "", "");
-            Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.NO_APPROOV_SERVICE);
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(fetchTokenResult);
-            approov.when(() -> Approov.fetchSecureStringAndWait("header-secret", null))
-                .thenReturn(substitutionResult);
+        Response response = interceptor.intercept(chain);
 
-            Response response = interceptor.intercept(chain);
-
-            assertEquals("header-secret", response.request().header("Api-Key"));
-            assertEquals("Bearer NO_APPROOV_SERVICE", response.request().header("Approov-Token"));
-            verify(chain).proceed(any());
-        }
+        assertEquals("header-secret", response.request().header("Api-Key"));
+        assertEquals("Bearer NO_APPROOV_SERVICE", response.request().header("Approov-Token"));
+        sdk.verify(() -> Approov.fetchSecureStringAndWait("header-secret", null));
+        verify(chain).proceed(any());
     }
 
     @Test
@@ -635,42 +540,24 @@ public class ApproovInterceptorTest {
                 throw new IllegalStateException("Failed to create required body digest");
             }
         });
-        Request request = request("https://api.example.com/data");
-        when(chain.request()).thenReturn(request);
-        Approov.TokenFetchResult tokenResult = result(Approov.TokenFetchStatus.SUCCESS);
+        when(chain.request()).thenReturn(request(API));
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data"))
-                .thenReturn(tokenResult);
+        IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
-            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
-
-            assertTrue(error.getCause() instanceof IllegalStateException);
-            assertTrue(error.getCause().getMessage().contains("required body digest"));
-            verify(chain, never()).proceed(any());
-        }
+        assertTrue(error.getCause() instanceof IllegalStateException);
+        assertTrue(error.getCause().getMessage().contains("required body digest"));
+        verify(chain, never()).proceed(any());
     }
 
     @Test
     public void queryParameterRejectionStopsTheRequest() throws Exception {
-        Request request = request("https://api.example.com/data?secret=query-secret");
-        when(chain.request()).thenReturn(request);
-        when(service.getSubstitutionQueryParams()).thenReturn(new HashMap<String, Pattern>() {{
-            put("secret", Pattern.compile("[\\?&]secret=([^&;]+)"));
-        }});
+        when(chain.request()).thenReturn(request("https://api.example.com/data?secret=query-secret"));
+        service.addSubstitutionQueryParam("secret");
+        nextAttestation("fetchSecureString", "\"status\": \"REJECTED\"");
 
-        try (MockedStatic<Approov> approov = mockStatic(Approov.class)) {
-            Approov.TokenFetchResult fetchTokenResult = result(Approov.TokenFetchStatus.SUCCESS);
-            Approov.TokenFetchResult substitutionResult = result(Approov.TokenFetchStatus.REJECTED);
-            when(service.fetchApproovTokenAndWait("https://api.example.com/data?secret=query-secret"))
-                .thenReturn(fetchTokenResult);
-            approov.when(() -> Approov.fetchSecureStringAndWait("query-secret", null))
-                .thenReturn(substitutionResult);
+        IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
 
-            IOException error = assertThrows(IOException.class, () -> interceptor.intercept(chain));
-
-            assertTrue(error.getCause() instanceof ApproovRejectionException);
-            verify(chain, never()).proceed(any());
-        }
+        assertTrue(error.getCause() instanceof ApproovRejectionException);
+        verify(chain, never()).proceed(any());
     }
 }

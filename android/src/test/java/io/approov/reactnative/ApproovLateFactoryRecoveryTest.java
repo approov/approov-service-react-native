@@ -5,13 +5,11 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.res.AssetManager;
 
-import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.modules.network.NetworkingModule;
@@ -19,7 +17,6 @@ import com.facebook.react.modules.network.OkHttpClientProvider;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import okhttp3.CookieJar;
@@ -29,7 +26,6 @@ import okhttp3.OkHttpClient;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.MockedStatic;
 
 /**
  * updateClientFactory(true) must keep a factory another SDK installed after React Native built
@@ -39,7 +35,6 @@ import org.mockito.MockedStatic;
  */
 public class ApproovLateFactoryRecoveryTest {
     private ReactApplicationContext context;
-    private MockedStatic<Approov> sdk;
 
     private static Field field(Class<?> cls, String... names) throws NoSuchFieldException {
         for (String name : names) {
@@ -66,13 +61,10 @@ public class ApproovLateFactoryRecoveryTest {
         AssetManager assets = mock(AssetManager.class);
         when(context.getAssets()).thenReturn(assets);
         when(assets.open(anyString())).thenThrow(new IOException("no config"));
-        sdk = mockStatic(Approov.class);
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.emptyMap());
     }
 
     @After
     public void tearDown() throws Exception {
-        sdk.close();
         field(OkHttpClientProvider.class, "factory", "sFactory").set(null, null);
         field(OkHttpClientProvider.class, "client", "sClient").set(null, null);
     }

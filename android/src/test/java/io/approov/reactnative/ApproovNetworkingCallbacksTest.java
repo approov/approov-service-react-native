@@ -3,7 +3,6 @@ package io.approov.reactnative;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import android.content.res.AssetManager;
 
 import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.Promise;
@@ -19,7 +18,6 @@ import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import io.approov.testfixtures.CustomClientBuilderFixtures;
 
-import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.Collections;
@@ -35,28 +33,34 @@ import okhttp3.OkHttpClient;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovNetworkingCallbacksTest {
     private ReactApplicationContext context;
+    private static final String PIN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
     private MockedStatic<Approov> sdk;
 
     @Before
     public void setUp() throws Exception {
         resetNetworking();
-        context = mock(ReactApplicationContext.class);
-        AssetManager assets = mock(AssetManager.class);
-        when(context.getAssets()).thenReturn(assets);
-        when(assets.open(anyString())).thenThrow(new IOException("No bundled configuration"));
-        sdk = mockStatic(Approov.class);
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.emptyMap());
+        context = MiniSdkHarness.reactContext();
+        // the mini-SDK protects and pins api.example.com; calls are recorded but answered by it
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"api.example.com\"], "
+                + "\"pins\": {\"public-key-sha256\": {\"api.example.com\": [\"" + PIN + "\"]}}");
+        sdk = mockStatic(Approov.class, CALLS_REAL_METHODS);
     }
 
     @After
     public void tearDown() throws Exception {
         sdk.close();
         resetNetworking();
+        MiniSdkHarness.tearDown();
     }
 
     private static Field field(Class<?> type, String... names) throws Exception {
@@ -139,14 +143,14 @@ public class ApproovNetworkingCallbacksTest {
         Promise initialized = mock(Promise.class);
         sdk.when(() -> Approov.getPins("public-key-sha256")).thenAnswer(invocation -> {
             verify(initialized, never()).resolve(any());
-            return Collections.singletonMap("api.example.com",
-                    Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+            return invocation.callRealMethod();
         });
+        sdk.clearInvocations(); // the stubbing call above is recorded too
         doAnswer(invocation -> {
             assertFalse(service.getPinningInterceptor().getCertificatePinner().getPins().isEmpty());
             return null;
         }).when(initialized).resolve(null);
-        service.initialize("test-config", null, initialized);
+        service.initialize(MiniSdkHarness.CONFIG, "reinit-publish", initialized);
         verify(initialized).resolve(null);
         for (int i = 0; i < 3; i++) {
             OkHttpClient client = OkHttpClientProvider.createClient();
@@ -182,12 +186,10 @@ public class ApproovNetworkingCallbacksTest {
 
     @Test
     public void wrappedRecoveryRetiresToBaseWithNoApproovInterceptorOrPins() throws Exception {
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.singletonMap(
-                "api.example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
         OkHttpClient customer = customerClient();
         OkHttpClientProvider.setOkHttpClientFactory(() -> customer);
         ApproovService old = new ApproovService(context);
-        old.initialize("test-config", null, mock(Promise.class));
+        old.initialize(MiniSdkHarness.CONFIG, "reinit-retire", mock(Promise.class));
         attachClient(OkHttpClientProvider.createClient());
         OkHttpClientFactory recovery = recover(old, true);
         assertFalse(old.getPinningInterceptor().getCertificatePinner().getPins().isEmpty());
@@ -431,9 +433,7 @@ public class ApproovNetworkingCallbacksTest {
     @Test
     public void diagnosticsRequirePinsOnTheNetworkChainWithoutFetchingPins() throws Exception {
         ApproovService service = new ApproovService(context);
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(Collections.singletonMap(
-                "api.example.com", Collections.singletonList("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")));
-        service.initialize("test-config", null, mock(Promise.class));
+        service.initialize(MiniSdkHarness.CONFIG, "reinit-diagnostics", mock(Promise.class));
         NetworkingModule.setCustomClientBuilder(null);
         attachClient(new OkHttpClient.Builder()
                 .certificatePinner(service.getPinningInterceptor().getCertificatePinner())

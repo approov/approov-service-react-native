@@ -3,7 +3,8 @@ package io.approov.reactnative;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
+import com.facebook.react.bridge.ReactApplicationContext;
 import java.io.InputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -34,17 +35,22 @@ import okhttp3.Response;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.MockedStatic;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 /** Uses a local TLS server and a test-only certificate; no external service or permissive trust manager. */
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovPinningTlsTest {
     private SSLServerSocket server;
     private final ExecutorService serverThreads = Executors.newCachedThreadPool();
     private final List<SSLSocket> connections = Collections.synchronizedList(new ArrayList<>());
     private OkHttpClient client;
+    private ReactApplicationContext context;
     private ApproovService service;
     private ApproovPinningInterceptor pinning;
-    private MockedStatic<Approov> sdk;
+    private static final String PROTECTED = "protected.test";
     private String matchingPin;
     private final List<Integer> remotePorts = Collections.synchronizedList(new ArrayList<>());
     private final AtomicInteger targetRequests = new AtomicInteger();
@@ -53,10 +59,11 @@ public class ApproovPinningTlsTest {
     @Before
     public void setUp() throws Exception {
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
-        sdk = mockStatic(Approov.class);
-        service = mock(ApproovService.class);
-        when(service.isApproovEnabled()).thenReturn(true);
-        pinning = new ApproovPinningInterceptor();
+        context = MiniSdkHarness.reactContext();
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"" + PROTECTED + "\"]");
+        service = MiniSdkHarness.initializedService(context);
+        // the service's shared pinning interceptor, rebuilt from the mini-SDK's pins
+        pinning = service.getPinningInterceptor();
         KeyStore keys = KeyStore.getInstance("PKCS12");
         try (InputStream input = getClass().getResourceAsStream("/pinning-test.p12")) {
             assertNotNull(input);
@@ -101,8 +108,7 @@ public class ApproovPinningTlsTest {
         }
         serverThreads.shutdownNow();
         assertTrue(serverThreads.awaitTermination(5, TimeUnit.SECONDS));
-        if (sdk != null) sdk.close();
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        MiniSdkHarness.tearDown();
     }
 
     // Minimal HTTP/1.1 responder retaining TLS sockets for the connection-reuse regression.
@@ -136,9 +142,23 @@ public class ApproovPinningTlsTest {
         return "https://" + host + ":" + server.getLocalPort() + path;
     }
 
-    private void pins(Map<String, List<String>> pins) {
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(pins);
-        pinning.rebuildPins(service);
+    private static String pinsJson(Map<String, List<String>> pins) {
+        StringBuilder json = new StringBuilder();
+        for (Map.Entry<String, List<String>> entry : pins.entrySet()) {
+            if (json.length() > 0)
+                json.append(',');
+            json.append('"').append(entry.getKey()).append("\": [\"")
+                    .append(String.join("\",\"", entry.getValue())).append("\"]");
+        }
+        return "\"pins\": {\"public-key-sha256\": {" + json + "}}";
+    }
+
+    // publishes a pin set from the mini-SDK by re-initializing with it; an empty set leaves only
+    // the mini-SDK's default trust-root entry, which pins no named host
+    private void pins(Map<String, List<String>> pins) throws Exception {
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"" + PROTECTED + "\"]"
+                + (pins.isEmpty() ? "" : ", " + pinsJson(pins)));
+        MiniSdkHarness.initialize(service, MiniSdkHarness.CONFIG);
     }
 
     private void get(String host, String path) throws Exception {
@@ -162,43 +182,42 @@ public class ApproovPinningTlsTest {
         assertEquals(3, targetRequests.get());
     }
 
+    // The next token fetch forces new pins for the protected host, delivered by the mini-SDK.
+    // protected.test resolves to the local TLS server; its certificate names localhost, so the
+    // client accepts the synthetic name (pinning, not hostname validation, is under test).
     private void forcePinsOnNextTokenFetch(String pin) {
-        when(service.isInitialized()).thenReturn(true);
-        when(service.getTokenHeader()).thenReturn("Approov-Token");
-        when(service.getTokenPrefix()).thenReturn("");
-        when(service.getExclusionURLRegexs()).thenReturn(Collections.emptyMap());
-        when(service.getSubstitutionHeaders()).thenReturn(Collections.emptyMap());
-        when(service.getSubstitutionQueryParams()).thenReturn(Collections.emptyMap());
-        Approov.TokenFetchResult result = mock(Approov.TokenFetchResult.class);
-        when(result.getStatus()).thenReturn(Approov.TokenFetchStatus.SUCCESS);
-        when(result.getToken()).thenReturn("jwt-token");
-        when(result.isForceApplyPins()).thenReturn(true);
-        when(service.fetchApproovTokenAndWait(anyString())).thenReturn(result);
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(
-                Collections.singletonMap("127.0.0.1", Collections.singletonList(pin)));
-        doAnswer(invocation -> {
-            pinning.rebuildPins(service);
-            return null;
-        }).when(service).rebuildPins();
-        client = client.newBuilder().addInterceptor(new ApproovInterceptor(service)).build();
+        AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\": \"fetchApproovToken\","
+                + "\"response\": {\"status\": \"SUCCESS\", \"forceApplyPins\": true},"
+                + "\"attesterConfig\": {\"protectedDomains\": [\"" + PROTECTED + "\"], "
+                + pinsJson(Collections.singletonMap(PROTECTED, Collections.singletonList(pin))) + "}}");
+        client = client.newBuilder()
+                .addInterceptor(new ApproovInterceptor(service))
+                .dns(hostname -> Collections.singletonList(java.net.InetAddress.getByName("127.0.0.1")))
+                .hostnameVerifier((hostname, session) -> PROTECTED.equals(hostname))
+                .build();
+    }
+
+    private boolean pinnedTo(String host, String pin) {
+        return pinning.getCertificatePinner().findMatchingPins(host).stream()
+                .anyMatch(p -> p.getHash().base64().equals(pin));
     }
 
     @Test
     public void forcedPinUpdateProtectsSameRequestWithoutClientRebuildOrRetry() throws Exception {
-        pins(Collections.singletonMap("127.0.0.1", Collections.singletonList(WRONG_PIN)));
+        pins(Collections.singletonMap(PROTECTED, Collections.singletonList(WRONG_PIN)));
         forcePinsOnNextTokenFetch(matchingPin);
-        get("127.0.0.1", "/target");
+        get(PROTECTED, "/target");
         assertEquals(1, targetRequests.get());
-        verify(service).rebuildPins();
+        assertTrue("the forced pins replaced the old ones", pinnedTo(PROTECTED, matchingPin));
     }
 
     @Test
     public void forcedPinUpdateStillRejectsMismatchingCertificateBeforeHttp() throws Exception {
-        pins(Collections.singletonMap("127.0.0.1", Collections.singletonList(matchingPin)));
+        pins(Collections.singletonMap(PROTECTED, Collections.singletonList(matchingPin)));
         forcePinsOnNextTokenFetch(WRONG_PIN);
-        assertThrows(SSLPeerUnverifiedException.class, () -> get("127.0.0.1", "/target"));
+        assertThrows(SSLPeerUnverifiedException.class, () -> get(PROTECTED, "/target"));
         assertEquals(0, targetRequests.get());
-        verify(service).rebuildPins();
+        assertTrue("the forced pins replaced the old ones", pinnedTo(PROTECTED, WRONG_PIN));
     }
 
     @Test

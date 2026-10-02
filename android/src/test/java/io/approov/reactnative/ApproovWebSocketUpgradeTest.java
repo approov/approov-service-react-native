@@ -5,13 +5,14 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.criticalblue.approovsdk.Approov;
+import com.facebook.react.bridge.ReactApplicationContext;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -45,6 +46,9 @@ import okhttp3.WebSocketListener;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 import org.mockito.MockedStatic;
 
 /**
@@ -54,7 +58,10 @@ import org.mockito.MockedStatic;
  * protected API domain and the pins would reject the connection (core-service-layers-testing
  * TESTING_REQUIREMENTS, "WebSockets Are Not Supported").
  */
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovWebSocketUpgradeTest {
+    private static final String PROTECTED = "protected.test";
     private static final String WRONG_PIN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
     private SSLServerSocket server;
@@ -64,13 +71,13 @@ public class ApproovWebSocketUpgradeTest {
     private MockedStatic<Approov> sdk;
     private OkHttpClient client;
     private ApproovPinningInterceptor pinning;
+    private ReactApplicationContext context;
     private ApproovService service;
     private String matchingPin;
 
     @Before
     public void setUp() throws Exception {
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
-        sdk = mockStatic(Approov.class);
         KeyStore keys = KeyStore.getInstance("PKCS12");
         try (InputStream in = getClass().getResourceAsStream("/pinning-test.p12")) {
             assertNotNull(in);
@@ -96,23 +103,17 @@ public class ApproovWebSocketUpgradeTest {
             }
         });
 
-        // 127.0.0.1 is not the localhost pass-through, so ordinary requests take the token path
-        service = mock(ApproovService.class);
-        when(service.isApproovEnabled()).thenReturn(true);
-        when(service.isInitialized()).thenReturn(true);
-        when(service.getTokenHeader()).thenReturn("Approov-Token");
-        when(service.getTokenPrefix()).thenReturn("");
-        when(service.getExclusionURLRegexs()).thenReturn(Collections.emptyMap());
-        when(service.getSubstitutionHeaders()).thenReturn(Collections.emptyMap());
-        when(service.getSubstitutionQueryParams()).thenReturn(Collections.emptyMap());
-        Approov.TokenFetchResult result = mock(Approov.TokenFetchResult.class);
-        when(result.getStatus()).thenReturn(Approov.TokenFetchStatus.SUCCESS);
-        when(result.getToken()).thenReturn("jwt-token");
-        when(service.fetchApproovTokenAndWait(anyString())).thenReturn(result);
-
-        pinning = new ApproovPinningInterceptor();
+        // protected.test is an Approov-protected domain in the mini-SDK scenario and resolves to the
+        // local TLS server; its certificate names localhost, so the client accepts the synthetic
+        // name (pinning and token handling, not hostname validation, are under test)
+        context = MiniSdkHarness.reactContext();
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"" + PROTECTED + "\"]");
+        service = MiniSdkHarness.initializedService(context);
+        pinning = service.getPinningInterceptor();
         client = new OkHttpClient.Builder()
                 .sslSocketFactory(tls.getSocketFactory(), (X509TrustManager) tmf.getTrustManagers()[0])
+                .dns(hostname -> Collections.singletonList(java.net.InetAddress.getByName("127.0.0.1")))
+                .hostnameVerifier((hostname, session) -> PROTECTED.equals(hostname))
                 .callTimeout(5, TimeUnit.SECONDS)
                 .addInterceptor(new ApproovInterceptor(service))
                 .addNetworkInterceptor(pinning)
@@ -125,7 +126,9 @@ public class ApproovWebSocketUpgradeTest {
         client.dispatcher().executorService().shutdownNow();
         server.close();
         threads.shutdownNow();
-        sdk.close();
+        if (sdk != null)
+            sdk.close();
+        MiniSdkHarness.tearDown();
     }
 
     // records each request head, then refuses the upgrade (the headers are what matter here)
@@ -151,13 +154,15 @@ public class ApproovWebSocketUpgradeTest {
     }
 
     private String url(String scheme) {
-        return scheme + "://127.0.0.1:" + server.getLocalPort() + "/socket";
+        return scheme + "://" + PROTECTED + ":" + server.getLocalPort() + "/socket";
     }
 
-    private void pin(String pin) {
-        sdk.when(() -> Approov.getPins("public-key-sha256"))
-                .thenReturn(Collections.singletonMap("127.0.0.1", Collections.singletonList(pin)));
-        pinning.rebuildPins(service);
+    // publishes the pin from the mini-SDK, then records every SDK call made from here on
+    private void pin(String pin) throws Exception {
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"" + PROTECTED + "\"], "
+                + "\"pins\": {\"public-key-sha256\": {\"" + PROTECTED + "\": [\"" + pin + "\"]}}");
+        MiniSdkHarness.initialize(service, MiniSdkHarness.CONFIG);
+        sdk = mockStatic(Approov.class, CALLS_REAL_METHODS);
     }
 
     private String openWebSocketAndCaptureUpgrade() throws Exception {
@@ -177,7 +182,7 @@ public class ApproovWebSocketUpgradeTest {
         try (Response r = client.newCall(new Request.Builder().url(url("https")).build()).execute()) {
             assertEquals(200, r.code());
         }
-        assertTrue(received.get(0).contains("Approov-Token: jwt-token"));
+        assertTrue("a mini-SDK token should be on the request", received.get(0).contains("Approov-Token: ey"));
     }
 
     @Test
@@ -186,7 +191,7 @@ public class ApproovWebSocketUpgradeTest {
         String upgrade = openWebSocketAndCaptureUpgrade();
         assertTrue("this must be the upgrade request", upgrade.toLowerCase().contains("upgrade: websocket"));
         assertFalse("no Approov token may travel on an unpinned upgrade", upgrade.contains("Approov-Token"));
-        verify(service, never()).fetchApproovTokenAndWait(anyString());
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), never());
     }
 
     @Test
@@ -194,6 +199,6 @@ public class ApproovWebSocketUpgradeTest {
         pin(matchingPin);
         String upgrade = openWebSocketAndCaptureUpgrade();
         assertFalse(upgrade.contains("Approov-Token"));
-        verify(service, never()).fetchApproovTokenAndWait(anyString());
+        sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), never());
     }
 }

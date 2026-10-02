@@ -4,6 +4,7 @@ import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 import com.criticalblue.approovsdk.Approov;
+import com.facebook.react.bridge.ReactApplicationContext;
 import java.net.Socket;
 import java.security.PublicKey;
 import java.security.cert.Certificate;
@@ -21,9 +22,15 @@ import okhttp3.Request;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 import org.mockito.MockedStatic;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovPinningInterceptorTest {
+    private ReactApplicationContext context;
     private ApproovService service;
     private ApproovPinningInterceptor pinning;
     private MockedStatic<Approov> sdk;
@@ -32,11 +39,13 @@ public class ApproovPinningInterceptorTest {
     private static final String WRONG_PIN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
-        sdk = mockStatic(Approov.class);
-        service = mock(ApproovService.class);
-        when(service.isApproovEnabled()).thenReturn(true);
+        context = MiniSdkHarness.reactContext();
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"example.com\"]");
+        service = MiniSdkHarness.initializedService(context);
+        // every SDK call from here on is answered by the mini-SDK and recorded
+        sdk = mockStatic(Approov.class, CALLS_REAL_METHODS);
         pinning = new ApproovPinningInterceptor();
         certificate = mock(X509Certificate.class);
         PublicKey key = mock(PublicKey.class);
@@ -47,13 +56,24 @@ public class ApproovPinningInterceptorTest {
     }
 
     @After
-    public void tearDown() {
+    public void tearDown() throws Exception {
         sdk.close();
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        MiniSdkHarness.tearDown();
     }
 
-    private void pins(Map<String, List<String>> pins) {
-        sdk.when(() -> Approov.getPins("public-key-sha256")).thenReturn(pins);
+    // publishes a new pin set from the mini-SDK, as a configuration update would, then refreshes
+    private void pins(Map<String, List<String>> pins) throws Exception {
+        StringBuilder json = new StringBuilder();
+        for (Map.Entry<String, List<String>> entry : pins.entrySet()) {
+            if (json.length() > 0)
+                json.append(',');
+            json.append('"').append(entry.getKey()).append("\": [\"")
+                    .append(String.join("\",\"", entry.getValue())).append("\"]");
+        }
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"example.com\"], "
+                + "\"pins\": {\"public-key-sha256\": {" + json + "}}");
+        MiniSdkHarness.initialize(service, MiniSdkHarness.CONFIG);
+        sdk.clearInvocations();
         pinning.rebuildPins(service);
     }
 
@@ -134,7 +154,7 @@ public class ApproovPinningInterceptorTest {
     }
 
     @Test
-    public void failedPinRebuildRetainsPreviousSnapshotAndPropagates() {
+    public void failedPinRebuildRetainsPreviousSnapshotAndPropagates() throws Exception {
         pins(Collections.singletonMap("example.com", Collections.singletonList(matchingPin)));
         CertificatePinner previous = pinning.getCertificatePinner();
         IllegalStateException failure = new IllegalStateException("pins unavailable");

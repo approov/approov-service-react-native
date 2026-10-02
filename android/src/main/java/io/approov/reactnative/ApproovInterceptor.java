@@ -99,20 +99,20 @@ public class ApproovInterceptor implements Interceptor {
     }
 
     /**
-     * Applies Approov processing to a request and tags the result with what was applied, so
-     * that ApproovPinningInterceptor can recognise a redirect or retry that OkHttp builds from
-     * it after this interceptor has run, and reprocess that attempt for its own URL. Called for
-     * the original request here and for rebuilt attempts from the network interceptor.
+     * Applies Approov processing to a request and records which headers it added or changed, so
+     * that ApproovPinningInterceptor can remove them from a redirect to another host. A request
+     * built from one Approov already processed for another host (such as a new call from
+     * Response.request()) first has those credentials removed.
      *
-     * @param original the request as the app (or a rebuilt attempt) presents it
-     * @return the request to send, carrying an ApproovAppliedRequest tag
+     * @param original the request as the app presents it
+     * @return the request to send
      * @throws IOException if processing must fail the request
      */
-    Request protect(Request original) throws IOException {
-        Request applied = process(original);
-        return applied.newBuilder()
-                .tag(ApproovAppliedRequest.class, new ApproovAppliedRequest(this, original, applied))
-                .build();
+    private Request protect(Request original) throws IOException {
+        ApproovIssuedHeaders earlier = original.tag(ApproovIssuedHeaders.class);
+        if (earlier != null)
+            original = earlier.stripIfOtherHost(original);
+        return ApproovIssuedHeaders.tag(original, process(original));
     }
 
     // Adds the Approov token, trace ID, secure string substitutions and any signature to a

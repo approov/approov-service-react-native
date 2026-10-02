@@ -217,7 +217,7 @@ public class ApproovInterceptorTest {
     }
 
     // Forwarded untouched means the same request on the wire. It may carry the in-process
-    // ApproovAppliedRequest tag, which redirect reclassification uses and which is never sent.
+    // ApproovIssuedHeaders tag, which is never sent.
     private static void assertForwardedUntouched(Request expected, Request actual) {
         assertEquals(expected.url(), actual.url());
         assertEquals(expected.method(), actual.method());

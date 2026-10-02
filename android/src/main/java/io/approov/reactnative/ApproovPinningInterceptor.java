@@ -67,12 +67,13 @@ public final class ApproovPinningInterceptor implements Interceptor {
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
 
-        // A redirect or retry reaches only network interceptors. Reprocess an attempt OkHttp
-        // rebuilt from an Approov-processed request, so it carries nothing issued for the
-        // previous URL, before deciding how to pin it.
-        ApproovAppliedRequest applied = request.tag(ApproovAppliedRequest.class);
-        if (applied != null)
-            request = applied.reclassifyIfRebuilt(request);
+        // A redirect reaches only network interceptors, and OkHttp builds it from the previous
+        // request's headers. Approov credentials must never cross hosts, so remove them from an
+        // attempt to a host other than the one they were issued for. The host is unchanged, as
+        // OkHttp requires of network interceptors.
+        ApproovIssuedHeaders issued = request.tag(ApproovIssuedHeaders.class);
+        if (issued != null)
+            request = issued.stripIfOtherHost(request);
 
         if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request))
             return chain.proceed(request);

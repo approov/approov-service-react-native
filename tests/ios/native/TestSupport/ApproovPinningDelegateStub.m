@@ -17,6 +17,10 @@
              onProcessedRequest:(NSMutableURLRequest *)processed {
 }
 
++ (NSURLRequest *)requestByUndoingRecordedApproovChangesIn:(NSURLRequest *)request {
+  return request;
+}
+
 - (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate>)delegate
                   approovService:(ApproovService *)approovService {
   self = [super init];

@@ -61,6 +61,14 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)recordPreApproovRequest:(NSURLRequest *)original
              onProcessedRequest:(NSMutableURLRequest *)processed;
 
+/**
+ * Takes out of a request everything Approov applied to the request it was built
+ * from (for example a completed task's currentRequest copied into a new task),
+ * using the record that request carries, so only the app's own values are
+ * processed again. A request without a record is returned unchanged.
+ */
++ (NSURLRequest *)requestByUndoingRecordedApproovChangesIn:(NSURLRequest *)request;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -51,6 +51,11 @@ static NSString *const kApproovPreRequestHeadersKey =
     @"io.approov.reactnative.preApproovHeaders";
 static NSString *const kApproovPreRequestURLKey =
     @"io.approov.reactnative.preApproovURL";
+// NSURLProtocol property keys holding what Approov applied to it
+static NSString *const kApproovAppliedHeadersKey =
+    @"io.approov.reactnative.approovAppliedHeaders";
+static NSString *const kApproovAppliedURLKey =
+    @"io.approov.reactnative.approovAppliedURL";
 
 // Header values compare equal regardless of surrounding whitespace, since the
 // stack may store or send a value trimmed
@@ -58,6 +63,56 @@ static BOOL ApproovHeaderValuesMatch(NSString *a, NSString *b) {
   NSCharacterSet *ws = [NSCharacterSet whitespaceCharacterSet];
   return [[a stringByTrimmingCharactersInSet:ws]
       isEqualToString:[b stringByTrimmingCharactersInSet:ws]];
+}
+
+// Takes the value Approov applied back out of a header value that still carries
+// it, whole or as one of its comma-separated parts (a value appended later is
+// joined with a comma), putting the app's value in its place or dropping it if
+// the app had none. Returns NO if the value does not carry the applied value.
+static BOOL ApproovUndoAppliedValue(NSString *carried, NSString *applied,
+                                    NSString *_Nullable appValue,
+                                    NSString *_Nullable *_Nonnull result) {
+  if (ApproovHeaderValuesMatch(carried, applied)) {
+    *result = appValue;
+    return YES;
+  }
+  NSCharacterSet *ws = [NSCharacterSet whitespaceCharacterSet];
+  NSString *target = [applied stringByTrimmingCharactersInSet:ws];
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  BOOL found = NO;
+  if ([target rangeOfString:@","].location == NSNotFound) {
+    for (NSString *part in [carried componentsSeparatedByString:@","]) {
+      NSString *trimmed = [part stringByTrimmingCharactersInSet:ws];
+      if (!found && [trimmed isEqualToString:target]) {
+        found = YES;
+        if (appValue != nil)
+          [parts addObject:appValue];
+      } else {
+        [parts addObject:trimmed];
+      }
+    }
+  } else {
+    // an applied value that itself contains commas can only be the first or
+    // the last part
+    NSString *value = [carried stringByTrimmingCharactersInSet:ws];
+    NSString *head = [target stringByAppendingString:@","];
+    NSString *tail = [@"," stringByAppendingString:target];
+    if ([value hasPrefix:head]) {
+      found = YES;
+      if (appValue != nil)
+        [parts addObject:appValue];
+      [parts addObject:[[value substringFromIndex:head.length] stringByTrimmingCharactersInSet:ws]];
+    } else if ([value hasSuffix:tail]) {
+      found = YES;
+      [parts addObject:[[value substringToIndex:value.length - tail.length] stringByTrimmingCharactersInSet:ws]];
+      if (appValue != nil)
+        [parts addObject:appValue];
+    }
+  }
+  if (!found)
+    return NO;
+  *result = parts.count > 0 ? [parts componentsJoinedByString:@","] : nil;
+  return YES;
 }
 
 // Case-insensitive header lookup in a header dictionary
@@ -93,6 +148,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
       [NSURLProtocol setProperty:recordedURL
                           forKey:kApproovPreRequestURLKey
                        inRequest:processed];
+    [self recordAppliedStateOf:processed];
     return;
   }
   [NSURLProtocol setProperty:(original.allHTTPHeaderFields ?: @{})
@@ -107,6 +163,26 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     [NSURLProtocol removePropertyForKey:kApproovPreRequestURLKey
                               inRequest:processed];
   }
+  [self recordAppliedStateOf:processed];
+}
+
+// Records the headers and URL a processed request carries, so a request built
+// from it later can be told apart from changes made afterwards by the app.
++ (void)recordAppliedStateOf:(NSMutableURLRequest *)processed {
+  [NSURLProtocol setProperty:(processed.allHTTPHeaderFields ?: @{})
+                      forKey:kApproovAppliedHeadersKey
+                   inRequest:processed];
+  NSString *url = processed.URL.absoluteString;
+  if (url != nil)
+    [NSURLProtocol setProperty:url forKey:kApproovAppliedURLKey inRequest:processed];
+  else
+    [NSURLProtocol removePropertyForKey:kApproovAppliedURLKey inRequest:processed];
+}
+
++ (NSURLRequest *)requestByUndoingRecordedApproovChangesIn:(NSURLRequest *)request {
+  if ([NSURLProtocol propertyForKey:kApproovPreRequestHeadersKey inRequest:request] == nil)
+    return request;
+  return [self requestByUndoingApproovChangesIn:request previousAttempt:nil];
 }
 
 /**
@@ -127,42 +203,45 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
 + (NSMutableURLRequest *)requestByUndoingApproovChangesIn:(NSURLRequest *)redirect
                                           previousAttempt:(NSURLRequest *_Nullable)previous {
   NSMutableURLRequest *followUp = [redirect mutableCopy];
-  NSDictionary<NSString *, NSString *> *before =
-      [NSURLProtocol propertyForKey:kApproovPreRequestHeadersKey
-                          inRequest:redirect];
-  if (before == nil && previous != nil)
-    before = [NSURLProtocol propertyForKey:kApproovPreRequestHeadersKey
-                                 inRequest:previous];
-  if (before == nil || previous == nil)
+  id (^recorded)(NSString *) = ^id(NSString *key) {
+    id value = [NSURLProtocol propertyForKey:key inRequest:redirect];
+    if (value == nil && previous != nil)
+      value = [NSURLProtocol propertyForKey:key inRequest:previous];
+    return value;
+  };
+  NSDictionary<NSString *, NSString *> *before = recorded(kApproovPreRequestHeadersKey);
+  NSDictionary<NSString *, NSString *> *applied = recorded(kApproovAppliedHeadersKey);
+  if (applied == nil)
+    applied = previous.allHTTPHeaderFields;
+  if (before == nil || applied == nil)
     return followUp;
 
-  NSDictionary<NSString *, NSString *> *applied = previous.allHTTPHeaderFields;
   for (NSString *name in applied) {
     NSString *appliedValue = applied[name];
     NSString *appValue = ApproovHeaderLookup(before, name);
     if (appValue != nil && [appValue isEqualToString:appliedValue])
       continue;
     NSString *carried = [followUp valueForHTTPHeaderField:name];
-    if (carried == nil || !ApproovHeaderValuesMatch(carried, appliedValue))
+    NSString *restored = nil;
+    if (carried == nil || !ApproovUndoAppliedValue(carried, appliedValue, appValue, &restored))
       continue;
-    [followUp setValue:appValue forHTTPHeaderField:name];
+    [followUp setValue:restored forHTTPHeaderField:name];
   }
 
-  NSString *appURL = [NSURLProtocol propertyForKey:kApproovPreRequestURLKey
-                                         inRequest:redirect];
-  if (appURL == nil)
-    appURL = [NSURLProtocol propertyForKey:kApproovPreRequestURLKey
-                                 inRequest:previous];
-  if (appURL != nil && [followUp.URL isEqual:previous.URL]) {
+  // The URL Approov applied may carry substituted query parameters; restore the
+  // app's URL only while the request still targets it.
+  NSString *appURL = recorded(kApproovPreRequestURLKey);
+  NSString *appliedURL = recorded(kApproovAppliedURLKey) ?: previous.URL.absoluteString;
+  if (appURL != nil && appliedURL != nil &&
+      [followUp.URL.absoluteString isEqualToString:appliedURL]) {
     NSURL *restored = [NSURL URLWithString:appURL];
     if (restored != nil)
       followUp.URL = restored;
   }
 
-  [NSURLProtocol removePropertyForKey:kApproovPreRequestHeadersKey
-                            inRequest:followUp];
-  [NSURLProtocol removePropertyForKey:kApproovPreRequestURLKey
-                            inRequest:followUp];
+  for (NSString *key in @[ kApproovPreRequestHeadersKey, kApproovPreRequestURLKey,
+                           kApproovAppliedHeadersKey, kApproovAppliedURLKey ])
+    [NSURLProtocol removePropertyForKey:key inRequest:followUp];
   return followUp;
 }
 

@@ -1648,6 +1648,26 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
 }
 @end
 
+// A caller delegate that ignores the redirect it is offered and builds its own from the task's
+// current request, which still carries what Approov applied, appends a value to Api-Key and
+// sends it to retargetURL.
+@interface ApproovAppendingRedirectProbeDelegate : ApproovPartialRedirectProbeDelegate
+@property(nonatomic, copy) NSString *retargetURL;
+@end
+
+@implementation ApproovAppendingRedirectProbeDelegate
+- (void)URLSession:(NSURLSession *)session
+                          task:(NSURLSessionTask *)task
+    willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+                    newRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSURLRequest *))completionHandler {
+  NSMutableURLRequest *chosen = [task.currentRequest mutableCopy];
+  chosen.URL = [NSURL URLWithString:_retargetURL];
+  [chosen addValue:@"extra" forHTTPHeaderField:@"Api-Key"];
+  completionHandler(chosen);
+}
+@end
+
 // Initializes a protected service with header and query substitution and an
 // interceptor that wraps sessions of the probe delegates.
 static ApproovService *RedirectTestService(void) {
@@ -1660,6 +1680,7 @@ static ApproovService *RedirectTestService(void) {
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovPartialRedirectProbeDelegate"];
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovFullRedirectProbeDelegate"];
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovRetargetingRedirectProbeDelegate"];
+  [ApproovRCTInterceptor addAllowedDelegate:@"ApproovAppendingRedirectProbeDelegate"];
   return service;
 }
 
@@ -1892,6 +1913,68 @@ static void TestRedirectRefusedByCallerDelegateIsNotFollowed(void) {
   [session invalidateAndCancel];
 }
 
+// A value appended to a header Approov substituted does not keep the secret on the header: the
+// part Approov installed goes back to the placeholder and the appended part is kept, so nothing
+// issued for the protected host reaches the host the caller delegate chose.
+static void TestRedirectWithAppendedValueDoesNotCarryTheSecret(void) {
+  RedirectTestService();
+  ApproovAppendingRedirectProbeDelegate *caller = [ApproovAppendingRedirectProbeDelegate new];
+  caller.retargetURL = [NSString stringWithFormat:@"%@/appended", UnprotectedURL()];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  AssertEqualObjects(@"header-secret", [task.currentRequest valueForHTTPHeaderField:@"Api-Key"],
+                     @"First attempt should carry the substituted header");
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", TargetURL()], nil);
+  NSString *key = [followUp valueForHTTPHeaderField:@"Api-Key"];
+  AssertTrue(key != nil && [key rangeOfString:@"header-secret"].location == NSNotFound,
+             [NSString stringWithFormat:@"The secret must not reach the chosen host (got %@)", key]);
+  AssertTrue([key rangeOfString:@"extra"].location != NSNotFound, @"The appended value should be kept");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"No token may reach an unprotected host");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A new task built from a completed task's currentRequest still carries what Approov applied. It is
+// taken back out before the new task is processed, so a copy sent to another host carries no
+// token and only the secure string placeholder.
+static void TestReusedCurrentRequestDoesNotCarryCredentialsToAnotherHost(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *first = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:first
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/reuse-source", TargetURL()], @"GET")];
+  [task resume];
+  if (dispatch_semaphore_wait(first.done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC))) != 0)
+    Fail(@"First task did not complete");
+  AssertEqualObjects(@"header-secret", [task.currentRequest valueForHTTPHeaderField:@"Api-Key"],
+                     @"The completed task's request should carry the substituted header");
+
+  NSMutableURLRequest *reused = [task.currentRequest mutableCopy];
+  reused.URL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/reused", UnprotectedURL()]];
+  [reused setValue:@"refreshed" forHTTPHeaderField:@"X-App"];
+  ApproovPartialRedirectProbeDelegate *second = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *other = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                      delegate:second
+                                                 delegateQueue:nil];
+  [[other dataTaskWithRequest:reused] resume];
+  if (dispatch_semaphore_wait(second.done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC))) != 0)
+    Fail(@"Reused task did not complete");
+  NSDictionary *reply = [NSJSONSerialization JSONObjectWithData:second.data options:0 error:nil];
+  AssertEqualObjects(@"header-key", HeaderValue(reply, @"Api-Key"),
+                     @"The reused request should reach the other host with the placeholder only");
+  AssertNil(HeaderValue(reply, @"Approov-Token"), @"No token may reach the other host");
+  AssertNil(HeaderValue(reply, @"Approov-TraceID"), @"No trace ID may reach the other host");
+  AssertEqualObjects(@"refreshed", HeaderValue(reply, @"X-App"),
+                     @"A header the app changed after copying the request should be kept");
+  [session invalidateAndCancel];
+  [other invalidateAndCancel];
+}
+
 // Returns a subclass of the probe delegate registered under the given runtime name, so a test can
 // present a delegate whose class name is exactly what a Swift module reports.
 static Class ProbeDelegateClassNamed(const char *name) {
@@ -2029,6 +2112,8 @@ int main(void) {
       ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
       ^{ TestPartialCallerDelegateDoesNotStallTask(); },
       ^{ TestExpoFetchSessionDelegateIsInterceptedByDefault(); },
+      ^{ TestRedirectWithAppendedValueDoesNotCarryTheSecret(); },
+      ^{ TestReusedCurrentRequestDoesNotCarryCredentialsToAnotherHost(); },
       ^{ TestRedirectToUnprotectedHostStripsApproovState(); },
       ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
       ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },

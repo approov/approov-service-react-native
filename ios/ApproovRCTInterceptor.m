@@ -703,6 +703,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
     metadata.requestCount++;
   });
 
+  // A request copied from one Approov already processed still carries what was
+  // applied to it, for the host it was issued for; take that out first.
+  request = [PinningURLSessionDelegate requestByUndoingRecordedApproovChangesIn:request];
+
   NSString *tokenHeader = [ApproovService sharedTokenHeader];
   NSString *traceIDHeader = [ApproovService sharedTraceIDHeader];
   NSString *tokenBefore = [request valueForHTTPHeaderField:tokenHeader];

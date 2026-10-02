@@ -88,7 +88,11 @@ OkHttp utilizes an **Interceptor Chain**. When a network request is fired, it pa
 
 To protect React Native traffic on Android, Approov injects itself into this pipeline by:
 1. Registering a custom `OkHttpClientFactory` with `OkHttpClientProvider`.
-2. When the React Native networking module requests an HTTP client, our factory builds one that includes the `ApproovInterceptor` (to inject tokens and handle header mutations) and the `ApproovCertificatePinner` (to handle TLS pinning natively).
+2. When the React Native networking module requests an HTTP client, our factory builds one that includes the application `ApproovInterceptor` (to inject tokens and handle header mutations) and a shared `ApproovPinningInterceptor` on the network chain (to check pins against the live TLS handshake).
+3. The service loads pins before resolving initialization and refreshes the shared state when the SDK reports a configuration change. Building a client, including recovery and isolated fetch clients, does not fetch pins. Existing clients see updated pins without being rebuilt.
+4. Every HTTPS network exchange checks its hostname and certificate chain against the current shared pins, including exchanges on reused connections. There is no handshake-approval cache, and checking pins performs no SDK fetch. Approov clears the built-in client pinner and does not merge customer pins.
+
+Protected request paths MUST await successful initialization. Android and iOS no longer provide the 2.5-second startup grace period.
 
 ### The Interference: The OkHttpClientFactory Race
 Similar to the swizzling race condition on iOS, there is a fundamental initialization race condition on Android when multiple SDKs (like Datadog, New Relic, or Firebase) try to monitor network traffic.

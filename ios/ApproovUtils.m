@@ -44,7 +44,7 @@ void ApproovLog(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_INFO) {
     va_list vargs;
     va_start(vargs, fmt);
-    ApproovLogWithType(OS_LOG_TYPE_INFO, @"ApproovService: ", fmt, vargs);
+    ApproovLogWithType(OS_LOG_TYPE_DEFAULT, @"ApproovService: ", fmt, vargs);
     va_end(vargs);
   }
 }
@@ -73,7 +73,7 @@ void ApproovLogI(NSString *fmt, ...) {
   if (sApproovLogLevel <= APPROOV_INFO) {
     va_list vargs;
     va_start(vargs, fmt);
-    ApproovLogWithType(OS_LOG_TYPE_INFO, @"ApproovService INFO: ", fmt, vargs);
+    ApproovLogWithType(OS_LOG_TYPE_DEFAULT, @"ApproovService INFO: ", fmt, vargs);
     va_end(vargs);
   }
 }

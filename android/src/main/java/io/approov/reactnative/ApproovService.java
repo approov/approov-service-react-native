@@ -22,6 +22,7 @@
 package io.approov.reactnative;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
@@ -39,10 +40,13 @@ import com.facebook.react.bridge.Arguments;
 import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
 import com.facebook.react.modules.network.OkHttpClientFactory;
+import com.facebook.react.modules.network.CookieJarContainer;
+import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Interceptor;
 import okhttp3.CertificatePinner;
+import okhttp3.JavaNetCookieJar;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -57,6 +61,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.net.CookieHandler;
+import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.Properties;
 import java.util.Map;
 import java.util.HashMap;
@@ -69,14 +79,6 @@ import java.util.regex.PatternSyntaxException;
 public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
-
-    /**
-     * Interface to be implemented by classes that wish to be notified of any pin
-     * changes.
-     */
-    public interface PinChangeListener {
-        void approovPinsUpdated();
-    }
 
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
@@ -95,19 +97,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // any prefix to be added before the Approov token, such as "Bearer "
     private static final String APPROOV_TOKEN_PREFIX = "";
 
-    // time window (in millseconds) applied to any network request attempts made
-    // before Approov
-    // is initialized. The start of the window is defined by the first network
-    // request received
-    // prior to initialization. That network request, and any others arriving during
-    // the window, may
-    // then be delayed until the end of the window period. This is to allow time for
-    // the Approov
-    // initialization to be completed as it may be in a race with API requests made
-    // as the app
-    // starts up.
-    private static final long STARTUP_SYNC_TIME_WINDOW = 2500;
-
     // flag indicating whether the Approov SDK has been initialized - if not then no
     // Approov functionality is enabled
     private static boolean isInitialized = false;
@@ -118,11 +107,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // the application context used for certain framework calls
     private Context applicationContext;
 
-    // the earliest time that any network request will be allowed to avoid any
-    // potential race conditions with Approov
-    // protected API calls being made before Approov itself can be initialized - or
-    // 0 they may proceed immediately
-    private long earliestNetworkRequestTime;
+    // true if the host app is debuggable, which gates forwarding of local development hosts
+    private final boolean appDebuggable;
 
     // flag indicating if there is a pending prefetch to be executed upon
     // initialization
@@ -186,16 +172,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
-    // list of listeners for pin changes
-    private List<PinChangeListener> pinChangeListeners;
+    // One mutable pinning interceptor shared by every client created for this service. It has
+    // no reference back to the service or ReactContext and does no SDK work in its constructor.
+    private final ApproovPinningInterceptor pinningInterceptor = new ApproovPinningInterceptor();
 
-    // Log levels matching iOS/ApproovUtils
-    private static final int LOG_EXTREME = 0;
-    private static final int LOG_DEBUG = 1;
-    private static final int LOG_INFO = 2;
-    private static final int LOG_WARN = 3;
-    private static final int LOG_ERROR = 4;
-    private static final int LOG_NONE = 5;
+    // Log levels matching iOS/ApproovUtils and ApproovService.Log in JS
+    static final int LOG_EXTREME = 0;
+    static final int LOG_DEBUG = 1;
+    static final int LOG_INFO = 2;
+    static final int LOG_WARN = 3;
+    static final int LOG_ERROR = 4;
+    static final int LOG_NONE = 5;
 
     // Current log level (default to INFO)
     private static int currentLogLevel = LOG_INFO;
@@ -244,9 +231,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             mutator = buildDefaultServiceMutator();
         }
         serviceMutator = mutator;
-        if (currentLogLevel <= LOG_DEBUG) {
-            Log.d(TAG, "Applied ApproovServiceMutator: " + mutator.toString());
-        }
+        log(LOG_DEBUG, TAG, "Applied ApproovServiceMutator: " + mutator.toString());
     }
 
     /**
@@ -316,8 +301,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
             } else {
                 setServiceMutator(new PolicyMutator(mask, sign, "account".equals(signatureMode)));
             }
-            if (currentLogLevel <= LOG_DEBUG)
-                Log.d(TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
+            log(LOG_DEBUG, TAG, "setServiceMutatorType mask=" + Integer.toBinaryString(mask) + " sign=" + sign);
             promise.resolve(null);
         } catch (Exception e) {
             promise.reject("setServiceMutatorType", e.getMessage(), e);
@@ -345,7 +329,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(LOG_INFO, TAG, "setLogLevel " + level);
     }
 
-    private void log(int level, String tag, String msg) {
+    static void log(int level, String tag, String msg) {
         log(level, tag, msg, null);
     }
 
@@ -363,7 +347,29 @@ public class ApproovService extends ReactContextBaseJavaModule {
         log(LOG_INFO, tag, msg);
     }
 
-    private void log(int level, String tag, String msg, Throwable tr) {
+    // set once the first request forwarded before initialize() has been reported, so the
+    // warning is not repeated for every early request (including Metro's own dev traffic)
+    private final AtomicBoolean uninitializedForwardReported = new AtomicBoolean(false);
+
+    /**
+     * Reports a request forwarded before initialize() completed, through the level-gated
+     * logger: a WARN with the guidance for the first such request, DEBUG for the rest.
+     *
+     * @param tag the logging tag
+     * @param url the forwarded URL
+     */
+    void logUninitializedForward(String tag, String url) {
+        if (uninitializedForwardReported.compareAndSet(false, true))
+            log(LOG_WARN, tag, "uninitialized forwarded (await ApproovService.initialize() before protected requests): " + url);
+        else
+            log(LOG_DEBUG, tag, "uninitialized forwarded: " + url);
+    }
+
+    /**
+     * The single level-gated sink for every native log line in this layer, so setLogLevel
+     * controls all of them. Other classes call it instead of android.util.Log.
+     */
+    static void log(int level, String tag, String msg, Throwable tr) {
         if (level < currentLogLevel)
             return;
 
@@ -499,7 +505,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // initialize the service state
         super(reactContext);
         applicationContext = reactContext;
-        earliestNetworkRequestTime = 0;
+        appDebuggable = isDebuggable(reactContext);
         pendingPrefetch = false;
         suppressLoggingUnknownURL = false;
         sessionMetadataCollectionEnabled = true;
@@ -510,7 +516,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-        pinChangeListeners = new ArrayList<>();
 
         // load any configuration and use it to initialize the SDK
         String config = loadApproovConfig();
@@ -559,6 +564,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
         } else
             log(LOG_INFO, TAG, "started");
 
+        // Load initial pins once, including when a recreated service inherits initialized SDK
+        // state. Client builders only attach this shared interceptor and never query the SDK.
+        rebuildPins();
+
         // Register Approov protection in the React Native networking stack.
         // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
         // (RN < 0.73) versions.
@@ -567,32 +576,27 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
         // 0.73+) ---
         // Capture any existing factory set by another SDK so we can chain through it.
-        OkHttpClientFactory existingFactory = null;
-        try {
-            Field factoryField = OkHttpClientProvider.class.getDeclaredField("sFactory");
-            factoryField.setAccessible(true);
-            existingFactory = (OkHttpClientFactory) factoryField.get(null);
-            if (existingFactory != null)
-                log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
-        } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "could not check for existing OkHttpClientFactory: " + e.getMessage());
-        }
-        final OkHttpClientFactory wrappedFactory = existingFactory;
-        OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
-            @Override
-            public OkHttpClient createNewNetworkModuleClient() {
-                OkHttpClient.Builder builder;
-                if (wrappedFactory != null) {
-                    // Chain: let the existing factory build its client, then layer Approov on top
-                    builder = wrappedFactory.createNewNetworkModuleClient().newBuilder();
-                } else {
-                    // No prior factory — start from the RN default builder
-                    builder = OkHttpClientProvider.createClientBuilder();
-                }
-                clientBuilder.apply(builder);
-                return builder.build();
-            }
-        });
+        OkHttpClientFactory existingFactory = readInstalledOkHttpClientFactory();
+        if (existingFactory != null)
+            log(LOG_DEBUG, TAG, "found existing OkHttpClientFactory: " + existingFactory.getClass().getName());
+
+        // If the installed factory is one WE registered previously (e.g. the RN context was
+        // recreated by an OTA reload, or a recovery via updateClientFactory), do NOT wrap it
+        // again: chaining a new Approov factory onto the old one on every reload retains every
+        // previous ApproovService and its ReactContext (a leak), and re-adds a stale interceptor.
+        // Unwrap to the underlying non-Approov factory and replace our own layer instead.
+        OkHttpClientFactory underlyingFactory = existingFactory;
+        while (underlyingFactory instanceof ApproovOwnedFactory)
+            underlyingFactory = ((ApproovOwnedFactory) underlyingFactory).wrappedFactory();
+
+        ApproovOkHttpClientFactory factory = new ApproovOkHttpClientFactory(underlyingFactory, clientBuilder);
+        OkHttpClientProvider.setOkHttpClientFactory(factory);
+
+        // Retire whichever Approov factory was installed before, wherever it now sits: a third
+        // party may have wrapped it since, putting it below the reach of the unwrap above. A
+        // retired factory passes straight through to what it wraps and drops its references to
+        // the old ApproovService, so nothing retains the previous ReactContext.
+        retirePreviousFactory(factory);
         log(LOG_INFO, TAG, "registered Approov via OkHttpClientFactory");
 
         // --- LEGACY FALLBACK: setCustomClientBuilder (RN < 0.73 only) ---
@@ -601,18 +605,326 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // ApproovClientBuilder.apply() has a deduplication guard that prevents
         // the interceptor from being added twice.
         try {
-            Method setBuilder = NetworkingModule.class.getMethod(
-                    "setCustomClientBuilder", NetworkingModule.CustomClientBuilder.class);
-            setBuilder.invoke(null, clientBuilder);
-            log(LOG_DEBUG, TAG, "registered Approov via legacy setCustomClientBuilder");
-        } catch (NoSuchMethodException e) {
-            log(LOG_DEBUG, TAG, "setCustomClientBuilder not available (expected on RN 0.73+)");
+            // React Native applies this hook PER REQUEST, on a newBuilder() of the module's
+            // client, so it must be preserved rather than replaced: another SDK (e.g. New
+            // Relic) registers its own request customisation here. Read the previously
+            // registered builder and wrap it. If that previous builder is one of ours from an
+            // earlier context (reload), unwrap to the non-Approov builder underneath so we
+            // replace our own layer instead of chaining it (same reasoning as the factory).
+            // This hook gets its OWN ApproovClientBuilder, distinct from the factory path's:
+            // the factory-built module client already carries our interceptor, and a single
+            // shared builder wrapping the other SDK's hook would apply that hook twice per
+            // request (once via the factory, once via this hook). It shares the factory
+            // builder's service-owned pinning interceptor.
+            Object previousBuilder = readInstalledCustomClientBuilder();
+            while (previousBuilder instanceof ApproovClientBuilder)
+                previousBuilder = ((ApproovClientBuilder) previousBuilder).getWrappedBuilder();
+            if (previousBuilder != null)
+                log(LOG_DEBUG, TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
+            ApproovClientBuilder hookBuilder = ApproovClientBuilder.wrapping(this, previousBuilder);
+
+            // Match setCustomClientBuilder by shape, not a hardcoded parameter type. The
+            // accepted type is the nested NetworkingModule.CustomClientBuilder on some RN
+            // versions and the top-level com.facebook.react.modules.network.CustomClientBuilder
+            // on others (the nested type extends the top-level one, so ApproovClientBuilder is
+            // assignable to whichever the runtime expects). getMethod() with the wrong exact
+            // type silently misses the method and skips this registration path entirely.
+            Method setBuilder = null;
+            for (Method m : NetworkingModule.class.getMethods()) {
+                if (m.getName().equals("setCustomClientBuilder")
+                        && m.getParameterTypes().length == 1
+                        && m.getParameterTypes()[0].isInstance(hookBuilder)) {
+                    setBuilder = m;
+                    break;
+                }
+            }
+            if (setBuilder != null) {
+                setBuilder.invoke(null, hookBuilder);
+                // retire the previously registered Approov hook wherever it now sits (see the
+                // factory path above)
+                ApproovClientBuilder previousHook = lastInstalledHook.getAndSet(hookBuilder);
+                if ((previousHook != null) && (previousHook != hookBuilder))
+                    previousHook.retire();
+                log(LOG_DEBUG, TAG, "registered Approov via setCustomClientBuilder"
+                        + (previousBuilder != null ? " (wrapping existing builder)" : ""));
+            } else {
+                log(LOG_DEBUG, TAG, "setCustomClientBuilder not available");
+            }
         } catch (Exception e) {
-            log(LOG_DEBUG, TAG, "setCustomClientBuilder failed: " + e.getMessage());
+            log(LOG_WARN, TAG, "setCustomClientBuilder failed: " + e.getMessage());
         }
 
         // add the Approov client builder to any rn-fetch-blob instances
         configureRNFetchBlobIfFound(clientBuilder);
+    }
+
+    // ---- reflection over React Native fields that were renamed across versions ----
+
+    // resolved fields keyed by class#name; a Field is stable for the life of the process
+    private static final Map<String, Field> resolvedFields = new ConcurrentHashMap<>();
+
+    /**
+     * Resolves the first of the candidate names declared as a field on the class, made
+     * accessible and cached. Callers pass every name a React Native version has used
+     * (e.g. sFactory then factory, mClient then client).
+     *
+     * @throws NoSuchFieldException if the class declares none of the names
+     */
+    private static Field resolveField(Class<?> type, String... names) throws NoSuchFieldException {
+        for (String name : names) {
+            String key = type.getName() + "#" + name;
+            Field field = resolvedFields.get(key);
+            if (field == null) {
+                try {
+                    field = type.getDeclaredField(name);
+                } catch (NoSuchFieldException tryNext) {
+                    continue;
+                }
+                field.setAccessible(true);
+                resolvedFields.put(key, field);
+            }
+            return field;
+        }
+        throw new NoSuchFieldException(type.getName() + " declares none of " + Arrays.toString(names));
+    }
+
+    /**
+     * Reads a class-level value: a static field, or, when the field is an instance property of
+     * a Kotlin object, that property on the object's INSTANCE singleton. Which of the two applies
+     * is decided from the field's modifiers, not by interpreting an exception.
+     */
+    private static Object readClassLevelField(Class<?> type, String... names) throws Exception {
+        Field field = resolveField(type, names);
+        if (Modifier.isStatic(field.getModifiers()))
+            return field.get(null);
+        Field instance = resolveField(type, "INSTANCE");
+        return field.get(instance.get(null));
+    }
+
+    /**
+     * Reads the OkHttpClientFactory currently installed on OkHttpClientProvider, if any. The
+     * backing field was "sFactory" while OkHttpClientProvider was a Java class (RN &lt;= 0.78)
+     * and "factory" after it became a Kotlin object (RN &gt;= 0.79). Returning null here would
+     * make the caller silently discard another SDK's factory (and its interceptors/config).
+     *
+     * @return the installed factory, or null if none / not readable
+     */
+    private OkHttpClientFactory readInstalledOkHttpClientFactory() {
+        try {
+            return (OkHttpClientFactory) readClassLevelField(OkHttpClientProvider.class, "factory", "sFactory");
+        } catch (Exception e) {
+            log(LOG_WARN, TAG, "could not read the installed OkHttpClientFactory: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Reads the custom client builder currently registered on the NetworkingModule, if any
+     * ("customClientBuilder" on the Kotlin NetworkingModule, "mCustomClientBuilder" on older
+     * Java versions). Returned as Object because React Native types it differently across
+     * versions.
+     */
+    private Object readInstalledCustomClientBuilder() {
+        try {
+            return readClassLevelField(NetworkingModule.class, "customClientBuilder", "mCustomClientBuilder");
+        } catch (Exception e) {
+            log(LOG_WARN, TAG, "could not read the registered custom client builder: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The NetworkingModule field holding the client it uses for fetch(): "client" on the
+     * Kotlin NetworkingModule (RN 0.73+), "mClient" on older Java versions. Shared by every
+     * read and write of that field so a future rename is fixed in one place.
+     */
+    private static Field networkingModuleClientField() throws NoSuchFieldException {
+        return resolveField(NetworkingModule.class, "client", "mClient");
+    }
+
+    /**
+     * Keeps cookie handling connected to the active NetworkingModule when recovery discards
+     * other client settings. A fresh container alone would lose the handler that RN already
+     * installed during initialize(). With no module yet, RN will initialize the new container.
+     */
+    private static CookieJarContainer networkingCookieJar(NetworkingModule module)
+            throws ReflectiveOperationException {
+        if (module == null)
+            return new ReactCookieJarContainer();
+        Field containerField = resolveField(NetworkingModule.class, "cookieJarContainer", "mCookieJarContainer");
+        CookieJarContainer container = (CookieJarContainer) containerField.get(module);
+        if (container == null) {
+            // Newer RN allows construction with a non-RN cookie jar. Repair that case by
+            // connecting the module's existing handler and recording the container so RN's
+            // initialize/invalidate lifecycle continues to manage it.
+            container = new ReactCookieJarContainer();
+            CookieHandler handler = (CookieHandler) resolveField(NetworkingModule.class,
+                    "cookieHandler", "mCookieHandler").get(module);
+            container.setCookieJar(new JavaNetCookieJar(handler));
+            containerField.set(module, container);
+        }
+        return container;
+    }
+
+    /**
+     * Returns the OkHttpClient the NetworkingModule is actually using for fetch(), or null if
+     * it cannot be obtained.
+     */
+    private OkHttpClient getNetworkingModuleClient() {
+        try {
+            NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
+            if (networkingModule == null)
+                return null;
+            Object client = networkingModuleClientField().get(networkingModule);
+            return (client instanceof OkHttpClient) ? (OkHttpClient) client : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ---- diagnostics ----
+
+    /**
+     * Forms the builder a fetch() request would actually run through, the way the
+     * NetworkingModule does it: the module's own client (or the provider's client if that
+     * cannot be read), then the registered custom client builder applied to a newBuilder() of
+     * it. Inspecting only the module's client field (or the provider's cached singleton) misses
+     * protection delivered through that per-request hook, and vice versa. The builder is
+     * inspected directly and never built, so no client (connection pool, dispatcher) is
+     * allocated for a diagnostic. The registered callback is executed because only its result
+     * shows what a request really carries; if it throws, the diagnostic rejects.
+     */
+    private OkHttpClient.Builder effectiveRequestBuilder() {
+        OkHttpClient base = getNetworkingModuleClient();
+        if (base == null)
+            base = OkHttpClientProvider.getOkHttpClient();
+        OkHttpClient.Builder builder = base.newBuilder();
+        ApproovClientBuilder.applyCustomClientBuilder(readInstalledCustomClientBuilder(), builder);
+        return builder;
+    }
+
+    /**
+     * Returns true if the token interceptor is on the application chain of the builder. This
+     * is the one detection rule every diagnostic uses.
+     */
+    private static boolean hasApproovInterceptor(OkHttpClient.Builder builder) {
+        for (Interceptor interceptor : builder.interceptors())
+            if (interceptor instanceof ApproovInterceptor)
+                return true;
+        return false;
+    }
+
+    // ---- the factories Approov installs ----
+
+    /**
+     * A factory Approov installed. A later registration (the RN context recreated by an OTA
+     * reload, or a recovery via updateClientFactory) recognises these to unwrap rather than
+     * chain, and retires the previously installed one wherever it now sits, so no earlier
+     * ApproovService or ReactContext is retained.
+     */
+    private interface ApproovOwnedFactory extends OkHttpClientFactory {
+        /** The non-Approov factory beneath this one, or null for the RN default. */
+        OkHttpClientFactory wrappedFactory();
+
+        /** Drops this factory's Approov protection and references; it then passes straight through. */
+        void retire();
+    }
+
+    // the Approov factory most recently installed, so a later registration can retire it
+    private static final AtomicReference<ApproovOwnedFactory> lastInstalledFactory = new AtomicReference<>();
+
+    // the Approov custom client builder most recently registered, likewise
+    private static final AtomicReference<ApproovClientBuilder> lastInstalledHook = new AtomicReference<>();
+
+    private static void retirePreviousFactory(ApproovOwnedFactory current) {
+        ApproovOwnedFactory previous = lastInstalledFactory.getAndSet(current);
+        if ((previous != null) && (previous != current))
+            previous.retire();
+    }
+
+    /**
+     * The OkHttpClientFactory that layers Approov protection on top of any factory previously
+     * installed by another SDK.
+     */
+    private static final class ApproovOkHttpClientFactory implements ApproovOwnedFactory {
+        // the underlying non-Approov factory this one wraps, or null to start from the RN default
+        private final OkHttpClientFactory wrappedFactory;
+        // the builder that applies Approov protection (interceptor + pinning); null once retired
+        private volatile ApproovClientBuilder clientBuilder;
+
+        ApproovOkHttpClientFactory(OkHttpClientFactory wrappedFactory, ApproovClientBuilder clientBuilder) {
+            this.wrappedFactory = wrappedFactory;
+            this.clientBuilder = clientBuilder;
+        }
+
+        @Override
+        public OkHttpClientFactory wrappedFactory() {
+            return wrappedFactory;
+        }
+
+        @Override
+        public void retire() {
+            clientBuilder = null;
+        }
+
+        @Override
+        public OkHttpClient createNewNetworkModuleClient() {
+            OkHttpClient.Builder builder = (wrappedFactory != null)
+                    ? wrappedFactory.createNewNetworkModuleClient().newBuilder()
+                    : OkHttpClientProvider.createClientBuilder();
+            ApproovClientBuilder current = clientBuilder;
+            if (current != null)
+                current.apply(builder);
+            return builder.build();
+        }
+    }
+
+    /**
+     * The configuration preserved by recovery, with Approov interceptors and pins removed.
+     * This factory holds no Approov protection to retire. A new service can wrap it to install
+     * its own protection while retaining the customer's other client settings.
+     */
+    private static final class ApproovBaseClientFactory implements OkHttpClientFactory {
+        private final OkHttpClient client;
+
+        ApproovBaseClientFactory(OkHttpClient client) {
+            this.client = client;
+        }
+
+        @Override
+        public OkHttpClient createNewNetworkModuleClient() {
+            return client;
+        }
+    }
+
+    /**
+     * The factory installed by updateClientFactory. It serves the protected snapshot until
+     * superseded, then releases it and serves the base configuration to any remaining wrapper.
+     * Unwrapping returns that same base without retaining the old Approov interceptor/service.
+     */
+    private static final class ApproovRecoveredClientFactory implements ApproovOwnedFactory {
+        private final ApproovBaseClientFactory baseFactory;
+        private volatile OkHttpClient client;
+
+        ApproovRecoveredClientFactory(OkHttpClient baseClient, OkHttpClient client) {
+            this.baseFactory = new ApproovBaseClientFactory(baseClient);
+            this.client = client;
+        }
+
+        @Override
+        public OkHttpClientFactory wrappedFactory() {
+            return baseFactory;
+        }
+
+        @Override
+        public void retire() {
+            client = baseFactory.createNewNetworkModuleClient();
+        }
+
+        @Override
+        public OkHttpClient createNewNetworkModuleClient() {
+            return client;
+        }
     }
 
     /**
@@ -624,55 +936,28 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void isInterceptorActive(Promise promise) {
         try {
-            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
-            boolean found = false;
-            for (Interceptor interceptor : client.interceptors()) {
-                if (interceptor instanceof ApproovInterceptor) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                for (Interceptor interceptor : client.networkInterceptors()) {
-                    if (interceptor instanceof ApproovInterceptor) {
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            promise.resolve(found);
+            // Inspect the EFFECTIVE per-request client (module client + registered custom
+            // client builder), not the provider's cached singleton and not the module's client
+            // field alone: the cached client can carry the interceptor while the live request
+            // path does not, and the module's field lacks any protection that React Native
+            // adds per request through the custom client builder hook.
+            promise.resolve(hasApproovInterceptor(effectiveRequestBuilder()));
         } catch (Exception e) {
             promise.reject("isInterceptorActive", "Error: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
 
     /**
-     * Adds a pin change listener that will be notified of any future Approov
-     * pin changes.
-     * 
-     * @param listener is the pin change listener
+     * Refresh shared pins on initialization or an SDK configuration update. Holds the service
+     * monitor, like the commit in initialize(), so a refresh cannot interleave with that commit
+     * and install pins for the enabled state it is replacing.
      */
-    public synchronized void addPinChangeListener(PinChangeListener listener) {
-        pinChangeListeners.add(listener);
+    public synchronized void rebuildPins() {
+        pinningInterceptor.rebuildPins(this);
     }
 
-    /**
-     * Gets all of the pin change listeners.
-     * 
-     * @return List of pin change listeners
-     */
-    public synchronized List<PinChangeListener> getPinChangeListeners() {
-        return new ArrayList<PinChangeListener>(pinChangeListeners);
-    }
-
-    /**
-     * Notifies pin change listeners of a pin update.
-     */
-    public void notifyPinChangeListeners() {
-        List<PinChangeListener> listeners = getPinChangeListeners();
-        for (PinChangeListener listener : listeners) {
-            listener.approovPinsUpdated();
-        }
+    ApproovPinningInterceptor getPinningInterceptor() {
+        return pinningInterceptor;
     }
 
     /**
@@ -729,42 +1014,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     }
 
     /**
-     * Sets the earliest network request based on the current time plus the window
-     * period if
-     * the time has not been previously set.
-     */
-    public synchronized void setEarliestNetworkRequestTime() {
-        if (earliestNetworkRequestTime == 0) {
-            earliestNetworkRequestTime = System.currentTimeMillis() + STARTUP_SYNC_TIME_WINDOW;
-            log(LOG_INFO, TAG, "startup sync time window started");
-        }
-    }
-
-    /**
-     * Clears the earliest network request time so any network requests can proceed
-     * immediately.
-     */
-    private synchronized void clearEarliestNetworkRequestTime() {
-        earliestNetworkRequestTime = 0;
-    }
-
-    /**
-     * Returns the earliest time that network requests should be allowed, in
-     * milliseconds, or 0
-     * if they are allowed immediately. This is used to perform a synchronization on
-     * any early network
-     * request thats should perhaps be subject to Approov protection that are
-     * performed prior to the
-     * initialization.
-     * 
-     * @return earliest network time in milliseconds, or 0 if no delay should be
-     *         imposed
-     */
-    public synchronized long getEarliestNetworkRequestTime() {
-        return earliestNetworkRequestTime;
-    }
-
-    /**
      * Initializes the ApproovService with an account configuration and comment.
      * Service-layer state is only reset after the platform SDK confirms success.
      * The platform SDK returns true on first initialization or false if it is
@@ -816,17 +1065,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // without an Approov token. The platform SDK call above is intentionally left
             // outside the lock so its network work never blocks those getters. iOS performs
             // the equivalent reset inside @synchronized(initializerLock).
+            // Build the pins for the new configuration before committing any state. If they
+            // cannot be built, nothing is committed and the promise rejects: the service must
+            // never report initialized while still holding the previous pins, or requests
+            // would carry tokens over connections Approov does not pin.
+            CertificatePinner pins = ApproovCertificatePinner.build(!config.isEmpty());
             synchronized (this) {
                 // Warn about runtime configuration that is about to be discarded. Token
                 // binding ceasing to apply is the security-relevant one, so it is called
                 // out separately from the rest.
                 if (bindingHeader != null)
-                    Log.w(TAG, "initialization is discarding the binding header - re-apply " +
+                    log(LOG_WARN, TAG, "initialization is discarding the binding header - re-apply " +
                             "setBindingHeader after initialize or tokens will no longer be " +
                             "bound to that header value");
                 if (!substitutionHeaders.isEmpty() || !substitutionQueryParams.isEmpty()
                         || !exclusionURLRegexs.isEmpty())
-                    Log.w(TAG, "initialization is discarding runtime configuration " +
+                    log(LOG_WARN, TAG, "initialization is discarding runtime configuration " +
                             "(substitution headers/query params and exclusion regexes) - " +
                             "re-apply it after initialize if it is still required");
                 isInitialized = false;
@@ -842,18 +1096,17 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 suppressLoggingUnknownURL = false;
                 sessionMetadataCollectionEnabled = true;
                 if ((serviceMutator != null) && (serviceMutator != ApproovServiceMutator.DEFAULT))
-                    Log.w(TAG, "initialization is discarding a custom service mutator - re-apply " +
+                    log(LOG_WARN, TAG, "initialization is discarding a custom service mutator - re-apply " +
                             "setServiceMutatorType (or setServiceMutator) after initialize if a " +
                             "custom policy is still required");
                 serviceMutator = buildDefaultServiceMutator();
+                pinningInterceptor.installPins(pins);
                 initialConfig = config;
                 isInitialized = true;
             }
-            clearEarliestNetworkRequestTime();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");
                 log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());
-                notifyPinChangeListeners();
             } else {
                 log(LOG_INFO, TAG, "initialized without Approov SDK");
             }
@@ -864,15 +1117,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
             promise.resolve(null);
         } catch (IllegalArgumentException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
-            // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
+            // Report initialization or pin-refresh failure; protected callers must not proceed.
             promise.reject("initialize", "initialize IllegalArgument: " + e.getMessage(), getErrorUserInfo(false));
         } catch (IllegalStateException e) {
             log(LOG_ERROR, TAG, "initialization failed: " + e.getMessage());
-            // Release the startup sync gate so any waiting threads are not held indefinitely.
-            // Service-layer state is NOT modified — previous operating mode is preserved.
-            clearEarliestNetworkRequestTime();
+            // Report initialization or pin-refresh failure; protected callers must not proceed.
             promise.reject("initialize", "initialize IllegalState: " + e.getMessage(), getErrorUserInfo(false));
         }
     }
@@ -1023,7 +1272,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public synchronized void setProceedOnNetworkFail() {
-        log(LOG_DEBUG, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
+        log(LOG_WARN, TAG, "setProceedOnNetworkFail has been deprecated and does nothing");
     }
 
     /**
@@ -1072,7 +1321,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         }
         try {
             Approov.setDevKey(devKey);
-            log(LOG_DEBUG, TAG, "setDevKey");
+            log(LOG_INFO, TAG, "setDevKey");
             promise.resolve(null);
         } catch (IllegalStateException e) {
             promise.reject("setDevKey", "IllegalState: " + e.getMessage(), getErrorUserInfo(false));
@@ -1138,6 +1387,30 @@ public class ApproovService extends ReactContextBaseJavaModule {
         diagnostics.putBoolean("enabled", sessionMetadataCollectionEnabled);
         diagnostics.putString("message", "Android does not retain an extended session ledger.");
         promise.resolve(diagnostics);
+    }
+
+    /**
+     * Reads the debuggable flag of the host app. This reflects the app's build type, not this
+     * library's, so it is true for a React Native debug build and false for a release build.
+     *
+     * @param context the context of the host app, which may be null in tests
+     * @return true if the app is debuggable
+     */
+    private static boolean isDebuggable(Context context) {
+        if (context == null)
+            return false;
+        ApplicationInfo info = context.getApplicationInfo();
+        return (info != null) && ((info.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
+    }
+
+    /**
+     * Gets whether the host app is debuggable. The interceptor only forwards local development
+     * hosts, such as the Android emulator alias for the development machine, when this is true.
+     *
+     * @return true if the host app is debuggable
+     */
+    boolean isAppDebuggable() {
+        return appDebuggable;
     }
 
     /**
@@ -1928,30 +2201,27 @@ public class ApproovService extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getPinningDiagnostics(Promise promise) {
         try {
-            OkHttpClient client = OkHttpClientProvider.getOkHttpClient();
+            // the effective per-request builder (see effectiveRequestBuilder), never built
+            OkHttpClient.Builder builder = effectiveRequestBuilder();
             WritableMap diagnostics = safeCreateMap();
-            boolean isInterceptorPresent = false;
             WritableArray interceptors = safeCreateArray();
-
-            for (Interceptor interceptor : client.interceptors()) {
-                String name = interceptor.getClass().getName();
-                interceptors.pushString(name);
-                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
-                    isInterceptorPresent = true;
-            }
-
-            for (Interceptor interceptor : client.networkInterceptors()) {
-                String name = interceptor.getClass().getName();
-                interceptors.pushString(name);
-                if (name.equals("io.approov.reactnative.ApproovInterceptor"))
-                    isInterceptorPresent = true;
-            }
-
-            diagnostics.putBoolean("isInterceptorPresent", isInterceptorPresent);
+            for (Interceptor interceptor : builder.interceptors())
+                interceptors.pushString(interceptor.getClass().getName());
+            for (Interceptor interceptor : builder.networkInterceptors())
+                interceptors.pushString(interceptor.getClass().getName());
+            diagnostics.putBoolean("isInterceptorPresent", hasApproovInterceptor(builder));
             diagnostics.putArray("interceptors", interceptors);
 
-            CertificatePinner pinner = client.certificatePinner();
-            boolean isPinnerPresent = (pinner != null) && !pinner.equals(CertificatePinner.DEFAULT);
+            // Only a network pinning interceptor enforces Approov pins. An empty pinner or
+            // one accidentally placed in the application chain must not report protection.
+            boolean isPinnerPresent = false;
+            for (Interceptor interceptor : builder.networkInterceptors()) {
+                if (interceptor instanceof ApproovPinningInterceptor &&
+                        !((ApproovPinningInterceptor) interceptor).getCertificatePinner().getPins().isEmpty()) {
+                    isPinnerPresent = true;
+                    break;
+                }
+            }
             diagnostics.putBoolean("isPinnerPresent", isPinnerPresent);
 
             log(LOG_INFO, TAG, "getPinningDiagnostics: " + diagnostics.toString());
@@ -1980,63 +2250,89 @@ public class ApproovService extends ReactContextBaseJavaModule {
         try {
             // we obtain the NetworkingModule and the current client it is using
             NetworkingModule networkingModule = getReactApplicationContext().getNativeModule(NetworkingModule.class);
-            OkHttpClient currentClient = OkHttpClientProvider.getOkHttpClient();
+            // recover from the client the NetworkingModule is ACTUALLY using, not the provider's
+            // cached singleton: copying the cache and then installing the copy on the module
+            // would silently drop any interceptor another SDK had added to the live client
+            OkHttpClient currentClient = getNetworkingModuleClient();
+            if (currentClient == null)
+                currentClient = OkHttpClientProvider.getOkHttpClient();
+
+            // Another SDK may have replaced the factory after React Native built its live
+            // client, which is the case this recovery is documented for. The live client
+            // cannot contain that factory's settings, so build from the factory, as the next
+            // context recreation would, keeping React Native's cookie bridge from the live
+            // client. When the installed factory is our own, fall through and copy the live
+            // client, which already carries anything registered before Approov.
+            OkHttpClientFactory installedFactory = wrapExisting ? readInstalledOkHttpClientFactory() : null;
+            if ((installedFactory != null) && !(installedFactory instanceof ApproovOwnedFactory)) {
+                ApproovOkHttpClientFactory factory = new ApproovOkHttpClientFactory(installedFactory,
+                        new ApproovClientBuilder(this, null));
+                OkHttpClient newClient = factory.createNewNetworkModuleClient().newBuilder()
+                        .cookieJar(currentClient.cookieJar())
+                        .build();
+                OkHttpClientProvider.setOkHttpClientFactory(factory);
+                retirePreviousFactory(factory);
+                setNetworkingModuleClient(networkingModule, newClient);
+                log(LOG_INFO, TAG, "updateClientFactory: success (wrapped factory "
+                        + installedFactory.getClass().getName() + ")");
+                promise.resolve(true);
+                return;
+            }
 
             // if we are wrapping the existing client then we use it as the basis for the
             // new one
             OkHttpClient.Builder builder;
             if (wrapExisting) {
                 builder = currentClient.newBuilder();
-                // OkHttp's newBuilder() clones the interceptor list, so remove any
-                // previously-added ApproovInterceptors to avoid stacking duplicate
-                // token-fetching and signature-generation on repeated recovery calls.
-                builder.interceptors().removeIf(i -> i instanceof ApproovInterceptor);
             } else {
-                builder = new OkHttpClient.Builder();
+                // Retain plain OkHttp defaults (including timeouts), but keep RN's cookie
+                // bridge even if another SDK replaced the live client's cookie jar.
+                builder = new OkHttpClient.Builder().cookieJar(networkingCookieJar(networkingModule));
             }
+
+            // Preserve the base configuration independently of Approov protection, so a later
+            // service can replace our layer without losing customer interceptors or settings.
+            // Remove Approov from either chain to avoid retaining an old service. Approov owns
+            // the pinning policy; neither customer pins nor old Approov pins are preserved.
+            builder.interceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
+            builder.networkInterceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
+            builder.certificatePinner(CertificatePinner.DEFAULT);
+            OkHttpClient baseClient = builder.build();
 
             // add the Approov protection to the builder
             // updateClientFactory builds a one-shot recovered client snapshot, so the
-            // builder should not register as a PinChangeListener.
+            // builder shares the service pinning state without fetching pins.
             ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
             approovBuilder.apply(builder);
 
             // build the new client
             OkHttpClient newClient = builder.build();
 
-            // set the new client as the default shared client
-            OkHttpClientProvider.setOkHttpClientFactory(new OkHttpClientFactory() {
-                @Override
-                public OkHttpClient createNewNetworkModuleClient() {
-                    return newClient;
-                }
-            });
+            // keep the base and protected snapshots separate so retiring or unwrapping this
+            // factory releases the old Approov protection while preserving base settings
+            ApproovRecoveredClientFactory factory = new ApproovRecoveredClientFactory(baseClient, newClient);
+            OkHttpClientProvider.setOkHttpClientFactory(factory);
+            retirePreviousFactory(factory);
 
-            // we also need to use reflection to set the client on the NetworkingModule
-            // since it has already grasped a reference to the previous client
-            try {
-                Field clientField = null;
-                try {
-                    // React Native 0.73+ (Kotlin NetworkingModule)
-                    clientField = NetworkingModule.class.getDeclaredField("client");
-                } catch (NoSuchFieldException e) {
-                    // React Native < 0.73 (Java NetworkingModule)
-                    clientField = NetworkingModule.class.getDeclaredField("mClient");
-                }
-                if (clientField != null) {
-                    clientField.setAccessible(true);
-                    clientField.set(networkingModule, newClient);
-                }
-            } catch (Exception e) {
-                log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
-                // we determine this is not a fatal error as the provider update should work for
-                // future requests
-            }
+            setNetworkingModuleClient(networkingModule, newClient);
 
             log(LOG_INFO, TAG, "updateClientFactory: success");
             promise.resolve(true);
         } catch (Exception e) {
             promise.reject("updateClientFactory", "Exception: " + e.getMessage(), getErrorUserInfo(false));
+        }
+    }
+
+    /**
+     * Sets the client on the NetworkingModule by reflection, since it has already grasped a
+     * reference to the previous client. A failure is logged but not fatal: the provider
+     * update still applies to clients created later.
+     */
+    private void setNetworkingModuleClient(NetworkingModule networkingModule, OkHttpClient newClient) {
+        try {
+            networkingModuleClientField().set(networkingModule, newClient);
+        } catch (Exception e) {
+            log(LOG_ERROR, TAG, "Failed to update NetworkingModule client via reflection: " + e.getMessage());
         }
     }
 
@@ -2123,7 +2419,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: skip PinChangeListener to avoid leaking references on
+                // ephemeral builder: share pinning state without registering listeners on
                 // every fetch
                 ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
                 approovBuilder.apply(clientBuilder);

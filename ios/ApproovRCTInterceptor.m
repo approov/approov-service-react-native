@@ -119,6 +119,7 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
       @"SentryNSURLSessionDelegate", // Sentry
       @"Sentry*", // Sentry (prefix match for any Sentry delegates)
       @"GDTCCTUploadOperation", // Firebase transport upload delegate
+      @"ExpoModulesCore.URLSessionSessionDelegateProxy", // expo/fetch, the default fetch from Expo SDK 56
     ]];
     _excludedDelegates = [NSSet setWithArray:@[
       @"RCTMultipartDataTask" // Bundle reload (excluded)
@@ -702,6 +703,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
     metadata.requestCount++;
   });
 
+  // A request copied from one Approov already processed still carries what was
+  // applied to it, for the host it was issued for; take that out first.
+  request = [PinningURLSessionDelegate requestByUndoingRecordedApproovChangesIn:request];
+
   NSString *tokenHeader = [ApproovService sharedTokenHeader];
   NSString *traceIDHeader = [ApproovService sharedTraceIDHeader];
   NSString *tokenBefore = [request valueForHTTPHeaderField:tokenHeader];
@@ -745,6 +750,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                               withAction:ApproovInterceptorActionFail
                                              withMessage:message];
     }
+    // Remember the app's own headers and URL so a redirect can take back out
+    // everything Approov added for this destination.
+    [PinningURLSessionDelegate recordPreApproovRequest:request
+                                    onProcessedRequest:finalRequest];
   }
 
   NSString *tokenAfterMutator =
@@ -955,7 +964,8 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           }
         } else {
           // No delegate provided
-          NSLog(@"[Approov] WARNING: NSURLSession created with a nil delegate! Call stack: %@", [NSThread callStackSymbols]);
+          ApproovLogW(@"NSURLSession created with a nil delegate");
+          ApproovLogD(@"nil delegate session call stack: %@", [NSThread callStackSymbols]);
           session = RSSWCallOriginal(configuration, delegate, queue);
           [interceptor trackObservedSession:session
                           delegateClassName:@"<nil delegate>"

@@ -7,8 +7,11 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -16,9 +19,9 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import android.content.res.AssetManager;
 
 import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableType;
@@ -47,9 +50,14 @@ import java.util.HashMap;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class ApproovServiceRegressionTest {
 
     private ReactApplicationContext reactContext;
@@ -59,14 +67,13 @@ public class ApproovServiceRegressionTest {
     @Before
     public void setUp() throws Exception {
         resetServiceStaticState();
-        reactContext = mock(ReactApplicationContext.class);
-        AssetManager assetManager = mock(AssetManager.class);
-        when(reactContext.getAssets()).thenReturn(assetManager);
-        when(assetManager.open(anyString())).thenThrow(new IOException("missing"));
+        reactContext = MiniSdkHarness.reactContext();
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"example.com\"]");
 
         networkingModuleStatic = mockStatic(NetworkingModule.class);
-        approovStatic = mockStatic(Approov.class);
-        approovStatic.when(() -> Approov.getPins("public-key-sha256")).thenReturn(java.util.Collections.emptyMap());
+        // the mini-SDK answers every SDK call; the wrapper records calls and lets a test inject
+        // a failure the mini-SDK cannot produce
+        approovStatic = mockStatic(Approov.class, CALLS_REAL_METHODS);
     }
 
     @After
@@ -74,6 +81,7 @@ public class ApproovServiceRegressionTest {
         resetServiceStaticState();
         approovStatic.close();
         networkingModuleStatic.close();
+        AttesterProxyController.reset();
     }
 
     private ApproovService newService() {
@@ -263,9 +271,6 @@ public class ApproovServiceRegressionTest {
         ApproovService service = newService();
         Promise promise = mock(Promise.class);
 
-        approovStatic.reset();
-        approovStatic.when(() -> Approov.getPins("public-key-sha256")).thenReturn(java.util.Collections.emptyMap());
-
         service.initialize("", null, promise);
 
         verify(promise, timeout(2000)).resolve(null);
@@ -277,11 +282,11 @@ public class ApproovServiceRegressionTest {
     @Test
     public void initializeWithSameConfigResetsRuntimeConfiguration() {
         ApproovService service = newService();
-        String config = "valid-config";
+        String config = MiniSdkHarness.CONFIG;
 
-        // Approov.initialize returns false here (mockStatic default) meaning the native
-        // SDK is treated as already initialized — no exception, so the service layer
-        // commits the configuration successfully.
+        // The SDK may report that it is already initialized with this config (the mini-SDK
+        // keeps its state across tests); that is not an error, so the service layer commits
+        // the configuration successfully.
         Promise firstInit = mock(Promise.class);
         service.initialize(config, null, firstInit);
         verify(firstInit, timeout(2000)).resolve(null);
@@ -313,6 +318,11 @@ public class ApproovServiceRegressionTest {
     @Test
     public void initializeWithDifferentConfigResetsRuntimeConfiguration() {
         ApproovService service = newService();
+        // The real SDK (and the mini-SDK) rejects a different config once initialized, so
+        // a successful different-config re-initialization is only reachable with the SDK
+        // call stubbed; everything else still runs against the mini-SDK.
+        approovStatic.when(() -> Approov.initialize(any(), anyString(), anyString(), nullable(String.class)))
+            .thenReturn(true);
 
         Promise firstInit = mock(Promise.class);
         service.initialize("config-one", null, firstInit);
@@ -331,6 +341,11 @@ public class ApproovServiceRegressionTest {
     @Test
     public void initializeWithDifferentConfigResetsCustomServiceMutator() {
         ApproovService service = newService();
+        // The real SDK (and the mini-SDK) rejects a different config once initialized, so
+        // a successful different-config re-initialization is only reachable with the SDK
+        // call stubbed; everything else still runs against the mini-SDK.
+        approovStatic.when(() -> Approov.initialize(any(), anyString(), anyString(), nullable(String.class)))
+            .thenReturn(true);
 
         Promise firstInit = mock(Promise.class);
         service.initialize("config-one", null, firstInit);
@@ -365,7 +380,7 @@ public class ApproovServiceRegressionTest {
         ApproovService service = newService();
 
         Promise firstInit = mock(Promise.class);
-        service.initialize("config-one", null, firstInit);
+        service.initialize(MiniSdkHarness.CONFIG, null, firstInit);
         verify(firstInit, timeout(2000)).resolve(null);
 
         ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
@@ -374,7 +389,7 @@ public class ApproovServiceRegressionTest {
         // A same-config re-initialization is an initialization boundary and must not
         // allow custom mutator state to persist.
         Promise secondInit = mock(Promise.class);
-        service.initialize("config-one", null, secondInit);
+        service.initialize(MiniSdkHarness.CONFIG, null, secondInit);
         verify(secondInit, timeout(2000)).resolve(null);
 
         ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
@@ -434,6 +449,24 @@ public class ApproovServiceRegressionTest {
     }
 
     @Test
+    public void initializeCommitsNoStateWhenPinsCannotBeBuilt() {
+        ApproovService service = newService();
+        approovStatic.when(() -> Approov.getPins("public-key-sha256"))
+            .thenThrow(new IllegalStateException("pins unavailable"));
+        Promise promise = mock(Promise.class);
+
+        service.initialize(MiniSdkHarness.CONFIG, "reinit-pins-unavailable", promise);
+
+        // rejected, and for the pin failure, not some other reason
+        verify(promise).reject(org.mockito.ArgumentMatchers.eq("initialize"),
+            org.mockito.ArgumentMatchers.contains("pins unavailable"), (com.facebook.react.bridge.WritableMap) any());
+        // the service must not report initialized while holding the previous (empty) pins,
+        // or requests would carry tokens over connections Approov does not pin
+        assertFalse(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+    }
+
+    @Test
     public void updateClientFactoryWrapExistingStripsDuplicateApproovInterceptors() {
         ApproovService service = newService();
         Promise promise = mock(Promise.class);
@@ -471,4 +504,48 @@ public class ApproovServiceRegressionTest {
         }
     }
 
+
+    // initialize() installs the new pins while holding the service monitor. A pin refresh,
+    // triggered by a token fetch on an OkHttp thread reporting a configuration change or forced
+    // pins, must not hold the pinning interceptor's monitor while it waits for the service
+    // monitor, or the two threads block each other for good: initialization never completes and
+    // every request then waits on the service monitor in the interceptor.
+    @Test
+    public void pinRefreshDuringInitializationCommitDoesNotDeadlock() throws Exception {
+        ApproovService service = newService();
+        ApproovPinningInterceptor interceptor = service.getPinningInterceptor();
+        Thread refresh = new Thread(service::rebuildPins, "pin-refresh");
+        refresh.setDaemon(true);
+        java.util.concurrent.CountDownLatch commitHoldsService = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService commit = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "init-commit");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            // the shape of the commit in initialize(): service monitor, then installPins
+            java.util.concurrent.Future<?> committed = commit.submit(() -> {
+                synchronized (service) {
+                    commitHoldsService.countDown();
+                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                    while (refresh.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline)
+                        Thread.yield();
+                    interceptor.installPins(okhttp3.CertificatePinner.DEFAULT);
+                }
+                return null;
+            });
+            assertTrue(commitHoldsService.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            refresh.start();
+
+            try {
+                committed.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                fail("initialization commit and pin refresh deadlocked");
+            }
+            refresh.join(5000);
+            assertFalse("pin refresh did not complete", refresh.isAlive());
+        } finally {
+            commit.shutdownNow();
+        }
+    }
 }

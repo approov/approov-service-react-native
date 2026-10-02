@@ -45,7 +45,205 @@
 
 @end
 
+// NSURLProtocol property keys holding a request's state before Approov
+// processed it
+static NSString *const kApproovPreRequestHeadersKey =
+    @"io.approov.reactnative.preApproovHeaders";
+static NSString *const kApproovPreRequestURLKey =
+    @"io.approov.reactnative.preApproovURL";
+// NSURLProtocol property keys holding what Approov applied to it
+static NSString *const kApproovAppliedHeadersKey =
+    @"io.approov.reactnative.approovAppliedHeaders";
+static NSString *const kApproovAppliedURLKey =
+    @"io.approov.reactnative.approovAppliedURL";
+
+// Header values compare equal regardless of surrounding whitespace, since the
+// stack may store or send a value trimmed
+static BOOL ApproovHeaderValuesMatch(NSString *a, NSString *b) {
+  NSCharacterSet *ws = [NSCharacterSet whitespaceCharacterSet];
+  return [[a stringByTrimmingCharactersInSet:ws]
+      isEqualToString:[b stringByTrimmingCharactersInSet:ws]];
+}
+
+// Takes the value Approov applied back out of a header value that still carries
+// it, whole or as one of its comma-separated parts (a value appended later is
+// joined with a comma), putting the app's value in its place or dropping it if
+// the app had none. Returns NO if the value does not carry the applied value.
+static BOOL ApproovUndoAppliedValue(NSString *carried, NSString *applied,
+                                    NSString *_Nullable appValue,
+                                    NSString *_Nullable *_Nonnull result) {
+  if (ApproovHeaderValuesMatch(carried, applied)) {
+    *result = appValue;
+    return YES;
+  }
+  NSCharacterSet *ws = [NSCharacterSet whitespaceCharacterSet];
+  NSString *target = [applied stringByTrimmingCharactersInSet:ws];
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  BOOL found = NO;
+  if ([target rangeOfString:@","].location == NSNotFound) {
+    for (NSString *part in [carried componentsSeparatedByString:@","]) {
+      NSString *trimmed = [part stringByTrimmingCharactersInSet:ws];
+      if (!found && [trimmed isEqualToString:target]) {
+        found = YES;
+        if (appValue != nil)
+          [parts addObject:appValue];
+      } else {
+        [parts addObject:trimmed];
+      }
+    }
+  } else {
+    // an applied value that itself contains commas can only be the first or
+    // the last part
+    NSString *value = [carried stringByTrimmingCharactersInSet:ws];
+    NSString *head = [target stringByAppendingString:@","];
+    NSString *tail = [@"," stringByAppendingString:target];
+    if ([value hasPrefix:head]) {
+      found = YES;
+      if (appValue != nil)
+        [parts addObject:appValue];
+      [parts addObject:[[value substringFromIndex:head.length] stringByTrimmingCharactersInSet:ws]];
+    } else if ([value hasSuffix:tail]) {
+      found = YES;
+      [parts addObject:[[value substringToIndex:value.length - tail.length] stringByTrimmingCharactersInSet:ws]];
+      if (appValue != nil)
+        [parts addObject:appValue];
+    }
+  }
+  if (!found)
+    return NO;
+  *result = parts.count > 0 ? [parts componentsJoinedByString:@","] : nil;
+  return YES;
+}
+
+// Case-insensitive header lookup in a header dictionary
+static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString *> *headers,
+                                               NSString *name) {
+  NSString *value = headers[name];
+  if (value != nil)
+    return value;
+  for (NSString *key in headers) {
+    if ([key caseInsensitiveCompare:name] == NSOrderedSame)
+      return headers[key];
+  }
+  return nil;
+}
+
 @implementation PinningURLSessionDelegate
+
++ (void)recordPreApproovRequest:(NSURLRequest *)original
+             onProcessedRequest:(NSMutableURLRequest *)processed {
+  // A request can pass through the interceptor more than once (the task
+  // swizzles sit on NSURLSession and on its private subclasses, and one may
+  // call through to the other). Keep the first record, which holds the app's
+  // values; recording again would capture the processed headers instead.
+  NSDictionary *recorded = [NSURLProtocol propertyForKey:kApproovPreRequestHeadersKey
+                                               inRequest:original];
+  if (recorded != nil) {
+    [NSURLProtocol setProperty:recorded
+                        forKey:kApproovPreRequestHeadersKey
+                     inRequest:processed];
+    NSString *recordedURL = [NSURLProtocol propertyForKey:kApproovPreRequestURLKey
+                                                inRequest:original];
+    if (recordedURL != nil)
+      [NSURLProtocol setProperty:recordedURL
+                          forKey:kApproovPreRequestURLKey
+                       inRequest:processed];
+    [self recordAppliedStateOf:processed];
+    return;
+  }
+  [NSURLProtocol setProperty:(original.allHTTPHeaderFields ?: @{})
+                      forKey:kApproovPreRequestHeadersKey
+                   inRequest:processed];
+  NSString *url = original.URL.absoluteString;
+  if (url != nil) {
+    [NSURLProtocol setProperty:url
+                        forKey:kApproovPreRequestURLKey
+                     inRequest:processed];
+  } else {
+    [NSURLProtocol removePropertyForKey:kApproovPreRequestURLKey
+                              inRequest:processed];
+  }
+  [self recordAppliedStateOf:processed];
+}
+
+// Records the headers and URL a processed request carries, so a request built
+// from it later can be told apart from changes made afterwards by the app.
++ (void)recordAppliedStateOf:(NSMutableURLRequest *)processed {
+  [NSURLProtocol setProperty:(processed.allHTTPHeaderFields ?: @{})
+                      forKey:kApproovAppliedHeadersKey
+                   inRequest:processed];
+  NSString *url = processed.URL.absoluteString;
+  if (url != nil)
+    [NSURLProtocol setProperty:url forKey:kApproovAppliedURLKey inRequest:processed];
+  else
+    [NSURLProtocol removePropertyForKey:kApproovAppliedURLKey inRequest:processed];
+}
+
++ (NSURLRequest *)requestByUndoingRecordedApproovChangesIn:(NSURLRequest *)request {
+  if ([NSURLProtocol propertyForKey:kApproovPreRequestHeadersKey inRequest:request] == nil)
+    return request;
+  return [self requestByUndoingApproovChangesIn:request previousAttempt:nil];
+}
+
+/**
+ * Builds the follow-up request for a redirect with everything Approov added
+ * for the previous attempt taken back out. URLSession builds the redirect
+ * request from the previous attempt's headers, so without this the token,
+ * trace ID, signatures and substituted secrets issued for the original host
+ * would be sent to the redirect target, whatever host that is.
+ *
+ * Every header whose value Approov changed is restored to the app's value, or
+ * removed if the app had not set it, but only while the redirect request still
+ * carries the value Approov applied: a header the stack dropped (Content-Type
+ * and Content-Digest on a 303 to GET) stays dropped. If the redirect targets
+ * the same URL, the app's URL is restored so no substituted query parameter
+ * survives. A request Approov never processed carries no record and is
+ * returned unchanged.
+ */
++ (NSMutableURLRequest *)requestByUndoingApproovChangesIn:(NSURLRequest *)redirect
+                                          previousAttempt:(NSURLRequest *_Nullable)previous {
+  NSMutableURLRequest *followUp = [redirect mutableCopy];
+  id (^recorded)(NSString *) = ^id(NSString *key) {
+    id value = [NSURLProtocol propertyForKey:key inRequest:redirect];
+    if (value == nil && previous != nil)
+      value = [NSURLProtocol propertyForKey:key inRequest:previous];
+    return value;
+  };
+  NSDictionary<NSString *, NSString *> *before = recorded(kApproovPreRequestHeadersKey);
+  NSDictionary<NSString *, NSString *> *applied = recorded(kApproovAppliedHeadersKey);
+  if (applied == nil)
+    applied = previous.allHTTPHeaderFields;
+  if (before == nil || applied == nil)
+    return followUp;
+
+  for (NSString *name in applied) {
+    NSString *appliedValue = applied[name];
+    NSString *appValue = ApproovHeaderLookup(before, name);
+    if (appValue != nil && [appValue isEqualToString:appliedValue])
+      continue;
+    NSString *carried = [followUp valueForHTTPHeaderField:name];
+    NSString *restored = nil;
+    if (carried == nil || !ApproovUndoAppliedValue(carried, appliedValue, appValue, &restored))
+      continue;
+    [followUp setValue:restored forHTTPHeaderField:name];
+  }
+
+  // The URL Approov applied may carry substituted query parameters; restore the
+  // app's URL only while the request still targets it.
+  NSString *appURL = recorded(kApproovPreRequestURLKey);
+  NSString *appliedURL = recorded(kApproovAppliedURLKey) ?: previous.URL.absoluteString;
+  if (appURL != nil && appliedURL != nil &&
+      [followUp.URL.absoluteString isEqualToString:appliedURL]) {
+    NSURL *restored = [NSURL URLWithString:appURL];
+    if (restored != nil)
+      followUp.URL = restored;
+  }
+
+  for (NSString *key in @[ kApproovPreRequestHeadersKey, kApproovPreRequestURLKey,
+                           kApproovAppliedHeadersKey, kApproovAppliedURLKey ])
+    [NSURLProtocol removePropertyForKey:key inRequest:followUp];
+  return followUp;
+}
 
 /** Creates a pinning URL session delegate.
  *
@@ -82,6 +280,32 @@
  * swizzling may be initialized before the native module exists, so pinning
  * must recover the live service at challenge time.
  */
+/**
+ * Asks the service mutator whether Approov pinning applies (handlePinningShouldProcessRequest).
+ * Server trust is a connection-level challenge on iOS, so pins are checked once per TLS
+ * connection and usually no single request is in scope: unless the task is known, the mutator
+ * is asked with a request for the connection's origin (https, host and port, no path, headers or
+ * body). If no origin can be built, pinning is kept.
+ */
+- (BOOL)shouldPinForChallenge:(NSURLAuthenticationChallenge *)challenge
+                         task:(NSURLSessionTask *_Nullable)task {
+  NSURLRequest *request = task.currentRequest ?: task.originalRequest;
+  if (request == nil) {
+    NSURLComponents *origin = [[NSURLComponents alloc] init];
+    origin.scheme = @"https";
+    origin.host = challenge.protectionSpace.host;
+    NSInteger port = challenge.protectionSpace.port;
+    if ((port > 0) && (port != 443))
+      origin.port = @(port);
+    origin.path = @"/";
+    NSURL *url = origin.URL;
+    if (url == nil)
+      return YES;
+    request = [NSURLRequest requestWithURL:url];
+  }
+  return [[ApproovServiceMutatorBridge shared] handlePinningShouldProcessRequest:request];
+}
+
 - (ApproovService *_Nullable)currentApproovService {
   ApproovService *service = _approovService ?: [ApproovService sharedService];
   if (_approovService == nil && service != nil) {
@@ -184,6 +408,17 @@
       return;
     }
 
+    if (![self shouldPinForChallenge:challenge task:dataTask]) {
+      ApproovLogI(@"pinning skipped by the service mutator for %@", host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:dataTask
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(pinning skipped)"];
+      return;
+    }
+
     ApproovTrustDecision trustDecision =
         [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
 
@@ -254,6 +489,18 @@
       return;
     }
 
+    if (![self shouldPinForChallenge:challenge task:nil]) {
+      ApproovLogI(@"pinning skipped by the service mutator for %@ (session-level)",
+                  host);
+      [self forwardChallengeToOriginalDelegateForSession:session
+                                                    task:nil
+                                               challenge:challenge
+                                       completionHandler:completionHandler
+                                           challengeType:@"server-trust "
+                                                         @"(pinning skipped)"];
+      return;
+    }
+
     ApproovTrustDecision trustDecision =
         [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
 
@@ -311,8 +558,25 @@
 }
 
 /**
- * Tells the delegate that the remote server requested an HTTP redirect. This is
- * simply passed to the original delegate.
+ * Tells the delegate that the remote server requested an HTTP redirect.
+ *
+ * A redirect is a new request to a new URL, and Approov protection is decided
+ * per API domain, so the follow-up is classified afresh: everything Approov
+ * added for the previous attempt is taken out, then the follow-up goes through
+ * the same processing as a new request. A redirect to a domain Approov does not
+ * protect therefore carries no Approov token, trace ID, signature or
+ * substituted secret, and one to a protected domain gets a token and signature
+ * issued for that URL. Processing may fetch a token, so it runs off the
+ * delegate queue, and the result is delivered back on it.
+ *
+ * The original delegate, if it implements this callback, decides where the
+ * redirect goes, so it is offered the follow-up with Approov's changes taken
+ * out, and the request it completes with is the one processed: a delegate that
+ * sends the redirect elsewhere gets protection decided for that destination,
+ * and one that refuses the redirect (nil) is honoured. Without such a delegate
+ * the follow-up is processed directly. Either way the completion handler is
+ * called here: this delegate implements the method, so URLSession waits for
+ * the handler, and leaving it uncalled would stall the task indefinitely.
  *
  * https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411626-urlsession?language=objc
  */
@@ -321,36 +585,86 @@
     willPerformHTTPRedirection:(NSHTTPURLResponse *)response
                     newRequest:(NSURLRequest *)request
              completionHandler:(void (^)(NSURLRequest *))completionHandler {
-  // Sign the redirected request
-  NSMutableURLRequest *mutableRequest = [request mutableCopy];
-  NSError *mutatorError = nil;
-  BOOL mutatorSucceeded =
-      [[ApproovServiceMutatorBridge shared]
-          processRequest:mutableRequest
-             tokenHeader:[ApproovService sharedTokenHeader]
-           traceIDHeader:[ApproovService sharedTraceIDHeader]
-            errorPointer:&mutatorError];
-  if (!mutatorSucceeded) {
-    ApproovLogE(@"failed to process redirected request: %@",
-                mutatorError.localizedDescription);
-    completionHandler(nil);
-    return;
-  }
+  NSURLRequest *previous = task.currentRequest ?: task.originalRequest;
+  NSMutableURLRequest *followUp =
+      [PinningURLSessionDelegate requestByUndoingApproovChangesIn:request
+                                                  previousAttempt:previous];
+  ApproovService *service = [self currentApproovService];
+  id<NSURLSessionDataDelegate> originalDelegate = _originalDelegate;
 
-  if ([_originalDelegate respondsToSelector:@selector
-                         (URLSession:
-                                task:willPerformHTTPRedirection:newRequest
-                                    :completionHandler:)])
-    [_originalDelegate URLSession:session
-                              task:task
-        willPerformHTTPRedirection:response
-                        newRequest:mutableRequest
-                 completionHandler:completionHandler];
+  void (^protectAndComplete)(NSURLRequest *) = ^(NSURLRequest *chosen) {
+    if (chosen == nil) {
+      completionHandler(nil);
+      return;
+    }
+    // A delegate may build its request from the task's current request, which
+    // still carries what Approov applied, so take that out again.
+    NSMutableURLRequest *clean =
+        [PinningURLSessionDelegate requestByUndoingApproovChangesIn:chosen
+                                                    previousAttempt:previous];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+      NSURLRequest *prepared = clean;
+      NSString *failure = nil;
+      if (service != nil) {
+        ApproovInterceptorResult *result = [service interceptRequest:clean];
+        if (result.action == ApproovInterceptorActionProceed) {
+          NSMutableURLRequest *processed = [result.request mutableCopy];
+          NSError *mutatorError = nil;
+          if ([[ApproovServiceMutatorBridge shared]
+                  processRequest:processed
+                     tokenHeader:[ApproovService sharedTokenHeader]
+                   traceIDHeader:[ApproovService sharedTraceIDHeader]
+                    errorPointer:&mutatorError]) {
+            [PinningURLSessionDelegate recordPreApproovRequest:clean
+                                            onProcessedRequest:processed];
+            prepared = processed;
+          } else {
+            failure = mutatorError.localizedDescription ?:
+                @"mutator processing failed";
+          }
+        } else {
+          failure = result.message ?: @"request rejected";
+        }
+      }
+
+      void (^deliver)(void) = ^{
+        if (failure != nil) {
+          // Fail the task rather than hand the app the redirect response as
+          // if it were the final one.
+          ApproovLogE(@"redirect to %@ not followed: %@", clean.URL, failure);
+          [task cancel];
+          completionHandler(nil);
+          return;
+        }
+        ApproovLogD(@"redirect %@ -> %@ reprocessed", previous.URL, prepared.URL);
+        completionHandler(prepared);
+      };
+      NSOperationQueue *queue = session.delegateQueue;
+      if (queue != nil)
+        [queue addOperationWithBlock:deliver];
+      else
+        deliver();
+    });
+  };
+
+  if ([originalDelegate respondsToSelector:@selector
+                        (URLSession:
+                               task:willPerformHTTPRedirection:newRequest
+                                   :completionHandler:)])
+    [originalDelegate URLSession:session
+                            task:task
+      willPerformHTTPRedirection:response
+                      newRequest:followUp
+               completionHandler:protectAndComplete];
+  else
+    protectAndComplete(followUp);
 }
 
 /**
  * Tells the delegate that the data task received the initial reply (headers)
- * from the server. This is simply passed to the original delegate.
+ * from the server. This is passed to the original delegate if it implements
+ * it; otherwise the response is allowed here, which is URLSession's own
+ * default, since an uncalled handler would stall the task.
  *
  * https://developer.apple.com/documentation/foundation/urlsessiondatadelegate/1410027-urlsession?language=objc
  */
@@ -366,6 +680,8 @@
                          dataTask:dataTask
                didReceiveResponse:response
                 completionHandler:completionHandler];
+  else
+    completionHandler(NSURLSessionResponseAllow);
 }
 
 /**

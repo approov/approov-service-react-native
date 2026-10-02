@@ -341,8 +341,11 @@ public interface ApproovServiceMutator {
     }
 
     /**
-     * Decides whether certificate pinning should be applied to a request or not.
-     * Called at the start of the ApproovService pinning processing.
+     * Decides whether Approov certificate pinning should be applied to a request or not.
+     * Called by the pinning network interceptor for every HTTPS exchange, before the pins are
+     * checked. Returning false skips the Approov pin check for that request only; the normal
+     * TLS trust evaluation still applies. iOS asks the same question once per TLS connection
+     * with a request for the connection's origin, so decide by host for consistent behaviour.
      *
      * @param request the request being processed
      * @return true if pinning should be applied, false to skip it

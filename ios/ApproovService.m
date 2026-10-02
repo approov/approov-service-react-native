@@ -86,15 +86,6 @@ RCT_EXPORT_MODULE(ApproovService);
 static NSString *const ConfigResource = @"approov";
 static NSString *const ConfigExtension = @"config";
 
-// time window (in millseconds) applied to any network request attempts made
-// before Approov is initialized. The start of the window is defined by the
-// first network request received prior to initialization. That network request,
-// and any others arriving during the window, may then be delayed until the end
-// of the window period. This is to allow time for the Approov initialization to
-// be completed as it may be in a race with API requests made as the app starts
-// up.
-static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
-
 // lock object used during initialization
 static id initializerLock = nil;
 
@@ -105,25 +96,17 @@ static id initializerLock = nil;
 static id configLock = nil;
 
 // keeps track of whether Approov is initialized
-BOOL isInitialized = NO;
-
-// lock object used for synchronizing the earliestNetworkRequestTime
-static id earliestNetworkRequestTimeLock = nil;
-
-// the earliest time that any network request will be allowed to avoid any
-// potential race conditions with Approov protected API calls being made before
-// Approov itself can be initialized - or 0.0 they may proceed immediately
-NSTimeInterval earliestNetworkRequestTime = 0.0;
+static BOOL isInitialized = NO;
 
 // the current shared ApproovService instance
 static ApproovService *sharedApproovService = nil;
 
 // original config string used during initialization
-NSString *initialConfigString = nil;
+static NSString *initialConfigString = nil;
 
 // keeps track of whether a prefetch request has been made prior to
 // initialization
-BOOL pendingPrefetch = NO;
+static BOOL pendingPrefetch = NO;
 
 static BOOL ApproovIsEnabled(void) {
   // Read under initializerLock so the request path never observes a torn/partial
@@ -139,36 +122,36 @@ static BOOL ApproovIsEnabled(void) {
 
 // YES if the status should be used as the token header value if the token is
 // empty
-BOOL useApproovStatusIfNoToken = NO;
+static BOOL useApproovStatusIfNoToken = NO;
 
 // YES if no logging should be output on unknown (or excluded) URLs
-BOOL suppressLoggingUnknownURL = NO;
+static BOOL suppressLoggingUnknownURL = NO;
 
 // header that will be added to Approov enabled requests
-NSString *approovTokenHeader = @"Approov-Token";
+static NSString *approovTokenHeader = @"Approov-Token";
 
 // default header that will carry any optional Approov TraceID debug value from
 // the SDK
-NSString *approovTraceIDHeader = @"Approov-TraceID";
+static NSString *approovTraceIDHeader = @"Approov-TraceID";
 
 // any prefix to be added before the Approov token, such as "Bearer "
-NSString *approovTokenPrefix = @"";
+static NSString *approovTokenPrefix = @"";
 
 // any header to be used for binding in Approov tokens or empty string if not
 // set
-NSString *bindingHeader = @"";
+static NSString *bindingHeader = @"";
 
 // map of headers that should have their values substituted for secure strings,
 // mapped to their required prefixes
-NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
+static NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
 
 // set of query parameter keys whose values may be substituted for secure
 // strings
-NSMutableSet<NSString *> *substitutionQueryParams = nil;
+static NSMutableSet<NSString *> *substitutionQueryParams = nil;
 
 // set of URL regular expressions that should be excluded from Approov
 // protection
-NSMutableSet<NSString *> *exclusionURLRegexs = nil;
+static NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 
 /**
  * Indicates that this module must initialize before any Javascript is run.
@@ -212,7 +195,6 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
     configLock = [NSObject new];
-    earliestNetworkRequestTimeLock = [NSObject new];
   }
 }
 
@@ -344,9 +326,8 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * The platform SDK returns YES on first initialization, or NO with a nil error
  * if already initialized with the same configuration (treated as success).
  * NO with a non-nil error indicates a genuine failure such as a different-config
- * conflict, which is surfaced as a rejected promise. The startup synchronization
- * gate is cleared on both success and failure so that pending requests are never
- * held indefinitely.
+ * conflict, which is surfaced as a rejected promise. Protected request paths must
+ * await successful initialization; request interception has no startup grace period.
  *
  * @param config   the configuration string, or empty string for bypass mode
  * @param comment  optional comment forwarded to the native SDK, or nil
@@ -391,14 +372,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     }
 
     if (initializationError != nil) {
-      // Genuine initialization failure — release the gate so pending requests
-      // are not held indefinitely. Service-layer state is NOT modified;
-      // the previous operating mode (protected or bypass) is fully preserved.
+      // Preserve the previous operating mode if SDK initialization fails.
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestNetworkRequestTime = 0.0;
-      }
       NSError *error =
           [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                      code:0
@@ -454,9 +430,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
-    @synchronized(earliestNetworkRequestTimeLock) {
-      earliestNetworkRequestTime = 0.0;
-    }
     if (ApproovIsEnabled()) {
       [Approov setUserProperty:@"approov-react-native"];
       ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
@@ -556,10 +529,6 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
   }
 }
 
-+ (id)networkRequestLock {
-  return earliestNetworkRequestTimeLock;
-}
-
 /**
  * Gets the last ARC (Attestation Response Code) code.
  *
@@ -645,7 +614,7 @@ RCT_EXPORT_METHOD(setInstallAttrsInToken : (NSString *)attrs resolver : (
  * handleInterceptorFetchTokenResult in a custom mutator.
  */
 RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
-  ApproovLogI(@"setProceedOnNetworkFail: deprecated no-op - use "
+  ApproovLogW(@"setProceedOnNetworkFail: deprecated no-op - use "
               @"ApproovServiceMutator instead");
 }
 
@@ -760,6 +729,8 @@ RCT_EXPORT_METHOD(addAllowedDelegate : (NSString *)delegatePattern) {
  */
 RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
   setApproovLogLevel((int)level);
+  // the Swift mutator bridge cannot call the C loggers, so it mirrors the level
+  ApproovServiceMutatorBridge.logLevel = level;
   ApproovLogI(@"setLogLevel %d", (int)level);
 }
 
@@ -1041,7 +1012,7 @@ RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
     return;
   }
   NSString *deviceID = [Approov getDeviceID];
-  ApproovLogI(@"getDeviceID: %@", deviceID);
+  ApproovLogD(@"getDeviceID: %@", deviceID);
   if (deviceID == nil) {
     NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                                 code:0
@@ -1428,59 +1399,41 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
               withMessage:@"localhost forwarded"];
   }
 
-  // if the Approov SDK is not initialized then we just return immediately
-  // without making any changes
+#if DEBUG
+  // In a debug build, also forward the loopback addresses used to reach the development
+  // machine, such as Metro on 127.0.0.1. They are never Approov-protected and, being
+  // cleartext, would otherwise cost a token fetch that returns BAD_URL. Release builds
+  // do not skip them.
+  static NSSet<NSString *> *debugDevelopmentHosts;
+  static dispatch_once_t debugDevelopmentHostsOnce;
+  dispatch_once(&debugDevelopmentHostsOnce, ^{
+    debugDevelopmentHosts = [NSSet setWithObjects:@"127.0.0.1", @"::1", nil];
+  });
+  if ([debugDevelopmentHosts containsObject:host]) {
+    if (!suppressLoggingUnknownURL)
+      ApproovLogD(@"development host forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"development host forwarded"];
+  }
+#endif
+
+  // Protected request paths MUST await initialize(). There is no startup grace period.
   if (!isInitialized) {
-    // if this is the first network request performed prior to Approov
-    // initialization then we start a time window in case we are in a race with
-    // that initialization
-    @synchronized(earliestNetworkRequestTimeLock) {
-      if (earliestNetworkRequestTime == 0) {
-        earliestNetworkRequestTime =
-            [[NSDate date] timeIntervalSince1970] + STARTUP_SYNC_TIME_WINDOW;
-        ApproovLogI(@"startup sync time window started");
-      }
-    }
-
-    // wait until any initial fetch time is reached
-    BOOL waitForReady = YES;
-    while (waitForReady) {
-      // if initialization has completed then we can proceed
-      if (isInitialized) {
-        waitForReady = NO;
-        break;
-      }
-
-      NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-      NSTimeInterval earliestTime = 0.0;
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestTime = earliestNetworkRequestTime;
-      }
-      if (currentTime >= earliestTime)
-        waitForReady = NO;
-      else {
-        // sleep for a short period to block this request thread
-        static BOOL hasLoggedInitWarning = NO;
-        if (!hasLoggedInitWarning) {
-          ApproovLogE(
-              @"Approov initialization is delaying a network request! A native "
-              @"thread is sleeping. You MUST await ApproovService.initialize() "
-              @"or use the useApproov() hook before calling fetch().");
-          hasLoggedInitWarning = YES;
-        }
-        ApproovLogI(@"request paused: %@", url);
-        [NSThread sleepForTimeInterval:0.1];
-      }
-    }
-
-    // if Approov is still not initialized then forward the request unchanged
-    if (!isInitialized) {
-      ApproovLogI(@"uninitialized forwarded: %@", url);
-      return [ApproovInterceptorResult
-          createWithRequest:updatedRequest
-                 withAction:ApproovInterceptorActionProceed
-                withMessage:@"uninitalized forwarded"];
-    }
+    // Warn once with the guidance; later early requests (Metro's own traffic included) log
+    // at debug so the warning is not repeated for every request.
+    static dispatch_once_t uninitializedForwardReported;
+    __block BOOL firstUninitializedForward = NO;
+    dispatch_once(&uninitializedForwardReported, ^{ firstUninitializedForward = YES; });
+    if (firstUninitializedForward)
+      ApproovLogW(@"uninitialized forwarded (await ApproovService.initialize() before protected requests): %@", url);
+    else
+      ApproovLogD(@"uninitialized forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"uninitalized forwarded"];
   }
 
   if (!ApproovIsEnabled()) {
@@ -1536,13 +1489,13 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
   if (!suppressLoggingUnknownURL ||
       ([result status] != ApproovTokenFetchStatusUnknownURL))
-    ApproovLogI(@"token for %@: %@", url, [result loggableToken]);
+    ApproovLogD(@"token for %@: %@", url, [result loggableToken]);
 
   // log if a configuration update is received and call fetchConfig to clear the
   // update state
   if (result.isConfigChanged) {
     [Approov fetchConfig];
-    ApproovLogI(@"dynamic configuration update received");
+    ApproovLogD(@"dynamic configuration update received");
   }
 
   // process the token fetch result
@@ -1694,7 +1647,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
           fetchSecureStringAndWait:[value substringFromIndex:prefix.length
       ]:nil];
       status = [result status];
-      ApproovLogI(@"substituting header %@: %@", header,
+      ApproovLogD(@"substituting header %@: %@", header,
                   [Approov stringFromApproovTokenFetchStatus:status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
@@ -1762,7 +1715,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSString *matchText = [url substringWithRange:[match rangeAtIndex:1]];
       result = [Approov fetchSecureStringAndWait:matchText:nil];
       status = [result status];
-      ApproovLogI(@"substituting query parameter %@: %@", key,
+      ApproovLogD(@"substituting query parameter %@: %@", key,
                   [Approov stringFromApproovTokenFetchStatus:result.status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
@@ -1804,7 +1757,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
 // Subject Public Key Info (SPKI) headers for public keys' type and size. Only
 // RSA-2048, RSA-4096, EC-256 and EC-384 are supported
-NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
+static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 /**
  * Initialize the SPKI header constants.

@@ -1,0 +1,4 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+rootProject.name = 'ApproovCombinedServicePackagingCheck'
+include ':app', ':approov-react-native'
+project(':approov-react-native').projectDir = file('../../android')

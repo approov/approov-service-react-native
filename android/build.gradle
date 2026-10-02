@@ -47,6 +47,21 @@ def candidateMiniSdkRoots = [
 ]
 def miniSdkAndroidRoot = candidateMiniSdkRoots.find { it.exists() }?.absoluteFile
 def miniSdkApproovJar = miniSdkAndroidRoot ? new File(miniSdkAndroidRoot, 'approov-sdk/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar') : null
+// Unit tests that run against the Approov mini-SDK instead of a mocked SDK. They are left out of the
+// build when the core-service-layers-testing checkout (with the mini-SDK) is not next to this repo.
+def miniSdkTestSources = [
+    'io/approov/reactnative/MiniSdkHarness.java',
+    'io/approov/reactnative/ApproovServiceMiniSdkTest.java',
+    'io/approov/reactnative/ApproovServicePublicApiTest.java',
+    'io/approov/reactnative/ApproovClientBuilderTest.java',
+    'io/approov/reactnative/ApproovNetworkingCallbacksTest.java',
+    'io/approov/reactnative/ApproovServiceRegressionTest.java',
+    'io/approov/reactnative/ApproovPinningInterceptorTest.java',
+    'io/approov/reactnative/ApproovPinningTlsTest.java',
+    'io/approov/reactnative/ApproovWebSocketUpgradeTest.java',
+    'io/approov/reactnative/ApproovCrossHostRedirectTest.java',
+    'io/approov/reactnative/ApproovInterceptorTest.java',
+]
 
 android {
     namespace = "io.approov.reactnative"
@@ -72,7 +87,7 @@ android {
                     new File(miniSdkAndroidRoot, 'test-support/src/main/java').absolutePath,
                 ]
             } else {
-                java.exclude 'io/approov/reactnative/ApproovServiceMiniSdkTest.java'
+                miniSdkTestSources.each { java.exclude it }
             }
         }
     }

@@ -24,6 +24,9 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 BINARY="$MACOS_DIR/ApproovNativeMiniSDKTests"
 
 mkdir -p "$MACOS_DIR"
+mkdir -p "$BUILD_DIR/TestHeaders/Approov"
+ln -sf "$MINI_SDK_ROOT/Sources/Approov/include/Approov.h" \
+  "$BUILD_DIR/TestHeaders/Approov/Approov.h"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -53,11 +56,12 @@ xcrun clang \
   -DDEBUG=1 \
   -I"$REPO_ROOT" \
   -I"$REPO_ROOT/ios" \
+  -I"$BUILD_DIR/TestHeaders" \
   -I"$TEST_ROOT" \
   -I"$MINI_SDK_ROOT/Sources/Approov/include" \
   -I"$REPO_ROOT/tests/ios/native/TestSupport" \
   -I"$MINI_SDK_ROOT/Sources/MiniSDKTestSupport/include" \
-  "$TEST_ROOT/ApproovNativeMiniSDKTests.m" \
+  "$TEST_ROOT/ApproovNativeMiniSDKTestsCombined.m" \
   "$MINI_SDK_ROOT/Sources/Approov/Approov.m" \
   "$MINI_SDK_ROOT/Sources/MiniSDKTestSupport/MiniSDKTestSupport.m" \
   "$REPO_ROOT/tests/ios/native/TestSupport/ApproovServiceMutatorBridgeStub.m" \
@@ -67,7 +71,6 @@ xcrun clang \
   "$REPO_ROOT/ios/ApproovMockURLProtocol.m" \
   "$REPO_ROOT/ios/RSSwizzle.m" \
   "$REPO_ROOT/ios/ApproovRCTInterceptor.m" \
-  "$REPO_ROOT/ios/ApproovService.m" \
   -framework Foundation \
   -framework Security \
   -o "$BINARY"

@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/runtime.h>
 
 #import "Approov.h"
 #import "MiniSDKTestSupport.h"
@@ -1891,6 +1892,46 @@ static void TestRedirectRefusedByCallerDelegateIsNotFollowed(void) {
   [session invalidateAndCancel];
 }
 
+// Returns a subclass of the probe delegate registered under the given runtime name, so a test can
+// present a delegate whose class name is exactly what a Swift module reports.
+static Class ProbeDelegateClassNamed(const char *name) {
+  Class existing = objc_getClass(name);
+  if (existing != Nil)
+    return existing;
+  Class cls = objc_allocateClassPair([ApproovPartialRedirectProbeDelegate class], name, 0);
+  objc_registerClassPair(cls);
+  return cls;
+}
+
+// expo-fetch (expo/fetch, the default global fetch from Expo SDK 56) opens its own URLSession with an
+// ExpoModulesCore.URLSessionSessionDelegateProxy delegate. It is intercepted by default, so its
+// requests carry a token and are pinned without the app calling addAllowedDelegate; other classes in
+// the same module are not.
+static void TestExpoFetchSessionDelegateIsInterceptedByDefault(void) {
+  RedirectTestService();
+  Class expoProxy = ProbeDelegateClassNamed("ExpoModulesCore.URLSessionSessionDelegateProxy");
+  ApproovPartialRedirectProbeDelegate *caller = [expoProxy new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  AssertTrue([session.delegate isKindOfClass:[PinningURLSessionDelegate class]],
+             @"The expo-fetch session delegate should be wrapped by the pinning delegate by default");
+  [[session dataTaskWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]]] resume];
+  BOOL completed = dispatch_semaphore_wait(caller.done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC))) == 0;
+  [session invalidateAndCancel];
+  AssertTrue(completed, @"expo-fetch task should complete");
+  NSDictionary *reply = [NSJSONSerialization JSONObjectWithData:caller.data options:0 error:nil];
+  AssertNotNil(HeaderValue(reply, @"Approov-Token"), @"An expo-fetch request should carry a token");
+
+  Class other = ProbeDelegateClassNamed("ExpoModulesCore.SomeOtherDelegate");
+  NSURLSession *otherSession = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                             delegate:[other new]
+                                                        delegateQueue:nil];
+  AssertTrue(![otherSession.delegate isKindOfClass:[PinningURLSessionDelegate class]],
+              @"Only the expo-fetch delegate is allowed by default, not the whole module");
+  [otherSession invalidateAndCancel];
+}
+
 static void TestLogMessageDoesNotCrashAtAnyLevel(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1987,6 +2028,7 @@ int main(void) {
       ^{ TestInterceptRequestDefaultsNoApproovServiceToProceed(); },
       ^{ TestInterceptRequestHonorsCustomNoApproovServiceBlocks(); },
       ^{ TestPartialCallerDelegateDoesNotStallTask(); },
+      ^{ TestExpoFetchSessionDelegateIsInterceptedByDefault(); },
       ^{ TestRedirectToUnprotectedHostStripsApproovState(); },
       ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
       ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },

@@ -150,7 +150,7 @@ ApproovService.logMessage(message: string, level?: number);
 * `level` (number, optional): One of `ApproovService.Log.*`. Defaults to `INFO` if omitted.
 
 ## addAllowedDelegate
-Registers a custom `NSURLSessionDelegate` class name (or a prefix pattern matching class names using a trailing `*`) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
+Registers a custom `NSURLSessionDelegate` class name (or a prefix pattern matching class names using a trailing `*`) to be intercepted by Approov on iOS. By default, the React Native SDK automatically intercepts known delegates (like `RCTHTTPRequestHandler` and expo-fetch's `ExpoModulesCore.URLSessionSessionDelegateProxy`). If you use a third-party networking library that employs its own custom `NSURLSessionDelegate`, you must add its class name here *before* initialization so Approov knows to protect those sessions.
 
 ```Javascript
 ApproovService.addAllowedDelegate(delegatePattern: string);

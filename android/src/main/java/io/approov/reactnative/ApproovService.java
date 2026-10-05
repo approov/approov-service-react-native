@@ -554,10 +554,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public ApproovService(ReactApplicationContext reactContext) {
         // initialize the service state
         super(reactContext);
-        ApproovService previous = latestService;
-        latestService = this;
-        if ((previous != null) && (previous != this))
-            previous.superseded = true;
         applicationContext = reactContext;
         appDebuggable = isDebuggable(reactContext);
         pendingPrefetch = false;
@@ -621,6 +617,15 @@ public class ApproovService extends ReactContextBaseJavaModule {
             }
         } else
             log(LOG_INFO, TAG, "started");
+
+        // Publish this service to interceptors of clients built before a reload only now that its
+        // configuration is complete: a request reading a half-built service would find no header
+        // maps and throw inside OkHttp, ending the app. The volatile write also makes every field
+        // set above visible to them.
+        ApproovService previous = latestService;
+        latestService = this;
+        if ((previous != null) && (previous != this))
+            previous.superseded = true;
 
         // Load initial pins once, including when a recreated service inherits initialized SDK
         // state. Client builders only attach this shared interceptor and never query the SDK.

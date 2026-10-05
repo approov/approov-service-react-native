@@ -65,6 +65,8 @@ public class ApproovLateFactoryRecoveryTest {
 
     @After
     public void tearDown() throws Exception {
+        // the services created here register a custom client builder; leave none behind
+        field(NetworkingModule.class, "customClientBuilder", "mCustomClientBuilder").set(null, null);
         field(OkHttpClientProvider.class, "factory", "sFactory").set(null, null);
         field(OkHttpClientProvider.class, "client", "sClient").set(null, null);
     }

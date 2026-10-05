@@ -284,13 +284,17 @@ public class ApproovInterceptorTest {
         sdk.verify(() -> Approov.fetchApproovTokenAndWait(url));
     }
 
-    @Test(timeout = 5000)
+    @Test
     public void uninitializedRequestsForwardWithoutAStartupWait() throws Exception {
         ApproovInterceptor uninitialized = interceptorForUnprotectedService(null);
         Request request = request("https://example.com/data");
         when(chain.request()).thenReturn(request);
 
+        // the removed startup wait held a request for up to 2.5 s
+        long start = System.nanoTime();
         Response response = uninitialized.intercept(chain);
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertTrue("an early request must not wait for initialization (took " + elapsedMs + " ms)", elapsedMs < 1000);
 
         assertForwardedUntouched(request, response.request());
         sdk.verifyNoInteractions();

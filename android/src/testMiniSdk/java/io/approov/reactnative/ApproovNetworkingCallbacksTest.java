@@ -431,6 +431,21 @@ public class ApproovNetworkingCallbacksTest {
     }
 
     @Test
+    public void diagnosticsDoNotReportAPinningInterceptorWithoutPinsAsProtection() throws Exception {
+        ApproovService service = new ApproovService(context);
+        // not initialized, so the shared pinning interceptor holds no pins
+        service.getPinningInterceptor().installPins(CertificatePinner.DEFAULT);
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addNetworkInterceptor(service.getPinningInterceptor())
+                .build();
+        attachClient(client);
+        NetworkingModule.setCustomClientBuilder(null);
+        Promise promise = mock(Promise.class);
+        service.getPinningDiagnostics(promise);
+        assertFalse(diagnostics(promise).getBoolean("isPinnerPresent"));
+    }
+
+    @Test
     public void diagnosticsRequirePinsOnTheNetworkChainWithoutFetchingPins() throws Exception {
         ApproovService service = new ApproovService(context);
         service.initialize(MiniSdkHarness.CONFIG, "reinit-diagnostics", mock(Promise.class));

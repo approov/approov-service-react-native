@@ -1383,6 +1383,40 @@ static void TestInterceptRequestAddsTokenTrace(void) {
                @"Success path should add the trace header");
 }
 
+static void TestInterceptRequestOnMainThreadSkipsApproovProcessing(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+
+  [service setTokenHeader:@"Approov-Token" prefix:@"Bearer "];
+
+  // A third-party SDK can start a request on the main queue. A token fetch there would
+  // block the main thread, so the request must be forwarded as it came, without a wait.
+  __block ApproovInterceptorResult *mainResult = nil;
+  __block BOOL ranOnMainThread = NO;
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]];
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    ranOnMainThread = [NSThread isMainThread];
+    mainResult = [service interceptRequest:request];
+  });
+
+  AssertTrue(ranOnMainThread, @"The request must have been intercepted on the main thread");
+  AssertEqualIntegers(ApproovInterceptorActionProceed, mainResult.action,
+                      @"A main thread request should be forwarded, not failed");
+  AssertEqualObjects(@"main thread forwarded", mainResult.message,
+                     @"The main thread skip should be reported");
+  AssertNil([mainResult.request valueForHTTPHeaderField:@"Approov-Token"],
+            @"A main thread request must not wait for or carry an Approov token");
+  AssertNil([mainResult.request valueForHTTPHeaderField:@"Approov-TraceID"],
+            @"A main thread request must not carry a trace header");
+
+  // The same request from a background thread is still protected.
+  AssertTrue(![NSThread isMainThread], @"The test body should run off the main thread");
+  ApproovInterceptorResult *backgroundResult = [service interceptRequest:request];
+  AssertTrue([[backgroundResult.request valueForHTTPHeaderField:@"Approov-Token"] hasPrefix:@"Bearer "],
+             @"A background thread request should still get the Approov token");
+}
+
 static void TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -2634,6 +2668,7 @@ int main(void) {
       ^{ TestInterceptRequestForwardsDevelopmentHostsInDebug(); },
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
       ^{ TestInterceptRequestAddsTokenTrace(); },
+      ^{ TestInterceptRequestOnMainThreadSkipsApproovProcessing(); },
       ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },
       ^{ TestInterceptRequestDefaultMutatorFailsClosedOnMitm(); },
       ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },
@@ -2670,8 +2705,23 @@ int main(void) {
 
     ];
 
-    for (void (^testBlock)(void) in tests) {
-      testBlock();
+    // Approov skips token fetches on the main thread, so the tests run on a worker
+    // thread, as real protected requests do. The main thread keeps servicing its run
+    // loop so a test can dispatch a block onto it.
+    __block BOOL testsDone = NO;
+    NSThread *testThread = [[NSThread alloc] initWithBlock:^{
+      @autoreleasepool {
+        for (void (^testBlock)(void) in tests) {
+          testBlock();
+        }
+      }
+      testsDone = YES;
+    }];
+    testThread.stackSize = 8 * 1024 * 1024;
+    [testThread start];
+    while (!testsDone) {
+      [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                               beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     }
 
     if (gFailureCount > 0) {

@@ -128,6 +128,7 @@ Some failures do not show up as simple custom delegate issues:
 * `IMP CONFLICT` or `IMP RECOVERY` logs mean another SDK has overwritten one of the active iOS hooks after interceptor startup and optional runtime recovery is enabled.
 * `skipping dataTaskWithRequest for unregistered session` means the task path is still visible but the session was never registered.
 * `forwarding without pin verification` means a challenge reached the pinning delegate before a usable service was available.
+* `main thread request forwarded WITHOUT Approov protection` means a request was started on the main thread. A token fetch there would block the UI, so the request goes out without an Approov token, secure string substitution or signature. Start protected requests from a background thread. The warning is logged for the first such request; later ones are logged at DEBUG.
 
 If you see these logs during rollout, treat them as an integration warning even if requests still appear to succeed.
 

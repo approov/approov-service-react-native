@@ -1500,9 +1500,17 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   // request is forwarded unmodified. Third-party SDKs such as Firebase can start
   // requests on the main queue, and their sessions are intercepted too.
   if ([NSThread isMainThread]) {
-    ApproovLogW(@"main thread request forwarded WITHOUT Approov protection (no token, "
-                @"no signing); a token fetch would block the main thread. Start the "
-                @"request from a background thread: %@", url);
+    // Warn once with the guidance; later main thread requests log at debug so the warning
+    // is not repeated for every request.
+    static dispatch_once_t mainThreadForwardReported;
+    __block BOOL firstMainThreadForward = NO;
+    dispatch_once(&mainThreadForwardReported, ^{ firstMainThreadForward = YES; });
+    if (firstMainThreadForward)
+      ApproovLogW(@"main thread request forwarded WITHOUT Approov protection (no token, "
+                  @"no signing); a token fetch would block the main thread. Start "
+                  @"protected requests from a background thread: %@", url);
+    else
+      ApproovLogD(@"main thread request forwarded: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed

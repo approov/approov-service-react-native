@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.5.18] - Unreleased
+## [3.5.18] - 2026-10-05
 
 - **Fixed: Approov no longer blocks the main thread on a token fetch (iOS)**: a request reaching `interceptRequest:` on the main thread waited for `fetchApproovTokenAndWait:`, which can take seconds on a poor network, so the app froze and the iOS watchdog killed it (`0x8badf00d`, "Fatal App Hang"). A production app saw this from Firebase's `GDTCCTUploadOperation`, which starts its upload tasks on the main queue (approov/approov-service-react-native#43). Approov processing is now skipped on the main thread: the request is forwarded unmodified, with no token, trace ID, secure string substitution or signature, and a warning is logged. The warning means a request that Approov would normally protect went out unprotected, so start such requests from a background thread. Requests on any other thread are unchanged. Covered by a new mini-SDK test that intercepts a request on the main thread; the suite now runs on a worker thread, as protected requests do.
 - **Changed: `GDTCCTUploadOperation` is no longer in the default allow list (iOS)**: Firebase's transport upload delegate was intercepted by default, which wrapped its session in the Approov pinning delegate and fetched a token for every upload, although those endpoints are not Approov protected. It is now left alone, so its session and callbacks are untouched. An app that does need Approov on that session can restore the old behaviour with `ApproovService.addAllowedDelegate("GDTCCTUploadOperation")`.

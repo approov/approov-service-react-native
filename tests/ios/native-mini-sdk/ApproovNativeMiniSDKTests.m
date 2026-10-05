@@ -2725,6 +2725,53 @@ static void TestNSURLSessionExposesStatusHeaderWhenTokenMissingAndAllowed(void) 
   ApproovMutatorBridgeReset();
 }
 
+// End to end on the swizzled session path: a task created on the main thread still
+// reaches the service mutator, but with no token header, so the signer has nothing to
+// sign (ApproovMessageSigningTests covers the signer's side). Nothing on the wire
+// carries a token, trace ID or signature.
+static void TestMainThreadTaskReachesMutatorWithoutToken(void) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+  @synchronized([ApproovCaptureProtocol class]) {
+    gCapturedRequest = nil;
+  }
+  __block NSInteger processRequestCalls = 0;
+  __block NSInteger callsWithToken = 0;
+  ApproovMutatorBridgeSetProcessRequestHandler(^(NSMutableURLRequest *request, NSString *tokenHeader,
+                                                 NSString *traceIDHeader) {
+    (void)traceIDHeader;
+    processRequestCalls += 1;
+    if ((tokenHeader != nil) && ([request valueForHTTPHeaderField:tokenHeader].length > 0))
+      callsWithToken += 1;
+  });
+
+  RCTTestNetworkDelegate *delegate = [[RCTTestNetworkDelegate alloc] init];
+  NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+  config.protocolClasses = @[ [ApproovCaptureProtocol class] ];
+  __block NSURLSession *session = nil;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    session = [NSURLSession sessionWithConfiguration:config delegate:delegate delegateQueue:nil];
+    [[session dataTaskWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:TargetURL()]]] resume];
+  });
+
+  long waitResult = dispatch_semaphore_wait(delegate.semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  AssertEqualIntegers(0, waitResult, @"The main thread request should complete in time");
+  NSURLRequest *sent = nil;
+  @synchronized([ApproovCaptureProtocol class]) {
+    sent = gCapturedRequest;
+  }
+  AssertNotNil(sent, @"The capture protocol should have seen the request");
+  AssertTrue(processRequestCalls > 0, @"The main thread request should still reach the mutator");
+  AssertEqualIntegers(0, callsWithToken, @"The mutator must never see a token header on a main thread request");
+  AssertNil([sent valueForHTTPHeaderField:@"Approov-Token"], @"The request should carry no token");
+  AssertNil([sent valueForHTTPHeaderField:@"Approov-TraceID"], @"The request should carry no trace ID");
+  AssertNil([sent valueForHTTPHeaderField:@"Signature"], @"The request should not be signed");
+  AssertNil([sent valueForHTTPHeaderField:@"Signature-Input"], @"The request should carry no Signature-Input");
+  [session finishTasksAndInvalidate];
+  ApproovMutatorBridgeReset();
+}
+
 // A NO_APPROOV_SERVICE secure string result that the mutator masks leaves the
 // header placeholder in place and does not fail the request.
 static void TestInterceptRequestSkipsMaskedNoApproovServiceHeaderSubstitution(void) {
@@ -2828,6 +2875,7 @@ int main(void) {
       ^{ TestInterceptRequestForwardsWhenUninitialized(); },
       ^{ TestInterceptRequestAddsTokenTrace(); },
       ^{ TestInterceptRequestOnMainThreadSkipsApproovProcessing(); },
+      ^{ TestMainThreadTaskReachesMutatorWithoutToken(); },
       ^{ TestInterceptRequestSuccessWithEmptyTokenOmitsEmptyHeaders(); },
       ^{ TestInterceptRequestDefaultMutatorFailsClosedOnMitm(); },
       ^{ TestInterceptRequestCanProceedOnMitmWithStatusHeader(); },

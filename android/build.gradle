@@ -161,6 +161,15 @@ dependencies {
     }
 }
 
+// Inside an app, react-android resolves to the app's React Native version. Built on its own (CI and
+// unit tests) the dynamic version would pick up the newest release candidate, so pin the latest
+// stable release there to keep the build reproducible.
+if (rootProject == project) {
+    configurations.configureEach {
+        resolutionStrategy.force 'com.facebook.react:react-android:0.87.1'
+    }
+}
+
 tasks.withType(JavaCompile) {
     dependsOn tasks.named('shadowJar')
 }

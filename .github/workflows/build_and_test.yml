@@ -36,6 +36,9 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: approov/core-service-layers-testing
+          # pinned, so a change to the mini-SDK or the workers cannot alter this build; move it
+          # forward deliberately
+          ref: fa7267e6148a59529bf7ed62b2f1509993cefb56
           token: ${{ secrets.CORE_SERVICE_LAYERS_TESTING_PAT }}
           path: core-service-layers-testing
 
@@ -137,7 +140,7 @@ jobs:
           TESTING_REPLY_URL_UNPROTECTED: ${{ env.TESTING_REPLY_URL_UNPROTECTED }}
 
       - name: Set up Gradle for combined-service packaging check
-        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
         with:
           gradle-version: '9.0.0'
 

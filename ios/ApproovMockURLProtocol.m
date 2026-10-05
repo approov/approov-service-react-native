@@ -44,6 +44,10 @@
   return [NSURLRequest requestWithURL:url];
 }
 
++ (NSURLRequest *)mockRequestWithErrorCode:(NSInteger)code message:(NSString *)msg {
+  return [self mockRequestForURL:[self mockURLForPath:@"error" code:code message:msg]];
+}
+
 /**
  * Starts a data task which returns a custom status code.
  *

@@ -99,7 +99,7 @@ public class ApproovNetworkingCallbacksTest {
         for (Interceptor interceptor : client.interceptors()) {
             if (interceptor instanceof ApproovInterceptor) {
                 count++;
-                assertSame(service, field(ApproovInterceptor.class, "approovService").get(interceptor));
+                assertSame(service, ((ApproovInterceptor) interceptor).service());
             }
         }
         assertEquals(1, count);
@@ -424,6 +424,21 @@ public class ApproovNetworkingCallbacksTest {
         OkHttpClient unpinned = new OkHttpClient.Builder().build();
         assertTrue(unpinned.certificatePinner().getPins().isEmpty());
         attachClient(unpinned);
+        NetworkingModule.setCustomClientBuilder(null);
+        Promise promise = mock(Promise.class);
+        service.getPinningDiagnostics(promise);
+        assertFalse(diagnostics(promise).getBoolean("isPinnerPresent"));
+    }
+
+    @Test
+    public void diagnosticsDoNotReportAPinningInterceptorWithoutPinsAsProtection() throws Exception {
+        ApproovService service = new ApproovService(context);
+        // not initialized, so the shared pinning interceptor holds no pins
+        service.getPinningInterceptor().installPins(CertificatePinner.DEFAULT);
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addNetworkInterceptor(service.getPinningInterceptor())
+                .build();
+        attachClient(client);
         NetworkingModule.setCustomClientBuilder(null);
         Promise promise = mock(Promise.class);
         service.getPinningDiagnostics(promise);

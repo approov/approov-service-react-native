@@ -28,58 +28,66 @@ import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
 // ApproovClientBuilder is a custom client building for OkHttp to add Approov protection, including dynamic pinning
-public class ApproovClientBuilder implements CustomClientBuilder {
-    // interceptor for adding Approov tokens or substituting headers and/or query
-    // parameters; null once retired
+@SuppressWarnings("deprecation")
+public class ApproovClientBuilder implements CustomClientBuilder, ApproovService.PinChangeListener {
+    // interceptor for adding Approov tokens or substituting headers and/or query parameters;
+    // null once retired
     private volatile Interceptor interceptor;
 
-    // Shared by all clients of this service; constructing a builder never fetches pins.
+    // the process-wide pinning interceptor; null once retired
     private volatile ApproovPinningInterceptor pinningInterceptor;
 
-    // prior client builder that might have been set by another SDK (e.g. New Relic). Held as
-    // Object because React Native types this hook as the nested
-    // NetworkingModule.CustomClientBuilder on some versions and the top-level
-    // com.facebook.react.modules.network.CustomClientBuilder on others.
-    private final Object wrappedBuilder;
+    // prior client builder that might have been set by another SDK (e.g. New Relic). React
+    // Native types the hook as the nested NetworkingModule.CustomClientBuilder on some versions
+    // and the top-level interface on others; the nested type extends the top-level one.
+    private final com.facebook.react.modules.network.CustomClientBuilder wrappedBuilder;
 
-    // set when a later Approov registration supersedes this builder: it then applies only the
-    // builder it wraps, adds no Approov protection, and holds no reference to the old service
-    private volatile boolean retired;
-
-    /** Creates a builder using the service's shared pinning state. */
+    /** Creates a builder that adds Approov protection after applying the wrapped builder. */
     public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder) {
-        this(approovService, (Object) wrappedBuilder);
+        this(approovService, (com.facebook.react.modules.network.CustomClientBuilder) wrappedBuilder);
     }
 
     /**
-     * Retains the existing constructor for callers creating short-lived builders. All builders
-     * now share service-owned pins, so neither kind registers listeners or fetches pins.
+     * Same as {@link #ApproovClientBuilder(ApproovService, CustomClientBuilder)}.
+     *
+     * @deprecated the ephemeral flag has no effect: no builder registers listeners or fetches pins
      */
+    @Deprecated
     public ApproovClientBuilder(ApproovService approovService, CustomClientBuilder wrappedBuilder, boolean ephemeral) {
-        this(approovService, (Object) wrappedBuilder);
+        this(approovService, wrappedBuilder);
     }
 
-    private ApproovClientBuilder(ApproovService approovService, Object wrappedBuilder) {
+    private ApproovClientBuilder(ApproovService approovService,
+            com.facebook.react.modules.network.CustomClientBuilder wrappedBuilder) {
         this.wrappedBuilder = wrappedBuilder;
         interceptor = new ApproovInterceptor(approovService);
         pinningInterceptor = approovService.getPinningInterceptor();
     }
 
-    /** Wraps the vendor's per-request callback, sharing the service's pinning interceptor. */
-    static ApproovClientBuilder wrapping(ApproovService approovService, Object previousBuilder) {
+    /** Wraps the vendor's per-request callback, sharing the process-wide pinning interceptor. */
+    static ApproovClientBuilder wrapping(ApproovService approovService,
+            com.facebook.react.modules.network.CustomClientBuilder previousBuilder) {
         return new ApproovClientBuilder(approovService, previousBuilder);
     }
 
     /**
      * Supersedes this builder after a later Approov registration. React Native (or a third
      * party's wrapper) may keep applying it, so it continues to apply the builder it wraps but
-     * adds no Approov protection, and it drops every reference to the old service so that the
-     * service and its ReactContext are not retained.
+     * adds no Approov protection.
      */
     void retire() {
-        retired = true;
         interceptor = null;
         pinningInterceptor = null;
+    }
+
+    /**
+     * Formerly rebuilt this builder's pinner. Every client now shares the service's pin state.
+     *
+     * @deprecated there is nothing to rebuild
+     */
+    @Deprecated
+    @Override
+    public void approovPinsUpdated() {
     }
 
     @Override
@@ -88,7 +96,7 @@ public class ApproovClientBuilder implements CustomClientBuilder {
         // partially configured builder must not proceed
         applyCustomClientBuilder(wrappedBuilder, builder);
 
-        if ((builder == null) || retired)
+        if (builder == null)
             return;
         Interceptor current = interceptor;
         ApproovPinningInterceptor currentPinning = pinningInterceptor;
@@ -100,7 +108,9 @@ public class ApproovClientBuilder implements CustomClientBuilder {
         builder.interceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
         builder.networkInterceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
         builder.addInterceptor(current);
-        builder.addNetworkInterceptor(currentPinning);
+        // First network interceptor, so that other network interceptors (loggers, inspectors)
+        // only ever see a redirect after Approov removed its headers from it.
+        builder.networkInterceptors().add(0, currentPinning);
 
         // Pinning is enforced on each network exchange. Clear the built-in pinner so stale
         // Approov pins cannot reject a connection before our network interceptor runs.
@@ -114,15 +124,14 @@ public class ApproovClientBuilder implements CustomClientBuilder {
 
     /**
      * Invokes an RN callback through its public interface, so non-public implementations
-     * (including another SDK's anonymous classes and lambdas) work as they do in RN. The nested
-     * NetworkingModule.CustomClientBuilder extends the top-level interface, so one cast covers
-     * both. Callback exceptions propagate: callers must not continue with a partially configured
-     * builder, and diagnostics reject if the callback fails.
+     * (including another SDK's anonymous classes and lambdas) work as they do in RN. Callback
+     * exceptions propagate: callers must not continue with a partially configured builder, and
+     * diagnostics reject if the callback fails.
      */
-    static void applyCustomClientBuilder(Object callback, OkHttpClient.Builder builder) {
-        if (callback == null)
-            return;
-        ((com.facebook.react.modules.network.CustomClientBuilder) callback).apply(builder);
+    static void applyCustomClientBuilder(com.facebook.react.modules.network.CustomClientBuilder callback,
+            OkHttpClient.Builder builder) {
+        if (callback != null)
+            callback.apply(builder);
     }
 
     // Package-private accessor for tests: the interceptor this builder installs.
@@ -132,7 +141,7 @@ public class ApproovClientBuilder implements CustomClientBuilder {
 
     // Package-private: the builder this one wraps (another SDK's, or a previous Approov
     // builder), or null.
-    Object getWrappedBuilder() {
+    com.facebook.react.modules.network.CustomClientBuilder getWrappedBuilder() {
         return wrappedBuilder;
     }
 }

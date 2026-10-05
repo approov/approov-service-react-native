@@ -51,8 +51,8 @@
 }
 
 // name of the property file and its extension
-NSString *const PropsResource = @"approov";
-NSString *const PropsExtension = @"plist";
+static NSString *const PropsResource = @"approov";
+static NSString *const PropsExtension = @"plist";
 
 /**
  * Initialize and read the properties which should be present if this is called.

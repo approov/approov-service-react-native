@@ -25,7 +25,7 @@ const { ApproovService } = NativeModules
 
 const ApproovContext = React.createContext()
 
-const ApproovProvider = ({ config, comment = null, onInit, children }) => {
+const ApproovProvider = ({ config, comment = null, onInit, onInitialized, children }) => {
   // approovInitCount increments on every successful initialization. approovReady
   // latches true on the first success and never changes again, so an effect keyed
   // only on it cannot observe a later re-initialization - and every successful
@@ -42,11 +42,18 @@ const ApproovProvider = ({ config, comment = null, onInit, children }) => {
 
     const initializeApproov = async () => {
       try {
-        // execute onInit function before initialization and support async setup
+        // execute onInit function before initialization and support async setup; settings that
+        // initialization resets belong in onInitialized instead
         if (onInit) await Promise.resolve(onInit())
 
         // initialize Approov
         await ApproovService.initialize(config, comment)
+        if (!isMounted) return
+
+        // Initialization resets the runtime configuration (token, binding and substitution
+        // headers, exclusions, the service mutator), so apply it here, before approovReady
+        // lets protected requests start. A failure leaves the provider not ready.
+        if (onInitialized) await Promise.resolve(onInitialized())
         if (!isMounted) return
 
         // updater form: two in-flight initializeApproov() closures would otherwise

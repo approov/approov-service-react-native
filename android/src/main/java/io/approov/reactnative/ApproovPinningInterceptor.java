@@ -27,6 +27,7 @@ import okhttp3.CertificatePinner;
 import okhttp3.Connection;
 import okhttp3.Handshake;
 import okhttp3.Interceptor;
+import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -42,20 +43,15 @@ public final class ApproovPinningInterceptor implements Interceptor {
     // exchange validates its hostname and certificate chain against the current pin set.
     private volatile CertificatePinner certificatePinner = CertificatePinner.DEFAULT;
 
-    // Serialize rebuilds so an earlier fetch cannot overwrite a later update. A failed fetch
-    // leaves the previous complete snapshot intact and propagates to the caller.
-    // Lock order is service monitor, then this monitor, as in initialize(), which installs pins
-    // while holding the service monitor. Service state is read before taking this monitor so a
-    // refresh never waits for the service while holding it, which would deadlock with that commit.
+    // Builds the pins for the service's current state and publishes them. Callers hold the
+    // service monitor (ApproovService.rebuildPins and initialize), which orders rebuilds. A
+    // failed build leaves the previous pin set in place and propagates to the caller.
     void rebuildPins(ApproovService service) {
-        boolean approovEnabled = service.isApproovEnabled();
-        synchronized (this) {
-            certificatePinner = ApproovCertificatePinner.build(approovEnabled);
-        }
+        certificatePinner = ApproovCertificatePinner.build(service.isApproovEnabled());
     }
 
     // Installs a pin set built in advance, so initialization can publish pins and state together.
-    synchronized void installPins(CertificatePinner pins) {
+    void installPins(CertificatePinner pins) {
         certificatePinner = pins;
     }
 
@@ -68,12 +64,12 @@ public final class ApproovPinningInterceptor implements Interceptor {
         Request request = chain.request();
 
         // A redirect reaches only network interceptors, and OkHttp builds it from the previous
-        // request's headers. Approov credentials must never cross hosts, so remove them from an
-        // attempt to a host other than the one they were issued for. The host is unchanged, as
-        // OkHttp requires of network interceptors.
+        // request's headers. Approov credentials must never leave the origin (scheme, host and
+        // port) they were issued for, so remove them from an attempt to any other origin. The
+        // URL is unchanged, as OkHttp requires of network interceptors.
         ApproovIssuedHeaders issued = request.tag(ApproovIssuedHeaders.class);
         if (issued != null)
-            request = issued.stripIfOtherHost(request);
+            request = issued.stripIfOtherOrigin(request);
 
         if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request))
             return chain.proceed(request);
@@ -87,15 +83,26 @@ public final class ApproovPinningInterceptor implements Interceptor {
 
         // Use one complete immutable pin set for this check. A concurrent refresh is visible
         // to subsequent exchanges, including those reusing this same TLS connection.
+        //
+        // The pinner has no certificate chain cleaner of its own, so it checks the chain exactly
+        // as Handshake.peerCertificates() returns it. In the OkHttp that React Native 0.76 and
+        // later ship (4.9) that is the chain the trust manager verified (cleaned), not the raw
+        // list the server sent, so a certificate the server appends to a valid chain cannot
+        // satisfy a pin. OkHttp 3.x and 4.0 returned the raw list. ApproovPinningChainTest
+        // covers this.
         CertificatePinner pins = certificatePinner;
         try {
             pins.check(request.url().host(), handshake.peerCertificates());
         } catch (SSLPeerUnverifiedException failure) {
-            // Force a new TLS negotiation after a mismatch, preserving the pinning exception.
-            try {
-                connection.socket().close();
-            } catch (IOException closeFailure) {
-                failure.addSuppressed(closeFailure);
+            // Force a new TLS negotiation after a mismatch, preserving the pinning exception. An
+            // HTTP/2 connection may carry streams for other hosts that passed their own check,
+            // so it is left open: every exchange on it is checked again anyway.
+            if (connection.protocol() != Protocol.HTTP_2) {
+                try {
+                    connection.socket().close();
+                } catch (IOException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
             }
             throw failure;
         }

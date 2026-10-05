@@ -30,9 +30,13 @@ public class ApproovLoggingGateTest {
     private static final Path ANDROID_SOURCES = Paths.get("src/main/java");
     private static final Path IOS_SOURCES = Paths.get("../ios");
 
-    private static final Pattern RAW_ANDROID_LOG = Pattern.compile("\\bLog\\.(v|d|i|w|e|wtf)\\(");
+    private static final Pattern RAW_ANDROID_LOG = Pattern.compile(
+            "\\bLog\\.(v|d|i|w|e|wtf|println)\\(|import\\s+static\\s+android\\.util\\.Log\\."
+                    + "|\\bjava\\.util\\.logging\\b|\\bLogger\\.getLogger\\(|\\bTimber\\.");
     private static final Pattern RAW_STD_STREAM = Pattern.compile("System\\.(out|err)\\.print|printStackTrace\\(");
-    private static final Pattern RAW_IOS_LOG = Pattern.compile("\\bNSLog\\s*\\(|\\bos_log(_with_type)?\\s*\\(|\\bprint\\s*\\(");
+    private static final Pattern RAW_IOS_LOG = Pattern.compile(
+            "\\bNSLogv?\\s*\\(|\\bos_log\\w*\\s*\\(|\\b(print|debugPrint|dump|printf|fprintf)\\s*\\("
+                    + "|\\bLogger\\s*\\(");
 
     private static List<Path> sources(Path root, String... extensions) throws IOException {
         try (Stream<Path> files = Files.walk(root)) {
@@ -42,7 +46,7 @@ public class ApproovLoggingGateTest {
         }
     }
 
-    // Drops comment lines and the body of the named method, found by brace matching.
+    // Drops comments and the body of the named method, found by brace matching.
     private static String codeWithout(String source, String methodSignature) {
         String code = source;
         if (methodSignature != null) {
@@ -56,12 +60,25 @@ public class ApproovLoggingGateTest {
             }
             code = code.substring(0, start) + code.substring(i + 1);
         }
-        return Stream.of(code.split("\n"))
-                .filter(line -> {
-                    String t = line.trim();
-                    return !(t.startsWith("//") || t.startsWith("*") || t.startsWith("/*"));
-                })
-                .collect(Collectors.joining("\n"));
+        // Drop comments by line: a line starting with // and every line of a block comment that
+        // starts a line. A line starting with * outside a comment (such as *error = ...) is code.
+        List<String> kept = new ArrayList<>();
+        boolean inBlock = false;
+        for (String line : code.split("\n")) {
+            String t = line.trim();
+            if (inBlock) {
+                if (t.contains("*/"))
+                    inBlock = false;
+                continue;
+            }
+            if (t.startsWith("/*")) {
+                inBlock = !t.contains("*/");
+                continue;
+            }
+            if (!t.startsWith("//"))
+                kept.add(line);
+        }
+        return String.join("\n", kept);
     }
 
     private static List<String> matches(Path file, String code, Pattern pattern) {
@@ -92,7 +109,7 @@ public class ApproovLoggingGateTest {
     @Test
     public void iosLogsOnlyThroughTheGatedSinks() throws IOException {
         List<String> raw = new ArrayList<>();
-        for (Path file : sources(IOS_SOURCES, ".m", ".mm", ".swift")) {
+        for (Path file : sources(IOS_SOURCES, ".h", ".m", ".mm", ".swift")) {
             String name = file.getFileName().toString();
             String source = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
             String sink = null;

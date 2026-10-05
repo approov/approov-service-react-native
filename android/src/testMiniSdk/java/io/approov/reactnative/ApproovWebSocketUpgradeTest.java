@@ -8,8 +8,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.criticalblue.approovsdk.Approov;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -190,7 +188,7 @@ public class ApproovWebSocketUpgradeTest {
         pin(WRONG_PIN);
         String upgrade = openWebSocketAndCaptureUpgrade();
         assertTrue("this must be the upgrade request", upgrade.toLowerCase().contains("upgrade: websocket"));
-        assertFalse("no Approov token may travel on an unpinned upgrade", upgrade.contains("Approov-Token"));
+        assertFalse("no Approov token may travel on an unpinned upgrade", upgrade.toLowerCase(java.util.Locale.ROOT).contains("approov-token"));
         sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), never());
     }
 
@@ -198,7 +196,7 @@ public class ApproovWebSocketUpgradeTest {
     public void webSocketUpgradeCarriesNoTokenWithMatchingPins() throws Exception {
         pin(matchingPin);
         String upgrade = openWebSocketAndCaptureUpgrade();
-        assertFalse(upgrade.contains("Approov-Token"));
+        assertFalse(upgrade.toLowerCase(java.util.Locale.ROOT).contains("approov-token"));
         sdk.verify(() -> Approov.fetchApproovTokenAndWait(anyString()), never());
     }
 }

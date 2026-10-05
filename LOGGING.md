@@ -11,12 +11,12 @@ By default, the log level is set to `INFO`. This provides visibility into key ev
 
 `setLogLevel` controls every log line the service layer writes on both platforms: all native code logs through one level-gated function per platform (`ApproovService.log` on Android, the `ApproovLog*` functions on iOS, which also pass the level to the Swift sources). `setLogLevel(ApproovService.Log.NONE)` silences the layer completely. The same event is logged at the same level on both platforms:
 
-* **DEBUG**: per-request detail, such as a WebSocket upgrade forwarded without Approov processing (Android; WebSockets are not supported), `token for <url>` (the decoded token claims, which include the device ID and the client IP address), header and query parameter substitution, dynamic configuration updates, pins applied per host, and `getDeviceID`.
-* **INFO**: lifecycle events and results, such as initialization (with the device ID), `setDevKey`, prefetch and precheck outcomes, `task mutation` / `request mutation` summaries, and bypass mode.
+* **DEBUG**: per-request and per-connection detail, such as `task mutation` / `request mutation` summaries, `intercepting` and `observed dataTask` lines (iOS), a WebSocket upgrade forwarded without Approov processing (Android; WebSockets are not supported), `token for <url>` (the decoded token claims, which include the device ID and the client IP address), header and query parameter substitution, excluded URLs, pin checks per connection, dynamic configuration updates, pins applied per host, and `getDeviceID`.
+* **INFO**: lifecycle events and results, such as initialization (with the device ID), `setDevKey`, prefetch and precheck outcomes, explicit calls such as `fetchToken`, and the first request forwarded in bypass mode (later ones are DEBUG).
 * **WARN**: recoverable problems that change behaviour, such as initialization discarding runtime configuration, another SDK's OkHttp factory or custom client builder that could not be read, the first request sent before `initialize()` completed, a session created with a nil delegate (iOS), and calls to deprecated no-op methods.
 * **ERROR**: failures, such as initialization errors, message signing failures and rejected native calls.
 
-Keep the level at `INFO` or above in production: `DEBUG` writes the device ID and client IP address for every protected request.
+Keep the level at `INFO` or above in production: `DEBUG` writes full request URLs, and the device ID and client IP address, for every protected request.
 
 ### Dynamic Log Levels
 
@@ -115,7 +115,7 @@ When debugging iOS networking conflicts, these log messages are especially impor
 
 * `+load passive probe ...`: startup-only diagnostics about `NSURLSession` classes and selector implementations before the interceptor starts.
 * `Registered session ...`: Approov saw session creation and stored session metadata.
-* `task mutation [...]`: request interception and mutation executed for that task.
+* `task mutation [...]` (DEBUG): request interception and mutation executed for that task.
 * `SKIPPING session creation ... (not in interception policy)`: the delegate class was not allowlisted.
 * `skipping dataTaskWithRequest for unregistered session`: task creation was visible, but session registration was missed.
 * `IMP CONFLICT` / `IMP RECOVERY`: another SDK overwrote an active Approov hook after interceptor startup and the optional runtime integrity checker detected or attempted recovery. These logs only appear when runtime recovery is enabled with `setMaxReswizzleAttempts(...) > 0`.

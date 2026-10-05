@@ -53,8 +53,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Records the headers and URL a request had before Approov processed it, on
 /// the processed request, so a redirect can undo exactly what Approov added.
 /// The record is stored as NSURLProtocol properties, which URLSession keeps on
-/// the task's requests and on the redirect request it builds. It holds only
-/// the app's own values (placeholders, not substituted secrets).
+/// the task's requests and on the redirect request it builds. It holds the
+/// app's own values (placeholders, not substituted secrets) and only SHA-256
+/// digests of what Approov applied, never the token, signatures or secrets.
 ///
 /// @param original is the request as the app built it
 /// @param processed is the request Approov will send

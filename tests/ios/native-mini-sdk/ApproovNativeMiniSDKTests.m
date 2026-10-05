@@ -682,6 +682,55 @@ static void TestPinningMutatorSkipBypassesPinCheck(void) {
   AssertEqualObjects(@"https", askedURL.scheme, @"The pinning hook must be asked with an https origin");
 }
 
+// The pinning hook is asked with the connection's origin only: lowercase host,
+// the port when it is not 443, IPv6 literals in brackets, and no path or headers.
+static NSURL *PinningOriginAskedFor(NSString *host, NSInteger port) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+  __block NSURLRequest *asked = nil;
+  ApproovMutatorBridgeSetPinningHandler(^BOOL(NSURLRequest *request) {
+    asked = request;
+    return NO;
+  });
+  PinningURLSessionDelegate *pinning = [[PinningURLSessionDelegate alloc] initWithDelegate:nil
+                                                                           approovService:service];
+  NSURLProtectionSpace *space =
+      [[NSURLProtectionSpace alloc] initWithHost:host
+                                            port:port
+                                        protocol:NSURLProtectionSpaceHTTPS
+                                           realm:nil
+                            authenticationMethod:NSURLAuthenticationMethodServerTrust];
+  NSURLAuthenticationChallenge *challenge =
+      [[NSURLAuthenticationChallenge alloc] initWithProtectionSpace:space
+                                                 proposedCredential:nil
+                                               previousFailureCount:0
+                                                    failureResponse:nil
+                                                              error:nil
+                                                             sender:(id<NSURLAuthenticationChallengeSender>)pinning];
+  __block BOOL completed = NO;
+  [pinning URLSession:[NSURLSession sharedSession]
+      didReceiveChallenge:challenge
+        completionHandler:^(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential) {
+          completed = YES;
+        }];
+  ApproovMutatorBridgeReset();
+  AssertTrue(completed, @"The challenge must be completed");
+  AssertNotNil(asked, @"The pinning hook must be asked");
+  AssertEqualObjects(@"/", asked.URL.path, @"The origin has no path");
+  AssertEqualObjects(@{}, asked.allHTTPHeaderFields ?: @{}, @"The origin request has no headers");
+  return asked.URL;
+}
+
+static void TestPinningHookOriginIsNormalised(void) {
+  NSURL *named = PinningOriginAskedFor(@"API.Example.COM", 443);
+  AssertEqualObjects(@"https://api.example.com/", named.absoluteString, @"The host is lowercase and port 443 omitted");
+  NSURL *ported = PinningOriginAskedFor(@"api.example.com", 8443);
+  AssertEqualObjects(@"https://api.example.com:8443/", ported.absoluteString, @"Another port is kept");
+  NSURL *ipv6 = PinningOriginAskedFor(@"::1", 443);
+  AssertEqualObjects(@"https://[::1]/", ipv6.absoluteString, @"An IPv6 literal is bracketed");
+}
+
 static void TestPinningMutatorConsultedWhenItKeepsPinning(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -1676,9 +1725,9 @@ static void TestInitializeWithDifferentConfigPreservesExistingState(void) {
 
 // Initializes a protected service with header and query substitution and an
 // interceptor that wraps sessions of the probe delegates.
-static ApproovService *RedirectTestService(void) {
+static ApproovService *RedirectTestServiceWithSecrets(NSString *secrets) {
   ApproovService *service = FreshService();
-  LoadProtectedDomainScenario(@"\"initialSecureStrings\":{\"header-key\":\"header-secret\",\"query-key\":\"query-secret\"}");
+  LoadProtectedDomainScenario([NSString stringWithFormat:@"\"initialSecureStrings\":%@", secrets]);
   InitializeService(service, @"reinit");
   [service addSubstitutionHeader:@"Api-Key" requiredPrefix:@""];
   [service addSubstitutionQueryParam:@"api_key"];
@@ -1688,6 +1737,11 @@ static ApproovService *RedirectTestService(void) {
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovRetargetingRedirectProbeDelegate"];
   [ApproovRCTInterceptor addAllowedDelegate:@"ApproovAppendingRedirectProbeDelegate"];
   return service;
+}
+
+static ApproovService *RedirectTestService(void) {
+  return RedirectTestServiceWithSecrets(
+      @"{\"header-key\":\"header-secret\",\"query-key\":\"query-secret\"}");
 }
 
 static NSMutableURLRequest *AppRedirectRequest(NSString *url, NSString *method) {
@@ -1979,6 +2033,110 @@ static void TestReusedCurrentRequestDoesNotCarryCredentialsToAnotherHost(void) {
                      @"A header the app changed after copying the request should be kept");
   [session invalidateAndCancel];
   [other invalidateAndCancel];
+}
+
+// The redirect record travels with the request as NSURLProtocol properties, which
+// other URL protocols (network inspectors) can read and which are archived with
+// the request. It must hold digests of what Approov applied, never the token or
+// a substituted secret.
+static void TestRedirectRecordHoldsNoSecrets(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start?api_key=query-key", TargetURL()], @"GET")];
+  NSURLRequest *sent = task.currentRequest;
+  NSString *token = [sent valueForHTTPHeaderField:@"Approov-Token"];
+  AssertNotNil(token, @"The request should carry a token");
+  NSMutableString *record = [NSMutableString string];
+  for (NSString *key in @[ @"io.approov.reactnative.approovAppliedHeaders",
+                           @"io.approov.reactnative.approovAppliedURL",
+                           @"io.approov.reactnative.preApproovHeaders",
+                           @"io.approov.reactnative.preApproovURL" ]) {
+    id value = [NSURLProtocol propertyForKey:key inRequest:sent];
+    if (value != nil)
+      [record appendString:[value description]];
+  }
+  AssertTrue(record.length > 0, @"The request should carry a redirect record");
+  AssertTrue([record rangeOfString:token].location == NSNotFound, @"The record must not hold the token");
+  AssertTrue([record rangeOfString:@"header-secret"].location == NSNotFound,
+             @"The record must not hold the substituted header secret");
+  AssertTrue([record rangeOfString:@"query-secret"].location == NSNotFound,
+             @"The record must not hold the substituted query secret");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A substituted secret may itself contain commas. With a value appended after it
+// the redirect still takes the whole secret back out.
+static void TestRedirectUndoesASecretContainingCommas(void) {
+  RedirectTestServiceWithSecrets(@"{\"header-key\":\"sec,ret\"}");
+  ApproovAppendingRedirectProbeDelegate *caller = [ApproovAppendingRedirectProbeDelegate new];
+  caller.retargetURL = [NSString stringWithFormat:@"%@/appended", UnprotectedURL()];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  AssertEqualObjects(@"sec,ret", [task.currentRequest valueForHTTPHeaderField:@"Api-Key"],
+                     @"First attempt should carry the substituted header");
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", TargetURL()], nil);
+  NSString *key = [followUp valueForHTTPHeaderField:@"Api-Key"];
+  AssertTrue(key != nil && [key rangeOfString:@"sec"].location == NSNotFound &&
+                 [key rangeOfString:@"ret"].location == NSNotFound,
+             [NSString stringWithFormat:@"No part of the secret may reach the chosen host (got %@)", key]);
+  AssertTrue([key rangeOfString:@"header-key"].location != NSNotFound, @"The placeholder should be restored");
+  AssertTrue([key rangeOfString:@"extra"].location != NSNotFound, @"The appended value should be kept");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A pinning delegate session that is not intercepted (fetchWithApproov uses one)
+// can carry an Approov token on a request without a redirect record. A redirect
+// to another host must still drop the token and trace ID.
+static void TestRedirectWithoutRecordDropsApproovTokenAndTrace(void) {
+  ApproovService *service = RedirectTestService();
+  PinningURLSessionDelegate *pinning = [[PinningURLSessionDelegate alloc] initWithDelegate:nil
+                                                                           approovService:service];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:pinning
+                                                   delegateQueue:nil];
+  NSMutableURLRequest *request = AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET");
+  [request setValue:@"unrecorded-token" forHTTPHeaderField:@"Approov-Token"];
+  [request setValue:@"unrecorded-trace" forHTTPHeaderField:@"Approov-TraceID"];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:request];
+  AssertEqualObjects(@"unrecorded-token", [task.currentRequest valueForHTTPHeaderField:@"Approov-Token"],
+                     @"The session must not be intercepted for this test to reach the unrecorded path");
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, [NSString stringWithFormat:@"%@/final", UnprotectedURL()], nil);
+  AssertNotNil(followUp, @"Redirect should be followed");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"No token may reach another host");
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-TraceID"], @"No trace ID may reach another host");
+  AssertEqualObjects(@"mine", [followUp valueForHTTPHeaderField:@"X-App"], @"App headers should be kept");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
+// A redirect follow-up Approov will not let through (a cleartext URL is BAD_URL,
+// which the default policy blocks) fails with the same error as a first request
+// would, not as a cancellation the app cannot tell from a user abort.
+static void TestRedirectThatFailsProcessingFailsWithTheApproovError(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, @"http://example.com/final", nil);
+  AssertNotNil(followUp, @"A failed redirect should complete with the mock error request, not nil");
+  AssertEqualObjects(@"mockhttps", followUp.URL.scheme, @"The follow-up should be answered by the mock protocol");
+  AssertTrue([followUp.URL.absoluteString rangeOfString:@"/error?code=499"].location != NSNotFound,
+             [NSString stringWithFormat:@"A blocked follow-up should fail with code 499 (got %@)", followUp.URL]);
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"The error request carries no token");
+  [task cancel];
+  [session invalidateAndCancel];
 }
 
 // Returns a subclass of the probe delegate registered under the given runtime name, so a test can
@@ -2644,6 +2802,11 @@ int main(void) {
       ^{ TestExpoFetchSessionDelegateIsInterceptedByDefault(); },
       ^{ TestRedirectWithAppendedValueDoesNotCarryTheSecret(); },
       ^{ TestReusedCurrentRequestDoesNotCarryCredentialsToAnotherHost(); },
+      ^{ TestRedirectRecordHoldsNoSecrets(); },
+      ^{ TestRedirectUndoesASecretContainingCommas(); },
+      ^{ TestRedirectWithoutRecordDropsApproovTokenAndTrace(); },
+      ^{ TestRedirectThatFailsProcessingFailsWithTheApproovError(); },
+      ^{ TestPinningHookOriginIsNormalised(); },
       ^{ TestRedirectToUnprotectedHostStripsApproovState(); },
       ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
       ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },

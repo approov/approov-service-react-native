@@ -169,7 +169,7 @@ ApproovService.setSuppressLoggingUnknownURL();
 
 Note that this also suppresses logging generated for domains that match a criteria set with `addExclusionURLRegex`.
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## setTokenHeader
 Sets the header that the Approov token is added on, as well as an optional prefix String (such as "`Bearer `"). Pass `null` or an empty string if you do not wish to have a prefix. By default the token is provided on `Approov-Token` with no prefix.
@@ -178,7 +178,7 @@ Sets the header that the Approov token is added on, as well as an optional prefi
 ApproovService.setTokenHeader(header: string, prefix: string | null);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default (or to the value from the bundled `approov.props` / `approov.plist`, if it sets one). With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## setTraceIDHeader
 Sets a header to be used to include a trace ID in subsequent network requests. If a header is set, then a random identifier is added to the request headers when an Approov token is fetched natively, to uniquely identify the request for diagnostic purposes.
@@ -187,7 +187,7 @@ Sets a header to be used to include a trace ID in subsequent network requests. I
 ApproovService.setTraceIDHeader(header: string);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## getTraceIDHeader
 Gets the trace ID header that was previously set by `setTraceIDHeader` or through the configuration properties.
@@ -205,7 +205,7 @@ Sets a [binding header](https://ext.approov.io/docs/latest/approov-usage-documen
 ApproovService.setBindingHeader(header: string);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default (or to the value from the bundled `approov.props` / `approov.plist`, if it sets one). With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## addSubstitutionHeader
 Adds the name of a header which should be subject to [secure strings](https://ext.approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the header is present then the value will be used as a key to look up a secure string value which will be substituted into the header value instead. This allows easy migration to the use of secure strings. A required prefix may be specified to deal with cases such as the use of "Bearer " prefixed before values in an authorization header.
@@ -214,7 +214,7 @@ Adds the name of a header which should be subject to [secure strings](https://ex
 ApproovService.addSubstitutionHeader(header: string, requiredPrefix: string);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## removeSubstitutionHeader
 Removes a header previously added using addSubstitutionHeader.
@@ -230,7 +230,7 @@ Adds a `key` name for a query parameter that should be subject to [secure string
 ApproovService.addSubstitutionQueryParam(key: string);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## removeSubstitutionQueryParam
 Removes a query parameter key name previously added using addSubstitutionQueryParam.
@@ -255,7 +255,7 @@ Conversely, use of those option may allow a connection to be established before 
 ApproovService.addExclusionURLRegex(urlRegex: string);
 ```
 
-Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
+Apply this after initialization has completed: every successful `initialize()`, including the one `ApproovProvider` performs after its `onInit` callback, resets it to the default. With `ApproovProvider`, apply it in `onInitialized`. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization).
 
 ## removeExclusionURLRegex
 Removes an exclusion URL regular expression previously added using addExclusionURLRegex.

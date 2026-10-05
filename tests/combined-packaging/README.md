@@ -13,5 +13,10 @@ gradle -p tests/combined-packaging :app:assembleRelease -Pintegration=both
 ```
 
 The `integration` property also accepts `react-native` and `okhttp` for
-standalone release builds. This check covers packaging only; it does not
+standalone release builds. The app keeps `ApproovPackage`, as a React Native
+app's application class references it, so R8 processes the service layer and
+its consumer rules. After the release build, `checkKeptMembers` reads R8's
+seeds and mapping files and fails unless the React Native members the service
+reads by reflection, the SDK constructor its native library looks up and the
+interceptor class names are kept. This check covers packaging only; it does not
 exercise live token fetching, TLS pinning, or message signing.

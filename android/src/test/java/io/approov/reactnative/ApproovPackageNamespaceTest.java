@@ -92,7 +92,13 @@ public class ApproovPackageNamespaceTest {
     /** Lists every io/approov class in the code source that holds this layer's main classes. */
     private static List<String> shippedApproovClasses() throws IOException {
         URL location = ApproovService.class.getProtectionDomain().getCodeSource().getLocation();
-        File source = new File(location.getPath());
+        File source;
+        try {
+            // toURI decodes spaces and other escaped characters in the path
+            source = new File(location.toURI());
+        } catch (java.net.URISyntaxException e) {
+            throw new IOException(e);
+        }
         List<String> out = new ArrayList<>();
         if (source.isDirectory()) {
             Path root = source.toPath();

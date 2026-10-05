@@ -141,6 +141,13 @@ static NSString *approovTokenPrefix = @"";
 // set
 static NSString *bindingHeader = @"";
 
+// token header, prefix and binding header applied from approov.plist at launch, or nil.
+// initialize() resets the runtime configuration to these instead of the built-in defaults, so
+// configuration from the bundled properties is not lost on the first JavaScript initialize().
+static NSString *launchTokenHeader = nil;
+static NSString *launchTokenPrefix = nil;
+static NSString *launchBindingHeader = nil;
+
 // map of headers that should have their values substituted for secure strings,
 // mapped to their required prefixes
 static NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
@@ -269,12 +276,16 @@ static NSMutableSet<NSString *> *exclusionURLRegexs = nil;
         if (tokenPrefix == nil)
           tokenPrefix = @"";
         [self setTokenHeader:tokenHeader prefix:tokenPrefix];
+        launchTokenHeader = tokenHeader;
+        launchTokenPrefix = tokenPrefix;
       }
 
       // set any token binding header
       NSString *bindingHeader = [props valueForKey:@"binding.name"];
-      if ((bindingHeader != nil) && ([bindingHeader length] != 0))
+      if ((bindingHeader != nil) && ([bindingHeader length] != 0)) {
         [self setBindingHeader:bindingHeader];
+        launchBindingHeader = bindingHeader;
+      }
     }
   } else
     ApproovLogI(@"started");
@@ -396,7 +407,8 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     // Warn about runtime configuration that is about to be discarded. Token binding
     // ceasing to apply is the security-relevant one, so it is called out separately
     // from the rest.
-    if ((bindingHeader != nil) && (bindingHeader.length != 0))
+    if ((bindingHeader != nil) && (bindingHeader.length != 0) &&
+        ![bindingHeader isEqualToString:(launchBindingHeader ?: @"")])
       ApproovLogW(@"initialization is discarding the binding header - re-apply "
                    "setBindingHeader after initialize or tokens will no longer be bound "
                    "to that header value");
@@ -413,10 +425,11 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     // the end of this critical section under the same initializerLock.
     useApproovStatusIfNoToken = NO;
     @synchronized(configLock) {
-      approovTokenHeader = @"Approov-Token";
+      // the defaults, or what approov.plist set at launch
+      approovTokenHeader = launchTokenHeader ?: @"Approov-Token";
       approovTraceIDHeader = @"Approov-TraceID";
-      approovTokenPrefix = @"";
-      bindingHeader = @"";
+      approovTokenPrefix = launchTokenPrefix ?: @"";
+      bindingHeader = launchBindingHeader ?: @"";
       substitutionHeaders = [[NSMutableDictionary alloc] init];
       substitutionQueryParams = [[NSMutableSet alloc] init];
       exclusionURLRegexs = [[NSMutableSet alloc] init];
@@ -1392,7 +1405,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   NSString *url = updatedRequest.URL.absoluteString;
   if ([host isEqualToString:@"localhost"]) {
     if (!suppressLoggingUnknownURL)
-      ApproovLogI(@"localhost forwarded: %@", url);
+      ApproovLogD(@"localhost forwarded: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1437,7 +1450,14 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    // Bypass mode is worth seeing in production logs, but once, not for every request.
+    static dispatch_once_t bypassForwardReported;
+    __block BOOL firstBypassForward = NO;
+    dispatch_once(&bypassForwardReported, ^{ firstBypassForward = YES; });
+    if (firstBypassForward)
+      ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    else
+      ApproovLogD(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1465,7 +1485,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
                               range:NSMakeRange(0, [url length])];
       if (match) {
         if (!suppressLoggingUnknownURL)
-          ApproovLogI(@"excluded url: %@", url);
+          ApproovLogD(@"excluded url: %@", url);
         return [ApproovInterceptorResult
             createWithRequest:updatedRequest
                    withAction:ApproovInterceptorActionProceed
@@ -1480,7 +1500,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
       if (headerValue != nil) {
         [Approov setDataHashInToken:headerValue];
-        ApproovLogI(@"setting data hash for binding header %@", bindingHeader);
+        ApproovLogD(@"setting data hash for binding header %@", bindingHeader);
       }
     }
   }
@@ -1918,7 +1938,7 @@ static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHead
 
   // if the Approov SDK is not initialized then there are no pins so we proceed
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"verifyPins for %@ called while Approov is disabled", host);
+    ApproovLogD(@"verifyPins for %@ called while Approov is disabled", host);
     return ApproovTrustDecisionNotPinned;
   }
 
@@ -1975,7 +1995,7 @@ static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHead
       // match pins on the receivers host
       for (NSString *pinHashB64 in pinsForHost) {
         if ([pinHashB64 isEqualToString:publicKeyHashB64]) {
-          ApproovLogI(
+          ApproovLogD(
               @"verifyPins for %@ matched public key pin %@ from %d pins", host,
               pinHashB64, [pinsForHost count]);
           return ApproovTrustDecisionAllow;
@@ -2162,6 +2182,12 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
                  mutatorError);
           return;
         }
+        // Remember the app's own headers and URL so a redirect can take back out
+        // everything Approov added, as for intercepted sessions. Without this a
+        // redirect to another host would carry the token, signature and
+        // substituted secrets issued for this one.
+        [PinningURLSessionDelegate recordPreApproovRequest:request
+                                        onProcessedRequest:finalRequest];
 
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate

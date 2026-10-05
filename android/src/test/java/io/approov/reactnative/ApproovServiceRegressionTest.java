@@ -528,7 +528,8 @@ public class ApproovServiceRegressionTest {
                 synchronized (service) {
                     commitHoldsService.countDown();
                     long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                    while (refresh.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline)
+                    while (refresh.getState() != Thread.State.BLOCKED
+                            && refresh.getState() != Thread.State.TERMINATED && System.nanoTime() < deadline)
                         Thread.yield();
                     interceptor.installPins(okhttp3.CertificatePinner.DEFAULT);
                 }

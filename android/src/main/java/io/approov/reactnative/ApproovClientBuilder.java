@@ -100,7 +100,9 @@ public class ApproovClientBuilder implements CustomClientBuilder {
         builder.interceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
         builder.networkInterceptors().removeIf(ApproovClientBuilder::isApproovInterceptor);
         builder.addInterceptor(current);
-        builder.addNetworkInterceptor(currentPinning);
+        // First network interceptor, so that other network interceptors (loggers, inspectors)
+        // only ever see a redirect after Approov removed its headers from it.
+        builder.networkInterceptors().add(0, currentPinning);
 
         // Pinning is enforced on each network exchange. Clear the built-in pinner so stale
         // Approov pins cannot reject a connection before our network interceptor runs.

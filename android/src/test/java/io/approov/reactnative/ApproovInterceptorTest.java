@@ -468,7 +468,9 @@ public class ApproovInterceptorTest {
         IllegalStateException failure = new IllegalStateException("pins unavailable");
         doThrow(failure).when(service).rebuildPins();
 
-        assertSame(failure, assertThrows(IllegalStateException.class, () -> interceptor.intercept(chain)));
+        // an IOException fails only this call; an unchecked exception would end the app
+        ApproovException error = assertThrows(ApproovException.class, () -> interceptor.intercept(chain));
+        assertSame(failure, error.getCause());
         verify(chain, never()).proceed(any());
     }
 

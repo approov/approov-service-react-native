@@ -184,7 +184,13 @@ public class ApproovInterceptor implements Interceptor {
         }
         if (configChanged || approovResults.isForceApplyPins()) {
             ApproovService.log(ApproovService.LOG_DEBUG, TAG, "refreshing shared pins before network verification");
-            approovService.rebuildPins();
+            try {
+                approovService.rebuildPins();
+            } catch (RuntimeException e) {
+                // OkHttp rethrows an unchecked exception from an interceptor on its dispatcher
+                // thread, which ends the app. Fail only this request.
+                throw new ApproovException("Approov pins could not be refreshed", e);
+            }
         }
 
         // check if the request should proceed based on the token fetch result

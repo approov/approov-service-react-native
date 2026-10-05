@@ -1494,6 +1494,21 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
   }
 
+  // Fetching a token blocks the calling thread until the SDK answers, which can take
+  // seconds on a poor network. On the main thread that freezes the UI and lets the iOS
+  // watchdog kill the app (0x8badf00d), so Approov processing is skipped there and the
+  // request is forwarded unmodified. Third-party SDKs such as Firebase can start
+  // requests on the main queue, and their sessions are intercepted too.
+  if ([NSThread isMainThread]) {
+    ApproovLogW(@"main thread request forwarded WITHOUT Approov protection (no token, "
+                @"no signing); a token fetch would block the main thread. Start the "
+                @"request from a background thread: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"main thread forwarded"];
+  }
+
   // update the data hash based on any token binding header
   @synchronized(configLock) {
     if (![bindingHeader isEqualToString:@""]) {

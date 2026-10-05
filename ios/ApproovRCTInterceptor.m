@@ -118,7 +118,6 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
       @"NRMAURLSessionTaskDelegate", // NewRelic
       @"SentryNSURLSessionDelegate", // Sentry
       @"Sentry*", // Sentry (prefix match for any Sentry delegates)
-      @"GDTCCTUploadOperation", // Firebase transport upload delegate
       @"ExpoModulesCore.URLSessionSessionDelegateProxy", // expo/fetch, the default fetch from Expo SDK 56
     ]];
     _excludedDelegates = [NSSet setWithArray:@[

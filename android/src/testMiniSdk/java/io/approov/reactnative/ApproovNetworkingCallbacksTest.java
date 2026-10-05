@@ -99,7 +99,7 @@ public class ApproovNetworkingCallbacksTest {
         for (Interceptor interceptor : client.interceptors()) {
             if (interceptor instanceof ApproovInterceptor) {
                 count++;
-                assertSame(service, field(ApproovInterceptor.class, "approovService").get(interceptor));
+                assertSame(service, ((ApproovInterceptor) interceptor).service());
             }
         }
         assertEquals(1, count);

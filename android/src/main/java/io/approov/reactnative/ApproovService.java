@@ -41,6 +41,7 @@ import com.facebook.react.modules.network.NetworkingModule;
 import com.facebook.react.modules.network.OkHttpClientProvider;
 import com.facebook.react.modules.network.OkHttpClientFactory;
 import com.facebook.react.modules.network.CookieJarContainer;
+import com.facebook.react.modules.network.CustomClientBuilder;
 import com.facebook.react.modules.network.ReactCookieJarContainer;
 
 import okhttp3.OkHttpClient;
@@ -172,9 +173,33 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
-    // One mutable pinning interceptor shared by every client created for this service. It has
-    // no reference back to the service or ReactContext and does no SDK work in its constructor.
-    private final ApproovPinningInterceptor pinningInterceptor = new ApproovPinningInterceptor();
+    // One pinning interceptor for the whole process, shared by every client and every service.
+    // The SDK's pins are process-wide, so a client built before a React Native reload keeps
+    // seeing the current pins. It has no reference to a service or ReactContext and does no SDK
+    // work in its constructor.
+    private static final ApproovPinningInterceptor pinningInterceptor = new ApproovPinningInterceptor();
+
+    // The most recently created service. An ApproovInterceptor created for an earlier service
+    // (in a client built before a reload) uses this one instead, so it neither keeps the old
+    // service and its ReactContext alive nor works with stale configuration.
+    private static volatile ApproovService latestService;
+
+    // set when a newer service has been created, normally by a React Native reload
+    private volatile boolean superseded;
+
+    /**
+     * Returns the most recently created service, or null if none has been created.
+     */
+    static ApproovService latest() {
+        return latestService;
+    }
+
+    /**
+     * Returns true once a newer service has been created, so this one no longer handles requests.
+     */
+    boolean isSuperseded() {
+        return superseded;
+    }
 
     // Log levels matching iOS/ApproovUtils and ApproovService.Log in JS
     static final int LOG_EXTREME = 0;
@@ -184,8 +209,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
     static final int LOG_ERROR = 4;
     static final int LOG_NONE = 5;
 
-    // Current log level (default to INFO)
-    private static int currentLogLevel = LOG_INFO;
+    // Current log level (default to INFO). Volatile: set from the JS thread, read on OkHttp threads.
+    private static volatile int currentLogLevel = LOG_INFO;
 
     // The mutator instance used to control ApproovService behavior. Marked volatile because
     // it is written from setServiceMutator/setServiceMutatorType and from the re-initialization
@@ -331,20 +356,6 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
     static void log(int level, String tag, String msg) {
         log(level, tag, msg, null);
-    }
-
-    /**
-     * Logs a message at INFO through the shared, level-gated logger. Exposed
-     * package-privately so collaborators such as {@link ApproovInterceptor} honour the
-     * configured log level (set via setLogLevel) instead of writing to android.util.Log
-     * unconditionally. This matches the iOS ApproovLogI behaviour, where the equivalent
-     * "task mutation" log is suppressed below INFO.
-     *
-     * @param tag the logging tag
-     * @param msg the message to log
-     */
-    void logInfo(String tag, String msg) {
-        log(LOG_INFO, tag, msg);
     }
 
     // set once the first request forwarded before initialize() has been reported, so the
@@ -504,6 +515,10 @@ public class ApproovService extends ReactContextBaseJavaModule {
     public ApproovService(ReactApplicationContext reactContext) {
         // initialize the service state
         super(reactContext);
+        ApproovService previous = latestService;
+        latestService = this;
+        if ((previous != null) && (previous != this))
+            previous.superseded = true;
         applicationContext = reactContext;
         appDebuggable = isDebuggable(reactContext);
         pendingPrefetch = false;
@@ -568,13 +583,13 @@ public class ApproovService extends ReactContextBaseJavaModule {
         // state. Client builders only attach this shared interceptor and never query the SDK.
         rebuildPins();
 
-        // Register Approov protection in the React Native networking stack.
-        // We use a two-tier strategy to support both modern (RN 0.73+) and legacy
-        // (RN < 0.73) versions.
+        // Register Approov protection in the React Native networking stack in two places: the
+        // OkHttpClientFactory, which builds the NetworkingModule's client and any client made
+        // with OkHttpClientProvider.createClient(), and the custom client builder hook, which
+        // React Native applies to every fetch() request.
         ApproovClientBuilder clientBuilder = new ApproovClientBuilder(this, null);
 
-        // --- PRIMARY: OkHttpClientFactory (works on all RN versions, required on
-        // 0.73+) ---
+        // --- OkHttpClientFactory ---
         // Capture any existing factory set by another SDK so we can chain through it.
         OkHttpClientFactory existingFactory = readInstalledOkHttpClientFactory();
         if (existingFactory != null)
@@ -599,11 +614,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
         retirePreviousFactory(factory);
         log(LOG_INFO, TAG, "registered Approov via OkHttpClientFactory");
 
-        // --- LEGACY FALLBACK: setCustomClientBuilder (RN < 0.73 only) ---
-        // On RN 0.73+ this method was removed so we call it via reflection and
-        // silently skip if it does not exist. On older RN where both paths fire,
-        // ApproovClientBuilder.apply() has a deduplication guard that prevents
-        // the interceptor from being added twice.
+        // --- Custom client builder hook ---
         try {
             // React Native applies this hook PER REQUEST, on a newBuilder() of the module's
             // client, so it must be preserved rather than replaced: another SDK (e.g. New
@@ -614,44 +625,27 @@ public class ApproovService extends ReactContextBaseJavaModule {
             // This hook gets its OWN ApproovClientBuilder, distinct from the factory path's:
             // the factory-built module client already carries our interceptor, and a single
             // shared builder wrapping the other SDK's hook would apply that hook twice per
-            // request (once via the factory, once via this hook). It shares the factory
-            // builder's service-owned pinning interceptor.
-            Object previousBuilder = readInstalledCustomClientBuilder();
+            // request (once via the factory, once via this hook).
+            CustomClientBuilder previousBuilder = readInstalledCustomClientBuilder();
             while (previousBuilder instanceof ApproovClientBuilder)
                 previousBuilder = ((ApproovClientBuilder) previousBuilder).getWrappedBuilder();
             if (previousBuilder != null)
                 log(LOG_DEBUG, TAG, "found existing custom client builder: " + previousBuilder.getClass().getName());
             ApproovClientBuilder hookBuilder = ApproovClientBuilder.wrapping(this, previousBuilder);
 
-            // Match setCustomClientBuilder by shape, not a hardcoded parameter type. The
-            // accepted type is the nested NetworkingModule.CustomClientBuilder on some RN
-            // versions and the top-level com.facebook.react.modules.network.CustomClientBuilder
-            // on others (the nested type extends the top-level one, so ApproovClientBuilder is
-            // assignable to whichever the runtime expects). getMethod() with the wrong exact
-            // type silently misses the method and skips this registration path entirely.
-            Method setBuilder = null;
-            for (Method m : NetworkingModule.class.getMethods()) {
-                if (m.getName().equals("setCustomClientBuilder")
-                        && m.getParameterTypes().length == 1
-                        && m.getParameterTypes()[0].isInstance(hookBuilder)) {
-                    setBuilder = m;
-                    break;
-                }
-            }
-            if (setBuilder != null) {
-                setBuilder.invoke(null, hookBuilder);
-                // retire the previously registered Approov hook wherever it now sits (see the
-                // factory path above)
-                ApproovClientBuilder previousHook = lastInstalledHook.getAndSet(hookBuilder);
-                if ((previousHook != null) && (previousHook != hookBuilder))
-                    previousHook.retire();
-                log(LOG_DEBUG, TAG, "registered Approov via setCustomClientBuilder"
-                        + (previousBuilder != null ? " (wrapping existing builder)" : ""));
-            } else {
-                log(LOG_DEBUG, TAG, "setCustomClientBuilder not available");
-            }
-        } catch (Exception e) {
-            log(LOG_WARN, TAG, "setCustomClientBuilder failed: " + e.getMessage());
+            // React Native 0.76 and later declare this as a public static method taking the
+            // top-level CustomClientBuilder, which ApproovClientBuilder implements.
+            NetworkingModule.setCustomClientBuilder(hookBuilder);
+
+            // retire the previously registered Approov hook wherever it now sits (see the
+            // factory path above)
+            ApproovClientBuilder previousHook = lastInstalledHook.getAndSet(hookBuilder);
+            if ((previousHook != null) && (previousHook != hookBuilder))
+                previousHook.retire();
+            log(LOG_DEBUG, TAG, "registered Approov via setCustomClientBuilder"
+                    + (previousBuilder != null ? " (wrapping existing builder)" : ""));
+        } catch (Exception | LinkageError e) {
+            log(LOG_WARN, TAG, "setCustomClientBuilder failed: " + e);
         }
 
         // add the Approov client builder to any rn-fetch-blob instances
@@ -721,12 +715,12 @@ public class ApproovService extends ReactContextBaseJavaModule {
     /**
      * Reads the custom client builder currently registered on the NetworkingModule, if any
      * ("customClientBuilder" on the Kotlin NetworkingModule, "mCustomClientBuilder" on older
-     * Java versions). Returned as Object because React Native types it differently across
-     * versions.
+     * Java versions).
      */
-    private Object readInstalledCustomClientBuilder() {
+    private CustomClientBuilder readInstalledCustomClientBuilder() {
         try {
-            return readClassLevelField(NetworkingModule.class, "customClientBuilder", "mCustomClientBuilder");
+            Object installed = readClassLevelField(NetworkingModule.class, "customClientBuilder", "mCustomClientBuilder");
+            return (installed instanceof CustomClientBuilder) ? (CustomClientBuilder) installed : null;
         } catch (Exception e) {
             log(LOG_WARN, TAG, "could not read the registered custom client builder: " + e.getMessage());
             return null;
@@ -2300,9 +2294,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
             OkHttpClient baseClient = builder.build();
 
             // add the Approov protection to the builder
-            // updateClientFactory builds a one-shot recovered client snapshot, so the
-            // builder shares the service pinning state without fetching pins.
-            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
+            // the builder shares the process-wide pinning interceptor and fetches no pins
+            ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
             approovBuilder.apply(builder);
 
             // build the new client
@@ -2419,9 +2412,8 @@ public class ApproovService extends ReactContextBaseJavaModule {
 
                 // 2. Build the cleanly isolated Approov OkHttpClient
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-                // ephemeral builder: share pinning state without registering listeners on
-                // every fetch
-                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null, true);
+                // shares the process-wide pinning interceptor; building it fetches no pins
+                ApproovClientBuilder approovBuilder = new ApproovClientBuilder(this, null);
                 approovBuilder.apply(clientBuilder);
                 OkHttpClient secureClient = clientBuilder.build();
 

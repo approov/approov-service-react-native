@@ -21,11 +21,8 @@
 
 package io.approov.reactnative;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.Properties;
+import java.lang.ref.WeakReference;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import java.util.Map;
@@ -35,8 +32,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-
-import android.content.Context;
 
 import okhttp3.Interceptor;
 import okhttp3.Request;
@@ -54,8 +49,10 @@ public class ApproovInterceptor implements Interceptor {
     static final Set<String> DEBUG_DEVELOPMENT_HOSTS = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList("127.0.0.1", "::1", "10.0.2.2", "10.0.3.2")));
 
-    // service wrapping Approov SDK
-    private ApproovService approovService;
+    // The service this interceptor works for, held weakly: a client built before a React Native
+    // reload (for example a cached or image-loading client) must not keep the old service and
+    // its ReactContext alive.
+    private volatile WeakReference<ApproovService> serviceRef;
 
     /**
      * Creates a new ApproovInterceptor for adding Approov protection to requests.
@@ -63,7 +60,26 @@ public class ApproovInterceptor implements Interceptor {
      * @param approovService the Approov service being used
      */
     public ApproovInterceptor(ApproovService approovService) {
-        this.approovService = approovService;
+        this.serviceRef = new WeakReference<>(approovService);
+    }
+
+    /**
+     * Returns the service to use for a request: the one this interceptor was created for, or the
+     * newest service once that one has been replaced by a React Native reload. A client built
+     * before the reload then uses the configuration and pins of the live service.
+     *
+     * @return the service, or null if there is none
+     */
+    ApproovService service() {
+        ApproovService service = serviceRef.get();
+        if ((service == null) || service.isSuperseded()) {
+            ApproovService latest = ApproovService.latest();
+            if (latest != null) {
+                serviceRef = new WeakReference<>(latest);
+                service = latest;
+            }
+        }
+        return service;
     }
 
     /**
@@ -118,6 +134,10 @@ public class ApproovInterceptor implements Interceptor {
     // Adds the Approov token, trace ID, secure string substitutions and any signature to a
     // request, or returns it unchanged if it must not be protected.
     private Request process(Request request) throws IOException {
+        ApproovService approovService = service();
+        if (approovService == null)
+            return request;
+
         // if there are any accesses to localhost then they are just passed through
         String url = request.url().toString();
         String host = request.url().host();
@@ -207,21 +227,19 @@ public class ApproovInterceptor implements Interceptor {
 
         // we successfully obtained a token so add it to the header for the request
         String addedTokenHeader = null;
-        String addedTokenPrefix = null;
-        String addedTokenValue = null;
         String addedTraceIDHeader = null;
         if ((approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
                 && (approovResults.getToken() != null) && !approovResults.getToken().isEmpty()) {
             addedTokenHeader = approovService.getTokenHeader();
-            addedTokenPrefix = approovService.getTokenPrefix();
-            addedTokenValue = approovResults.getToken();
-            request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
+            request = request.newBuilder()
+                    .header(addedTokenHeader, approovService.getTokenPrefix() + approovResults.getToken())
+                    .build();
         } else if ((approovResults.getToken() == null || approovResults.getToken().isEmpty())
                 && approovService.getUseApproovStatusIfNoToken()) {
             addedTokenHeader = approovService.getTokenHeader();
-            addedTokenPrefix = approovService.getTokenPrefix();
-            addedTokenValue = approovResults.getStatus().toString();
-            request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
+            request = request.newBuilder()
+                    .header(addedTokenHeader, approovService.getTokenPrefix() + approovResults.getStatus().toString())
+                    .build();
         }
 
         String traceIDHeader = approovService.getTraceIDHeader();
@@ -237,7 +255,7 @@ public class ApproovInterceptor implements Interceptor {
         // writing to android.util.Log unconditionally for every request.
         String tokenAfter = request.header(tokenHeaderKey);
         String traceAfter = (traceIDHeader != null) ? request.header(traceIDHeader) : null;
-        approovService.logInfo(TAG, "request mutation " + url
+        ApproovService.log(ApproovService.LOG_INFO, TAG, "request mutation " + url
                 + " token=" + headerState(tokenBefore) + "->" + headerState(tokenAfter)
                 + " trace=" + headerState(traceAfter));
 

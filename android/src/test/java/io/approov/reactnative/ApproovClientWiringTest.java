@@ -26,10 +26,12 @@ import org.junit.Test;
 /**
  * The pinning interceptor must be the first network interceptor. It removes Approov headers from
  * a redirect to another origin, so a logging or inspection interceptor added by another SDK must
- * only ever see the request after that. Runs without the mini-SDK.
+ * only ever see the request after that. Also covers what a client built before a React Native
+ * reload holds on to. Runs without the mini-SDK.
  */
-public class ApproovNetworkInterceptorOrderTest {
+public class ApproovClientWiringTest {
     private ApproovService service;
+    private ReactApplicationContext context;
 
     private static Field field(Class<?> cls, String... names) throws NoSuchFieldException {
         for (String name : names) {
@@ -55,7 +57,7 @@ public class ApproovNetworkInterceptorOrderTest {
         field(ApproovService.class, "isInitialized").set(null, false);
         field(ApproovService.class, "initialConfig").set(null, null);
         resetReactNative();
-        ReactApplicationContext context = mock(ReactApplicationContext.class);
+        context = mock(ReactApplicationContext.class);
         AssetManager assets = mock(AssetManager.class);
         when(context.getAssets()).thenReturn(assets);
         when(assets.open(anyString())).thenThrow(new IOException("no config"));
@@ -90,5 +92,35 @@ public class ApproovNetworkInterceptorOrderTest {
 
         assertEquals(2, builder.networkInterceptors().size());
         assertTrue(builder.networkInterceptors().get(0) instanceof ApproovPinningInterceptor);
+    }
+
+    // creates a service and an interceptor for it, keeping only a weak reference to the service
+    private ApproovInterceptor interceptorForReloadedService(java.lang.ref.WeakReference<ApproovService>[] old) {
+        ApproovService first = new ApproovService(context);
+        old[0] = new java.lang.ref.WeakReference<>(first);
+        return new ApproovInterceptor(first);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void clientBuiltBeforeAReloadUsesTheNewServiceAndDoesNotKeepTheOldOne() throws Exception {
+        java.lang.ref.WeakReference<ApproovService>[] old = new java.lang.ref.WeakReference[1];
+        ApproovInterceptor interceptor = interceptorForReloadedService(old);
+
+        // a React Native reload creates a new service
+        ApproovService reloaded = new ApproovService(context);
+        assertTrue(old[0].get() == null || old[0].get().isSuperseded());
+        assertSame("the interceptor works for the live service", reloaded, interceptor.service());
+
+        for (int i = 0; (i < 50) && (old[0].get() != null); i++) {
+            System.gc();
+            Thread.sleep(20);
+        }
+        assertTrue("nothing may keep the replaced service (and its ReactContext) alive", old[0].get() == null);
+    }
+
+    @Test
+    public void everyServiceSharesOnePinningInterceptor() {
+        assertSame(service.getPinningInterceptor(), new ApproovService(context).getPinningInterceptor());
     }
 }

@@ -36,6 +36,16 @@ typedef void (^ApproovMockTaskCompletionHandler)(
 @property(class, nonatomic, strong, nullable) NSURLRequest *lastRequest;
 #endif
 
+/// Returns a request this protocol answers by failing the task with a custom
+/// error, for a session whose configuration lists this protocol (as sessions
+/// the interceptor wraps do). Used to fail a redirect follow-up Approov could not
+/// protect with the same error the first request would have had.
+///
+/// @param code the error code
+/// @param msg a descriptive message
+/// @return the request to load
++ (NSURLRequest *)mockRequestWithErrorCode:(NSInteger)code message:(NSString *)msg;
+
 /// Starts a data task which returns a custom status code.
 ///
 /// @param session the session starting the task

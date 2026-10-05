@@ -682,6 +682,55 @@ static void TestPinningMutatorSkipBypassesPinCheck(void) {
   AssertEqualObjects(@"https", askedURL.scheme, @"The pinning hook must be asked with an https origin");
 }
 
+// The pinning hook is asked with the connection's origin only: lowercase host,
+// the port when it is not 443, IPv6 literals in brackets, and no path or headers.
+static NSURL *PinningOriginAskedFor(NSString *host, NSInteger port) {
+  ApproovService *service = FreshService();
+  LoadProtectedDomainScenario(nil);
+  InitializeService(service, @"reinit");
+  __block NSURLRequest *asked = nil;
+  ApproovMutatorBridgeSetPinningHandler(^BOOL(NSURLRequest *request) {
+    asked = request;
+    return NO;
+  });
+  PinningURLSessionDelegate *pinning = [[PinningURLSessionDelegate alloc] initWithDelegate:nil
+                                                                           approovService:service];
+  NSURLProtectionSpace *space =
+      [[NSURLProtectionSpace alloc] initWithHost:host
+                                            port:port
+                                        protocol:NSURLProtectionSpaceHTTPS
+                                           realm:nil
+                            authenticationMethod:NSURLAuthenticationMethodServerTrust];
+  NSURLAuthenticationChallenge *challenge =
+      [[NSURLAuthenticationChallenge alloc] initWithProtectionSpace:space
+                                                 proposedCredential:nil
+                                               previousFailureCount:0
+                                                    failureResponse:nil
+                                                              error:nil
+                                                             sender:(id<NSURLAuthenticationChallengeSender>)pinning];
+  __block BOOL completed = NO;
+  [pinning URLSession:[NSURLSession sharedSession]
+      didReceiveChallenge:challenge
+        completionHandler:^(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential) {
+          completed = YES;
+        }];
+  ApproovMutatorBridgeReset();
+  AssertTrue(completed, @"The challenge must be completed");
+  AssertNotNil(asked, @"The pinning hook must be asked");
+  AssertEqualObjects(@"/", asked.URL.path, @"The origin has no path");
+  AssertEqualObjects(@{}, asked.allHTTPHeaderFields ?: @{}, @"The origin request has no headers");
+  return asked.URL;
+}
+
+static void TestPinningHookOriginIsNormalised(void) {
+  NSURL *named = PinningOriginAskedFor(@"API.Example.COM", 443);
+  AssertEqualObjects(@"https://api.example.com/", named.absoluteString, @"The host is lowercase and port 443 omitted");
+  NSURL *ported = PinningOriginAskedFor(@"api.example.com", 8443);
+  AssertEqualObjects(@"https://api.example.com:8443/", ported.absoluteString, @"Another port is kept");
+  NSURL *ipv6 = PinningOriginAskedFor(@"::1", 443);
+  AssertEqualObjects(@"https://[::1]/", ipv6.absoluteString, @"An IPv6 literal is bracketed");
+}
+
 static void TestPinningMutatorConsultedWhenItKeepsPinning(void) {
   ApproovService *service = FreshService();
   LoadProtectedDomainScenario(nil);
@@ -2069,6 +2118,27 @@ static void TestRedirectWithoutRecordDropsApproovTokenAndTrace(void) {
   [session invalidateAndCancel];
 }
 
+// A redirect follow-up Approov will not let through (a cleartext URL is BAD_URL,
+// which the default policy blocks) fails with the same error as a first request
+// would, not as a cancellation the app cannot tell from a user abort.
+static void TestRedirectThatFailsProcessingFailsWithTheApproovError(void) {
+  RedirectTestService();
+  ApproovPartialRedirectProbeDelegate *caller = [ApproovPartialRedirectProbeDelegate new];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                        delegate:caller
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task = [session dataTaskWithRequest:
+      AppRedirectRequest([NSString stringWithFormat:@"%@/start", TargetURL()], @"GET")];
+  NSURLRequest *followUp = OfferRedirect(session, task, 302, @"http://example.com/final", nil);
+  AssertNotNil(followUp, @"A failed redirect should complete with the mock error request, not nil");
+  AssertEqualObjects(@"mockhttps", followUp.URL.scheme, @"The follow-up should be answered by the mock protocol");
+  AssertTrue([followUp.URL.absoluteString rangeOfString:@"/error?code=499"].location != NSNotFound,
+             [NSString stringWithFormat:@"A blocked follow-up should fail with code 499 (got %@)", followUp.URL]);
+  AssertNil([followUp valueForHTTPHeaderField:@"Approov-Token"], @"The error request carries no token");
+  [task cancel];
+  [session invalidateAndCancel];
+}
+
 // Returns a subclass of the probe delegate registered under the given runtime name, so a test can
 // present a delegate whose class name is exactly what a Swift module reports.
 static Class ProbeDelegateClassNamed(const char *name) {
@@ -2735,6 +2805,8 @@ int main(void) {
       ^{ TestRedirectRecordHoldsNoSecrets(); },
       ^{ TestRedirectUndoesASecretContainingCommas(); },
       ^{ TestRedirectWithoutRecordDropsApproovTokenAndTrace(); },
+      ^{ TestRedirectThatFailsProcessingFailsWithTheApproovError(); },
+      ^{ TestPinningHookOriginIsNormalised(); },
       ^{ TestRedirectToUnprotectedHostStripsApproovState(); },
       ^{ TestRedirect303ToSameURLIsReprocessedAsGet(); },
       ^{ TestRedirectFromUnprotectedToProtectedAddsToken(); },

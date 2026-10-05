@@ -23,6 +23,7 @@
  */
 
 #import "ApproovPinningDelegate.h"
+#import "ApproovMockURLProtocol.h"
 #import "ApproovUtils.h"
 #import <CommonCrypto/CommonCrypto.h>
 #if __has_include(                                                             \
@@ -264,36 +265,36 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
 }
 
 /**
+ * Asks the service mutator whether Approov pinning applies (handlePinningShouldProcessRequest).
+ * Server trust is a connection-level challenge on iOS, so pins are checked once per TLS
+ * connection and no single request is in scope. The mutator is asked with a request for the
+ * connection's origin only (https, lowercase host and port, no path, headers or body), never a
+ * task's request, which would carry the Approov token and substituted secrets. If no origin can
+ * be built, pinning is kept.
+ */
+- (BOOL)shouldPinForChallenge:(NSURLAuthenticationChallenge *)challenge {
+  NSString *host = challenge.protectionSpace.host.lowercaseString;
+  if (host.length == 0)
+    return YES;
+  // an IPv6 literal needs brackets in a URL
+  if (([host rangeOfString:@":"].location != NSNotFound) && ![host hasPrefix:@"["])
+    host = [NSString stringWithFormat:@"[%@]", host];
+  NSInteger port = challenge.protectionSpace.port;
+  NSString *origin = ((port > 0) && (port != 443))
+      ? [NSString stringWithFormat:@"https://%@:%ld/", host, (long)port]
+      : [NSString stringWithFormat:@"https://%@/", host];
+  NSURL *url = [NSURL URLWithString:origin];
+  if (url == nil)
+    return YES;
+  return [[ApproovServiceMutatorBridge shared]
+      handlePinningShouldProcessRequest:[NSURLRequest requestWithURL:url]];
+}
+
+/**
  * Resolves the current ApproovService. Delegates created during early
  * swizzling may be initialized before the native module exists, so pinning
  * must recover the live service at challenge time.
  */
-/**
- * Asks the service mutator whether Approov pinning applies (handlePinningShouldProcessRequest).
- * Server trust is a connection-level challenge on iOS, so pins are checked once per TLS
- * connection and usually no single request is in scope: unless the task is known, the mutator
- * is asked with a request for the connection's origin (https, host and port, no path, headers or
- * body). If no origin can be built, pinning is kept.
- */
-- (BOOL)shouldPinForChallenge:(NSURLAuthenticationChallenge *)challenge
-                         task:(NSURLSessionTask *_Nullable)task {
-  NSURLRequest *request = task.currentRequest ?: task.originalRequest;
-  if (request == nil) {
-    NSURLComponents *origin = [[NSURLComponents alloc] init];
-    origin.scheme = @"https";
-    origin.host = challenge.protectionSpace.host;
-    NSInteger port = challenge.protectionSpace.port;
-    if ((port > 0) && (port != 443))
-      origin.port = @(port);
-    origin.path = @"/";
-    NSURL *url = origin.URL;
-    if (url == nil)
-      return YES;
-    request = [NSURLRequest requestWithURL:url];
-  }
-  return [[ApproovServiceMutatorBridge shared] handlePinningShouldProcessRequest:request];
-}
-
 - (ApproovService *_Nullable)currentApproovService {
   ApproovService *service = _approovService ?: [ApproovService sharedService];
   if (_approovService == nil && service != nil) {
@@ -341,7 +342,12 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     return;
   }
 
-  if ([_originalDelegate respondsToSelector:@selector
+  // A task-level challenge (such as HTTP Basic) is not the session delegate's
+  // to answer, so only server trust falls back to the session-level handler.
+  BOOL serverTrust = [challenge.protectionSpace.authenticationMethod
+      isEqualToString:NSURLAuthenticationMethodServerTrust];
+  if (((task == nil) || serverTrust) &&
+      [_originalDelegate respondsToSelector:@selector
                          (URLSession:didReceiveChallenge:completionHandler:)]) {
     ApproovLogD(@"ApproovService forwarding %@ challenge for %@ to session "
                 @"delegate %@",
@@ -359,168 +365,116 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
 }
 
 /**
- * Handles session authentication challenges. This is handled by Approov pinning
- * and not passed to the original delegate.
- *
- * @param session is the session containing the task whose request requires
- * authentication
- * @param challenge is an object that contains the request for authentication
- * @param completionHandler is a handler that must be called providing the
- * outcome of the decision
+ * Handles an authentication challenge for the session (task nil) or a task. A
+ * server-trust challenge is checked against the Approov pins, unless the service
+ * mutator skips pinning for the host, and then chained to the original
+ * delegate, which still makes its own decision. Any other challenge (HTTP Basic,
+ * client certificates) is passed to the original delegate unchanged.
  */
-- (void)URLSession:(NSURLSession *)session
-               dataTask:(NSURLSessionDataTask *)dataTask
-    didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
-      completionHandler:
-          (void (^)(NSURLSessionAuthChallengeDisposition disposition,
-                    NSURLCredential *credential))completionHandler {
+- (void)handleChallenge:(NSURLAuthenticationChallenge *)challenge
+              forSession:(NSURLSession *)session
+                    task:(NSURLSessionTask *_Nullable)task
+       completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition,
+                                   NSURLCredential *credential))completionHandler {
+  NSString *level = (task != nil) ? @"task" : @"session";
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *authMethod =
       challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
-  ApproovLogD(@"ApproovService received task challenge %@ for %@", authMethod,
-              host);
-  if ([challenge.protectionSpace.authenticationMethod
+  ApproovLogD(@"ApproovService received %@ challenge %@ for %@", level,
+              authMethod, host);
+  if (![challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-    ApproovService *service = [self currentApproovService];
-    if (service == nil) {
-      ApproovLogW(@"ApproovService unavailable for task server-trust "
-                  @"challenge on %@, forwarding without pin verification",
-                  host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:dataTask
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust "
-                                                         @"(service "
-                                                         @"unavailable)"];
-      return;
-    }
-
-    if (![self shouldPinForChallenge:challenge task:dataTask]) {
-      ApproovLogD(@"pinning skipped by the service mutator for %@", host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:dataTask
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust "
-                                                         @"(pinning skipped)"];
-      return;
-    }
-
-    ApproovTrustDecision trustDecision =
-        [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
-
-    // Notify interceptor that pinning was invoked
-    if (self.authChallengeCallback) {
-      self.authChallengeCallback(host, trustDecision);
-    }
-
-    if (trustDecision == ApproovTrustDecisionBlock) {
-      ApproovLogW(@"ApproovService PINNING BLOCKED connection to %@", host);
-      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
-                        NULL);
-    } else {
-      ApproovLogD(@"ApproovService pinning allowed connection to %@, chaining "
-                  @"server-trust challenge to original delegate",
-                  host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:dataTask
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust"];
-    }
-  } else {
     [self forwardChallengeToOriginalDelegateForSession:session
-                                                  task:dataTask
+                                                  task:task
                                              challenge:challenge
                                      completionHandler:completionHandler
                                          challengeType:@"non-server-trust"];
+    return;
   }
+
+  ApproovService *service = [self currentApproovService];
+  if (service == nil) {
+    ApproovLogW(@"ApproovService unavailable for %@ server-trust challenge on "
+                @"%@, forwarding without pin verification",
+                level, host);
+    [self forwardChallengeToOriginalDelegateForSession:session
+                                                  task:task
+                                             challenge:challenge
+                                     completionHandler:completionHandler
+                                         challengeType:@"server-trust (service unavailable)"];
+    return;
+  }
+
+  if (![self shouldPinForChallenge:challenge]) {
+    ApproovLogD(@"pinning skipped by the service mutator for %@ (%@-level)",
+                host, level);
+    [self forwardChallengeToOriginalDelegateForSession:session
+                                                  task:task
+                                             challenge:challenge
+                                     completionHandler:completionHandler
+                                         challengeType:@"server-trust (pinning skipped)"];
+    return;
+  }
+
+  ApproovTrustDecision trustDecision =
+      [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
+
+  // Notify interceptor that pinning was invoked
+  if (self.authChallengeCallback) {
+    self.authChallengeCallback(host, trustDecision);
+  }
+
+  if (trustDecision == ApproovTrustDecisionBlock) {
+    ApproovLogW(@"ApproovService PINNING BLOCKED connection to %@ (%@-level)",
+                host, level);
+    completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
+                      NULL);
+    return;
+  }
+  ApproovLogD(@"ApproovService pinning allowed connection to %@ (%@-level), "
+              @"chaining server-trust challenge to original delegate",
+              host, level);
+  [self forwardChallengeToOriginalDelegateForSession:session
+                                                task:task
+                                           challenge:challenge
+                                   completionHandler:completionHandler
+                                       challengeType:@"server-trust"];
 }
 
 /**
- * Handles session-level authentication challenges. This is called by some
- * frameworks (like New Relic) that use session-level challenge handling instead
- * of task-level. This is handled by Approov pinning and not passed to the
- * original delegate.
+ * Handles session-level authentication challenges, which include server trust.
  *
- * @param session is the session containing the task whose request requires
- * authentication
- * @param challenge is an object that contains the request for authentication
- * @param completionHandler is a handler that must be called providing the
- * outcome of the decision
+ * https://developer.apple.com/documentation/foundation/nsurlsessiondelegate/1409308-urlsession?language=objc
  */
 - (void)URLSession:(NSURLSession *)session
     didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
       completionHandler:
           (void (^)(NSURLSessionAuthChallengeDisposition disposition,
                     NSURLCredential *credential))completionHandler {
-  NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
-  NSString *authMethod =
-      challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
-  ApproovLogD(@"ApproovService received session challenge %@ for %@",
-              authMethod, host);
-  if ([challenge.protectionSpace.authenticationMethod
-          isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-    ApproovService *service = [self currentApproovService];
-    if (service == nil) {
-      ApproovLogW(@"ApproovService unavailable for session server-trust "
-                  @"challenge on %@, forwarding without pin verification",
-                  host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:nil
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust "
-                                                         @"(service "
-                                                         @"unavailable)"];
-      return;
-    }
+  [self handleChallenge:challenge
+             forSession:session
+                   task:nil
+      completionHandler:completionHandler];
+}
 
-    if (![self shouldPinForChallenge:challenge task:nil]) {
-      ApproovLogD(@"pinning skipped by the service mutator for %@ (session-level)",
-                  host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:nil
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust "
-                                                         @"(pinning skipped)"];
-      return;
-    }
-
-    ApproovTrustDecision trustDecision =
-        [service verifyPins:challenge.protectionSpace.serverTrust forHost:host];
-
-    // Notify interceptor that pinning was invoked
-    if (self.authChallengeCallback) {
-      self.authChallengeCallback(host, trustDecision);
-    }
-
-    if (trustDecision == ApproovTrustDecisionBlock) {
-      ApproovLogW(
-          @"ApproovService PINNING BLOCKED connection to %@ (session-level)",
-          host);
-      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
-                        NULL);
-    } else {
-      ApproovLogD(@"ApproovService pinning allowed connection to %@ "
-                  @"(session-level), chaining server-trust challenge to "
-                  @"original delegate",
-                  host);
-      [self forwardChallengeToOriginalDelegateForSession:session
-                                                    task:nil
-                                               challenge:challenge
-                                       completionHandler:completionHandler
-                                           challengeType:@"server-trust"];
-    }
-  } else {
-    [self forwardChallengeToOriginalDelegateForSession:session
-                                                  task:nil
-                                             challenge:challenge
-                                     completionHandler:completionHandler
-                                         challengeType:@"non-server-trust"];
-  }
+/**
+ * Handles task-level authentication challenges, such as HTTP Basic, which are
+ * passed to the original delegate. URLSession sends server trust to the
+ * session-level method above because this delegate implements it; it is still
+ * pinned here if it ever arrives.
+ *
+ * https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411595-urlsession?language=objc
+ */
+- (void)URLSession:(NSURLSession *)session
+                   task:(NSURLSessionTask *)task
+    didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
+      completionHandler:
+          (void (^)(NSURLSessionAuthChallengeDisposition disposition,
+                    NSURLCredential *credential))completionHandler {
+  [self handleChallenge:challenge
+             forSession:session
+                   task:task
+      completionHandler:completionHandler];
 }
 
 /**
@@ -593,6 +547,9 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
       NSURLRequest *prepared = clean;
       NSString *failure = nil;
+      // the error code the first request would have failed with: 503 for a
+      // retry (network) status, 499 for a permanent one
+      NSInteger failureCode = 499;
       if (service != nil) {
         ApproovInterceptorResult *result = [service interceptRequest:clean];
         if (result.action == ApproovInterceptorActionProceed) {
@@ -612,16 +569,26 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
           }
         } else {
           failure = result.message ?: @"request rejected";
+          if (result.action == ApproovInterceptorActionRetry)
+            failureCode = 503;
         }
       }
 
       void (^deliver)(void) = ^{
         if (failure != nil) {
           // Fail the task rather than hand the app the redirect response as
-          // if it were the final one.
+          // if it were the final one. Where the session has the mock protocol
+          // (sessions the interceptor wraps), follow the redirect to a request
+          // it fails with the same error code and message as a first request,
+          // so the app can tell an Approov failure from a cancellation.
           ApproovLogE(@"redirect to %@ not followed: %@", clean.URL, failure);
-          [task cancel];
-          completionHandler(nil);
+          if ([session.configuration.protocolClasses containsObject:[ApproovMockURLProtocol class]]) {
+            completionHandler([ApproovMockURLProtocol mockRequestWithErrorCode:failureCode
+                                                                       message:failure]);
+          } else {
+            [task cancel];
+            completionHandler(nil);
+          }
           return;
         }
         // previous.URL may carry substituted secure strings, so log only its host; clean.URL

@@ -2182,6 +2182,12 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
                  mutatorError);
           return;
         }
+        // Remember the app's own headers and URL so a redirect can take back out
+        // everything Approov added, as for intercepted sessions. Without this a
+        // redirect to another host would carry the token, signature and
+        // substituted secrets issued for this one.
+        [PinningURLSessionDelegate recordPreApproovRequest:request
+                                        onProcessedRequest:finalRequest];
 
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate

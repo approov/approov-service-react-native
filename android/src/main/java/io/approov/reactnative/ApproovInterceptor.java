@@ -100,9 +100,9 @@ public class ApproovInterceptor implements Interceptor {
 
     /**
      * Applies Approov processing to a request and records which headers it added or changed, so
-     * that ApproovPinningInterceptor can remove them from a redirect to another host. A request
-     * built from one Approov already processed for another host (such as a new call from
-     * Response.request()) first has those credentials removed.
+     * that ApproovPinningInterceptor can remove them from a redirect to another origin (scheme,
+     * host or port). A request built from one Approov already processed for another origin (such
+     * as a new call from Response.request()) first has those credentials removed.
      *
      * @param original the request as the app presents it
      * @return the request to send
@@ -111,7 +111,7 @@ public class ApproovInterceptor implements Interceptor {
     private Request protect(Request original) throws IOException {
         ApproovIssuedHeaders earlier = original.tag(ApproovIssuedHeaders.class);
         if (earlier != null)
-            original = earlier.stripIfOtherHost(original);
+            original = earlier.stripIfOtherOrigin(original);
         return ApproovIssuedHeaders.tag(original, process(original));
     }
 

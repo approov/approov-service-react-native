@@ -227,6 +227,7 @@ public class ApproovCrossHostRedirectTest {
             assertEquals(200, r.code());
         }
 
+        assertNotNull("the first request carries a token", received.get(0).get("approov-token"));
         assertEquals("the same-host follow-up keeps the token", received.get(0).get("approov-token"), received.get(1).get("approov-token"));
         assertEquals(received.get(0).get("approov-traceid"), received.get(1).get("approov-traceid"));
         assertEquals("real-secret", received.get(1).get("api-key"));

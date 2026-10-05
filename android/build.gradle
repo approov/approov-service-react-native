@@ -41,12 +41,30 @@ def safeExtGet(prop, fallback) {
 
 apply plugin: 'com.android.library'
 
-def candidateMiniSdkRoots = [
+// The Approov mini-SDK lives in the core-service-layers-testing checkout next to this repo. Its
+// location can be overridden with miniSdkAndroidRoot in local.properties, as settings.gradle does.
+def localProperties = new Properties()
+def localPropertiesFile = new File(projectDir, 'local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+def candidateMiniSdkRoots = []
+if (localProperties.getProperty('miniSdkAndroidRoot') != null) {
+    candidateMiniSdkRoots << new File(projectDir, localProperties.getProperty('miniSdkAndroidRoot'))
+}
+candidateMiniSdkRoots += [
     new File(projectDir, '../../core-service-layers-testing/mini-sdk/android'),
     new File(projectDir, '../core-service-layers-testing/mini-sdk/android'),
 ]
 def miniSdkAndroidRoot = candidateMiniSdkRoots.find { it.exists() }?.absoluteFile
 def miniSdkApproovJar = miniSdkAndroidRoot ? new File(miniSdkAndroidRoot, 'approov-sdk/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar') : null
+// Unit tests that run against the Approov mini-SDK instead of a mocked SDK live in
+// src/testMiniSdk/java. They are only built when the mini-SDK is present, and this repo's CI must
+// have it: without this check a missing checkout would silently drop most of the Android tests.
+// Only a standalone build of this library checks, never an app that includes it.
+if ((project == rootProject) && (miniSdkAndroidRoot == null) && (System.getenv('CI') != null)) {
+    throw new GradleException('The Approov mini-SDK (core-service-layers-testing/mini-sdk/android) is required on CI')
+}
 
 android {
     namespace = "io.approov.reactnative"
@@ -69,10 +87,9 @@ android {
         test {
             if (miniSdkAndroidRoot != null) {
                 java.srcDirs += [
+                    'src/testMiniSdk/java',
                     new File(miniSdkAndroidRoot, 'test-support/src/main/java').absolutePath,
                 ]
-            } else {
-                java.exclude 'io/approov/reactnative/ApproovServiceMiniSdkTest.java'
             }
         }
     }
@@ -135,8 +152,21 @@ dependencies {
     testImplementation 'org.json:json:20231013'
     testImplementation 'androidx.test:core:1.6.1'
     testImplementation 'org.robolectric:robolectric:4.11.1'
+    // local HTTPS servers and certificates for the redirect and pinning tests; keep the version
+    // in step with the OkHttp that react-android brings in (4.9.2)
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.9.2'
+    testImplementation 'com.squareup.okhttp3:okhttp-tls:4.9.2'
     if (miniSdkApproovJar != null) {
         testImplementation files(miniSdkApproovJar)
+    }
+}
+
+// Inside an app, react-android resolves to the app's React Native version. Built on its own (CI and
+// unit tests) the dynamic version would pick up the newest release candidate, so pin the latest
+// stable release there to keep the build reproducible.
+if (rootProject == project) {
+    configurations.configureEach {
+        resolutionStrategy.force 'com.facebook.react:react-android:0.87.1'
     }
 }
 

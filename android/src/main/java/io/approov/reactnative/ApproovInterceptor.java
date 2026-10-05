@@ -21,19 +21,17 @@
 
 package io.approov.reactnative;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.Properties;
+import java.lang.ref.WeakReference;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
-
-import android.content.Context;
-import android.util.Log;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import okhttp3.Interceptor;
 import okhttp3.Request;
@@ -46,8 +44,15 @@ public class ApproovInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovService";
 
-    // service wrapping Approov SDK
-    private ApproovService approovService;
+    // loopback and emulator aliases for the development machine, forwarded untouched only in
+    // debuggable apps: 10.0.2.2 is the Android emulator, 10.0.3.2 is Genymotion
+    static final Set<String> DEBUG_DEVELOPMENT_HOSTS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("127.0.0.1", "::1", "10.0.2.2", "10.0.3.2")));
+
+    // The service this interceptor works for, held weakly: a client built before a React Native
+    // reload (for example a cached or image-loading client) must not keep the old service and
+    // its ReactContext alive.
+    private volatile WeakReference<ApproovService> serviceRef;
 
     /**
      * Creates a new ApproovInterceptor for adding Approov protection to requests.
@@ -55,7 +60,26 @@ public class ApproovInterceptor implements Interceptor {
      * @param approovService the Approov service being used
      */
     public ApproovInterceptor(ApproovService approovService) {
-        this.approovService = approovService;
+        this.serviceRef = new WeakReference<>(approovService);
+    }
+
+    /**
+     * Returns the service to use for a request: the one this interceptor was created for, or the
+     * newest service once that one has been replaced by a React Native reload. A client built
+     * before the reload then uses the configuration and pins of the live service.
+     *
+     * @return the service, or null if there is none
+     */
+    ApproovService service() {
+        ApproovService service = serviceRef.get();
+        if ((service == null) || service.isSuperseded()) {
+            ApproovService latest = ApproovService.latest();
+            if (latest != null) {
+                serviceRef = new WeakReference<>(latest);
+                service = latest;
+            }
+        }
+        return service;
     }
 
     /**
@@ -73,14 +97,64 @@ public class ApproovInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
-        // if there are any accesses to localhost then they are just passed through
         Request request = chain.request();
+
+        // WebSockets are not supported. OkHttp runs application interceptors on the upgrade
+        // request (it sets "Upgrade: websocket" before the call starts) but skips network
+        // interceptors, so ApproovPinningInterceptor never checks the connection. Forward the
+        // upgrade untouched: no token, no secure string substitution and no signature, so
+        // nothing Approov issues travels over a connection Approov has not pinned.
+        if ("websocket".equalsIgnoreCase(request.header("Upgrade"))) {
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG,
+                    "WebSocket upgrade forwarded without Approov processing (not supported): " + request.url());
+            return chain.proceed(request);
+        }
+
+        // proceed with the rest of the chain
+        return chain.proceed(protect(request));
+    }
+
+    /**
+     * Applies Approov processing to a request and records which headers it added or changed, so
+     * that ApproovPinningInterceptor can remove them from a redirect to another origin (scheme,
+     * host or port). A request built from one Approov already processed for another origin (such
+     * as a new call from Response.request()) first has those credentials removed.
+     *
+     * @param original the request as the app presents it
+     * @return the request to send
+     * @throws IOException if processing must fail the request
+     */
+    private Request protect(Request original) throws IOException {
+        ApproovIssuedHeaders earlier = original.tag(ApproovIssuedHeaders.class);
+        if (earlier != null)
+            original = earlier.stripIfOtherOrigin(original);
+        return ApproovIssuedHeaders.tag(original, process(original));
+    }
+
+    // Adds the Approov token, trace ID, secure string substitutions and any signature to a
+    // request, or returns it unchanged if it must not be protected.
+    private Request process(Request request) throws IOException {
+        ApproovService approovService = service();
+        if (approovService == null)
+            return request;
+
+        // if there are any accesses to localhost then they are just passed through
         String url = request.url().toString();
         String host = request.url().host();
+
         if (host.equals("localhost")) {
             if (!approovService.isSuppressLoggingUnknownURL())
-                Log.d(TAG, "localhost forwarded: " + url);
-            return chain.proceed(request);
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "localhost forwarded: " + url);
+            return request;
+        }
+
+        // In a debug build, also forward the other addresses used to reach the development
+        // machine, such as Metro on the emulator at 10.0.2.2. They are never Approov-protected
+        // and, being cleartext, would otherwise cost a token fetch that returns BAD_URL.
+        if (DEBUG_DEVELOPMENT_HOSTS.contains(host) && approovService.isAppDebuggable()) {
+            if (!approovService.isSuppressLoggingUnknownURL())
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "development host forwarded: " + url);
+            return request;
         }
 
         // obtain the mutator to use for this request - this is always non-null
@@ -89,102 +163,58 @@ public class ApproovInterceptor implements Interceptor {
         // check if we should intercept this request
         try {
             if (!mutator.handleInterceptorShouldProcessRequest(approovService, request))
-                return chain.proceed(request);
+                return request;
         } catch (ApproovException e) {
             throw new IOException(e);
         }
 
-        // if Approov is not initialized then perform any necessary synchronization to
-        // avoid a race on any
-        // initial network fetches
+        // Protected request paths MUST await initialize(). There is no startup grace period.
         if (!approovService.isInitialized()) {
-            // mark the earliest network fetch request time prior to initialization - it is
-            // only updated
-            // if it is currently unset
-            approovService.setEarliestNetworkRequestTime();
-
-            // wait until any initial fetch time is reached
-            boolean waitForReady = true;
-            boolean hasLoggedInitWarning = false;
-            while (waitForReady) {
-                // if initialization has completed then we can proceed
-                if (approovService.isInitialized()) {
-                    waitForReady = false;
-                    break;
-                }
-                
-                long currentTime = System.currentTimeMillis();
-                long earliestTime = approovService.getEarliestNetworkRequestTime();
-                if (currentTime >= earliestTime)
-                    waitForReady = false;
-                else {
-                    if (!hasLoggedInitWarning) {
-                        Log.e(TAG, "Approov initialization is delaying a network request! A native thread is sleeping. You MUST await ApproovService.initialize() or use the useApproov() hook before calling fetch().");
-                        hasLoggedInitWarning = true;
-                    }
-                    // sleep for a short period to block this request thread
-                    Log.d(TAG, "request paused: " + url);
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Log.d(TAG, "request pause interrupted: " + url);
-                    }
-                }
-            }
-
-            // if Approov is still not initialized then forward the request unchanged
-            if (!approovService.isInitialized()) {
-                Log.d(TAG, "uninitialized forwarded: " + url);
-                return chain.proceed(request);
-            }
+            approovService.logUninitializedForward(TAG, url);
+            return request;
         }
 
         if (!approovService.isApproovEnabled()) {
-            // INFO (was DEBUG): bypass mode is security-relevant and should be visible in
-            // production logs, matching the iOS layer. Message kept identical across platforms.
-            Log.i(TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
-            return chain.proceed(request);
+            approovService.logBypassForward(TAG, url);
+            return request;
         }
 
         // update the data hash based on any token binding header (presence is optional)
         String bindingHeader = approovService.getBindingHeader();
         if ((bindingHeader != null) && !bindingHeader.equals("") && request.headers().names().contains(bindingHeader)) {
             Approov.setDataHashInToken(request.header(bindingHeader));
-            Log.d(TAG, "setting data hash for binding header " + bindingHeader);
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "setting data hash for binding header " + bindingHeader);
         }
 
         // request an Approov token for the domain and log unless suppressed
         Approov.TokenFetchResult approovResults = approovService.fetchApproovTokenAndWait(url);
         if (!approovService.isSuppressLoggingUnknownURL()
                 || (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL))
-            Log.d(TAG, "token for " + url + ": " + approovResults.getLoggableToken());
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "token for " + url + ": " + approovResults.getLoggableToken());
 
-        // force a pinning change if there is any dynamic config update, calling
-        // fetchConfig to
-        // clear the update flag
-        if (approovResults.isConfigChanged()) {
-            Log.d(TAG, "dynamic config update received");
+        // Acknowledge configuration changes before reading the latest pins. Refresh only once
+        // if both flags are set. The shared network interceptor will check this same request
+        // against the new pins, so no client rebuild or forced retry is needed.
+        boolean configChanged = approovResults.isConfigChanged();
+        if (configChanged) {
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "dynamic config update received");
             Approov.fetchConfig();
-            approovService.notifyPinChangeListeners();
         }
-
-        // we cannot proceed if the pins need to be updated. We notify any certificate
-        // pinners that
-        // they need to update. This might occur on first use after initial app install
-        // if the
-        // initial network fetch was unable to obtain the dynamic configuration for the
-        // account if
-        // there was poor network connectivity at that point.
-        if (approovResults.isForceApplyPins()) {
-            Log.d(TAG, "force apply pins asserted so aborting request");
-            approovService.notifyPinChangeListeners();
-            throw new IOException("Approov pins need to be updated");
+        if (configChanged || approovResults.isForceApplyPins()) {
+            ApproovService.log(ApproovService.LOG_DEBUG, TAG, "refreshing shared pins before network verification");
+            try {
+                approovService.rebuildPins();
+            } catch (RuntimeException e) {
+                // OkHttp rethrows an unchecked exception from an interceptor on its dispatcher
+                // thread, which ends the app. Fail only this request.
+                throw new ApproovException("Approov pins could not be refreshed", e);
+            }
         }
 
         // check if the request should proceed based on the token fetch result
         try {
             if (!mutator.handleInterceptorFetchTokenResult(approovService, approovResults, url))
-                return chain.proceed(request);
+                return request;
         } catch (ApproovException e) {
             throw new IOException(e);
         }
@@ -195,21 +225,19 @@ public class ApproovInterceptor implements Interceptor {
 
         // we successfully obtained a token so add it to the header for the request
         String addedTokenHeader = null;
-        String addedTokenPrefix = null;
-        String addedTokenValue = null;
         String addedTraceIDHeader = null;
         if ((approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
                 && (approovResults.getToken() != null) && !approovResults.getToken().isEmpty()) {
             addedTokenHeader = approovService.getTokenHeader();
-            addedTokenPrefix = approovService.getTokenPrefix();
-            addedTokenValue = approovResults.getToken();
-            request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
+            request = request.newBuilder()
+                    .header(addedTokenHeader, approovService.getTokenPrefix() + approovResults.getToken())
+                    .build();
         } else if ((approovResults.getToken() == null || approovResults.getToken().isEmpty())
                 && approovService.getUseApproovStatusIfNoToken()) {
             addedTokenHeader = approovService.getTokenHeader();
-            addedTokenPrefix = approovService.getTokenPrefix();
-            addedTokenValue = approovResults.getStatus().toString();
-            request = request.newBuilder().header(addedTokenHeader, addedTokenPrefix + addedTokenValue).build();
+            request = request.newBuilder()
+                    .header(addedTokenHeader, approovService.getTokenPrefix() + approovResults.getStatus().toString())
+                    .build();
         }
 
         String traceIDHeader = approovService.getTraceIDHeader();
@@ -219,13 +247,11 @@ public class ApproovInterceptor implements Interceptor {
             request = request.newBuilder().header(traceIDHeader, traceID).build();
         }
 
-        // log the request mutation result (matches iOS "task mutation" log at INFO level).
-        // Routed through the service's level-gated logger so it honours setLogLevel and is
-        // suppressed below INFO, matching the iOS ApproovLogI behaviour — rather than
-        // writing to android.util.Log unconditionally for every request.
+        // log the request mutation result (matches the iOS "task mutation" line); per-request
+        // detail is DEBUG on both platforms
         String tokenAfter = request.header(tokenHeaderKey);
         String traceAfter = (traceIDHeader != null) ? request.header(traceIDHeader) : null;
-        approovService.logInfo(TAG, "request mutation " + url
+        ApproovService.log(ApproovService.LOG_DEBUG, TAG, "request mutation " + url
                 + " token=" + headerState(tokenBefore) + "->" + headerState(tokenAfter)
                 + " trace=" + headerState(traceAfter));
 
@@ -238,7 +264,7 @@ public class ApproovInterceptor implements Interceptor {
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
-                Log.d(TAG, "substituting header: " + header + ", " + approovResults.getStatus().toString());
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "substituting header: " + header + ", " + approovResults.getStatus().toString());
 
                 // check if the substitution should proceed
                 try {
@@ -271,7 +297,7 @@ public class ApproovInterceptor implements Interceptor {
                 // Note: we can only support one occurrence of the query parameter
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
-                Log.d(TAG, "substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                ApproovService.log(ApproovService.LOG_DEBUG, TAG, "substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
 
                 // check if the substitution should proceed
                 try {
@@ -309,7 +335,6 @@ public class ApproovInterceptor implements Interceptor {
             throw new IOException(e);
         }
 
-        // proceed with the rest of the chain
-        return chain.proceed(request);
+        return request;
     }
 }

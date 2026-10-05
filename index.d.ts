@@ -207,7 +207,14 @@ export declare class ApproovService {
 export interface ApproovProviderProps {
   config: string;
   comment?: string | null;
+  /** Runs before initialization. Settings that initialization resets are lost if set here. */
   onInit?: () => void | Promise<void>;
+  /**
+   * Runs after each successful initialization and before `approovReady` becomes true. Apply the
+   * token, binding and substitution headers, exclusions and service mutator here. If it throws or
+   * rejects, the provider reports the error and stays not ready.
+   */
+  onInitialized?: () => void | Promise<void>;
   children?: React.ReactNode;
 }
 

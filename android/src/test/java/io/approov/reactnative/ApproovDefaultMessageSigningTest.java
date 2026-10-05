@@ -15,9 +15,9 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
-import io.approov.util.sig.ComponentProvider;
-import io.approov.util.sig.SignatureBaseBuilder;
-import io.approov.util.sig.SignatureParameters;
+import io.approov.internal.reactnative.util.sig.ComponentProvider;
+import io.approov.internal.reactnative.util.sig.SignatureBaseBuilder;
+import io.approov.internal.reactnative.util.sig.SignatureParameters;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;

@@ -365,6 +365,36 @@ private func testMutatorBridgeIntegratesMessageSigningEndToEnd() throws {
                "The signature base should include the Approov trace header when present")
 }
 
+// A request the interceptor did not protect, such as one started on the main thread
+// (ApproovService.m forwards it without a token), still reaches the mutator bridge. The
+// default signer must leave it unsigned and must not ask the SDK for a signature.
+private func testMutatorBridgeLeavesRequestWithoutTokenUnsigned() {
+    ApproovServiceStubState.reset()
+    ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
+
+    let bridge = ApproovServiceMutatorBridge.shared
+    bridge.serviceMutator = defaultSigner()
+
+    let request = NSMutableURLRequest(url: URL(string: "https://api.example.com/reply")!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("{\"hello\":\"world\"}".utf8)
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    var error: NSError?
+    let succeeded = bridge.processRequest(request, tokenHeader: "Approov-Token",
+                                          traceIDHeader: "Approov-TraceID", errorPointer: &error)
+
+    assertTrue(succeeded, "A request without a token should proceed through the bridge")
+    assertTrue(request.value(forHTTPHeaderField: "Signature") == nil,
+               "A request without a token must not be signed")
+    assertTrue(request.value(forHTTPHeaderField: "Signature-Input") == nil,
+               "A request without a token must not get Signature-Input")
+    assertTrue(request.value(forHTTPHeaderField: "Content-Digest") == nil,
+               "A request without a token must not get Content-Digest")
+    assertTrue(ApproovServiceStubState.lastInstallMessage == nil,
+               "The SDK must not be asked for a signature for a request without a token")
+}
+
 private func testProceedingFailureStatusCanBeSignedAndBounced() throws {
     ApproovServiceStubState.reset()
     ApproovServiceStubState.installSignatureBase64 = derSignatureBase64()
@@ -762,6 +792,7 @@ struct ApproovMessageSigningTestsRunner {
             try testDefaultSigningCanonicalizesRootTargetUri()
             try testMutatorBridgeSignsWithCustomTokenHeaderAndOptionalTrace()
             try testMutatorBridgeIntegratesMessageSigningEndToEnd()
+            testMutatorBridgeLeavesRequestWithoutTokenUnsigned()
             try testProceedingFailureStatusCanBeSignedAndBounced()
             try testInstallSigningCanBeBouncedEndToEnd()
             try testAccountSigningCanBeBouncedEndToEnd()

@@ -118,7 +118,7 @@ typedef NS_ENUM(NSInteger, SessionInterceptionMode) {
       @"NRMAURLSessionTaskDelegate", // NewRelic
       @"SentryNSURLSessionDelegate", // Sentry
       @"Sentry*", // Sentry (prefix match for any Sentry delegates)
-      @"GDTCCTUploadOperation", // Firebase transport upload delegate
+      @"ExpoModulesCore.URLSessionSessionDelegateProxy", // expo/fetch, the default fetch from Expo SDK 56
     ]];
     _excludedDelegates = [NSSet setWithArray:@[
       @"RCTMultipartDataTask" // Bundle reload (excluded)
@@ -693,7 +693,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                 session:(NSURLSession *)session
                                metadata:(SessionMetadata *)metadata
                                 request:(NSURLRequest *)request {
-  ApproovLogI(@"intercepting %@ %@ %@ for session %p (delegate: %@, requests: "
+  ApproovLogD(@"intercepting %@ %@ %@ for session %p (delegate: %@, requests: "
               @"%lu)",
               taskType, request.HTTPMethod, request.URL, session,
               metadata.delegateClassName, (unsigned long)metadata.requestCount);
@@ -701,6 +701,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
   dispatch_async(_sessionRegistryQueue, ^{
     metadata.requestCount++;
   });
+
+  // A request copied from one Approov already processed still carries what was
+  // applied to it, for the host it was issued for; take that out first.
+  request = [PinningURLSessionDelegate requestByUndoingRecordedApproovChangesIn:request];
 
   NSString *tokenHeader = [ApproovService sharedTokenHeader];
   NSString *traceIDHeader = [ApproovService sharedTraceIDHeader];
@@ -745,6 +749,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                                               withAction:ApproovInterceptorActionFail
                                              withMessage:message];
     }
+    // Remember the app's own headers and URL so a redirect can take back out
+    // everything Approov added for this destination.
+    [PinningURLSessionDelegate recordPreApproovRequest:request
+                                    onProcessedRequest:finalRequest];
   }
 
   NSString *tokenAfterMutator =
@@ -754,7 +762,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
       finalRequest ? [finalRequest valueForHTTPHeaderField:traceIDHeader]
                    : traceAfterIntercept;
 
-  ApproovLogI(@"task mutation [%@] %@ token=%@->%@->%@ trace=%@->%@ action=%ld "
+  ApproovLogD(@"task mutation [%@] %@ token=%@->%@->%@ trace=%@->%@ action=%ld "
               @"message=%@",
               taskType, request.URL, [self headerStateForValue:tokenBefore],
               [self headerStateForValue:tokenAfterIntercept],
@@ -891,7 +899,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
                         metadata.blockedChallengeCount++;
                       }
 
-                      ApproovLogI(@"Session %p: auth challenge for %@ "
+                      ApproovLogD(@"Session %p: auth challenge for %@ "
                                   @"(decision: %d, total: %lu)",
                                   weakSession, host, decision,
                                   (unsigned long)metadata.authChallengeCount);
@@ -955,7 +963,10 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           }
         } else {
           // No delegate provided
-          NSLog(@"[Approov] WARNING: NSURLSession created with a nil delegate! Call stack: %@", [NSThread callStackSymbols]);
+          ApproovLogW(@"NSURLSession created with a nil delegate");
+          // symbolicating the stack is slow, so only do it when the line is logged
+          if (getApproovLogLevel() <= APPROOV_DEBUG)
+            ApproovLogD(@"nil delegate session call stack: %@", [NSThread callStackSymbols]);
           session = RSSWCallOriginal(configuration, delegate, queue);
           [interceptor trackObservedSession:session
                           delegateClassName:@"<nil delegate>"
@@ -1003,7 +1014,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request);
           }
-          ApproovLogI(@"observed dataTaskWithRequest: for session %p %@", self,
+          ApproovLogD(@"observed dataTaskWithRequest: for session %p %@", self,
                       request.URL);
           // Thread-safe session lookup
           __block SessionMetadata *metadata = nil;
@@ -1042,7 +1053,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"dataTaskWithRequest:"];
-            ApproovLogI(
+            ApproovLogD(
                 @"skipping dataTaskWithRequest for unregistered session "
                 @"%p %@ %@",
                 self, request.HTTPMethod, request.URL);
@@ -1067,7 +1078,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, completionHandler);
           }
-          ApproovLogI(@"observed dataTaskWithRequest:completionHandler: for "
+          ApproovLogD(@"observed dataTaskWithRequest:completionHandler: for "
                       @"session %p %@",
                       self, request.URL);
           __block SessionMetadata *metadata = nil;
@@ -1102,7 +1113,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"dataTaskWithRequest:completionHandler:"];
-            ApproovLogI(@"skipping dataTaskWithRequest:completionHandler: for "
+            ApproovLogD(@"skipping dataTaskWithRequest:completionHandler: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request, completionHandler);
@@ -1124,7 +1135,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockURL(url)) {
             return RSSWCallOriginal(url);
           }
-          ApproovLogI(@"observed dataTaskWithURL: for session %p %@", self,
+          ApproovLogD(@"observed dataTaskWithURL: for session %p %@", self,
                       url);
           __block SessionMetadata *metadata = nil;
           dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1157,7 +1168,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"dataTaskWithURL:"];
-            ApproovLogI(@"skipping dataTaskWithURL: for unregistered session "
+            ApproovLogD(@"skipping dataTaskWithURL: for unregistered session "
                         @"%p %@",
                         self, url);
             return RSSWCallOriginal(url);
@@ -1181,7 +1192,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockURL(url)) {
             return RSSWCallOriginal(url, completionHandler);
           }
-          ApproovLogI(@"observed dataTaskWithURL:completionHandler: for "
+          ApproovLogD(@"observed dataTaskWithURL:completionHandler: for "
                       @"session %p %@",
                       self, url);
           __block SessionMetadata *metadata = nil;
@@ -1218,7 +1229,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"dataTaskWithURL:completionHandler:"];
-            ApproovLogI(@"skipping dataTaskWithURL:completionHandler: for "
+            ApproovLogD(@"skipping dataTaskWithURL:completionHandler: for "
                         @"unregistered session %p %@",
                         self, url);
             return RSSWCallOriginal(url, completionHandler);
@@ -1264,7 +1275,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, bodyData);
           }
-          ApproovLogI(
+          ApproovLogD(
               @"observed uploadTaskWithRequest:fromData: for session %p "
               @"%@",
               self, request.URL);
@@ -1298,7 +1309,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"uploadTaskWithRequest:fromData:"];
-            ApproovLogI(@"skipping uploadTaskWithRequest:fromData: for "
+            ApproovLogD(@"skipping uploadTaskWithRequest:fromData: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request, bodyData);
@@ -1324,7 +1335,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, bodyData, completionHandler);
           }
-          ApproovLogI(
+          ApproovLogD(
               @"observed uploadTaskWithRequest:fromData:completionHandler: "
               @"for session %p %@",
               self, request.URL);
@@ -1361,7 +1372,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"uploadTaskWithRequest:fromData:completionHandler:"];
-            ApproovLogI(
+            ApproovLogD(
                 @"skipping uploadTaskWithRequest:fromData:completionHandler: "
                 @"for unregistered session %p %@ %@",
                 self, request.HTTPMethod, request.URL);
@@ -1383,7 +1394,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, fileURL);
           }
-          ApproovLogI(
+          ApproovLogD(
               @"observed uploadTaskWithRequest:fromFile: for session %p "
               @"%@",
               self, request.URL);
@@ -1417,7 +1428,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"uploadTaskWithRequest:fromFile:"];
-            ApproovLogI(@"skipping uploadTaskWithRequest:fromFile: for "
+            ApproovLogD(@"skipping uploadTaskWithRequest:fromFile: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request, fileURL);
@@ -1442,7 +1453,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request, fileURL, completionHandler);
           }
-          ApproovLogI(
+          ApproovLogD(
               @"observed uploadTaskWithRequest:fromFile:completionHandler: "
               @"for session %p %@",
               self, request.URL);
@@ -1479,7 +1490,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"uploadTaskWithRequest:fromFile:completionHandler:"];
-            ApproovLogI(
+            ApproovLogD(
                 @"skipping uploadTaskWithRequest:fromFile:completionHandler: "
                 @"for unregistered session %p %@ %@",
                 self, request.HTTPMethod, request.URL);
@@ -1500,7 +1511,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
           if (ApproovIsMockRequest(request)) {
             return RSSWCallOriginal(request);
           }
-          ApproovLogI(@"observed uploadTaskWithStreamedRequest: for session %p "
+          ApproovLogD(@"observed uploadTaskWithStreamedRequest: for session %p "
                       @"%@",
                       self, request.URL);
           __block SessionMetadata *metadata = nil;
@@ -1533,7 +1544,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             [interceptor trackUnregisteredRequestForSession:self
                                                     request:request
                                                    taskType:@"uploadTaskWithStreamedRequest:"];
-            ApproovLogI(@"skipping uploadTaskWithStreamedRequest: for "
+            ApproovLogD(@"skipping uploadTaskWithStreamedRequest: for "
                         @"unregistered session %p %@ %@",
                         self, request.HTTPMethod, request.URL);
             return RSSWCallOriginal(request);
@@ -1715,7 +1726,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1759,7 +1770,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request, completionHandler);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1800,7 +1811,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockURL(url)) {
               return RSSWCallOriginal(url);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1845,7 +1856,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockURL(url)) {
               return RSSWCallOriginal(url, completionHandler);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, url);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1892,7 +1903,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request, bodyData);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1938,7 +1949,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request, bodyData, completionHandler);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -1981,7 +1992,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request, fileURL);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -2026,7 +2037,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request, fileURL, completionHandler);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{
@@ -2068,7 +2079,7 @@ static NSUInteger ApproovApproximateStringBytes(NSString *value) {
             if (ApproovIsMockRequest(request)) {
               return RSSWCallOriginal(request);
             }
-            ApproovLogI(@"observed %@ for session %p %@ [recovered]", label,
+            ApproovLogD(@"observed %@ for session %p %@ [recovered]", label,
                         self, request.URL);
             __block SessionMetadata *metadata = nil;
             dispatch_sync(interceptor->_sessionRegistryQueue, ^{

@@ -305,6 +305,33 @@ private func testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail() {
                 "resetToDefault should remove the installed PolicyMutator")
 }
 
+// A customer mutator that skips Approov pinning for one host.
+private struct SkipPinningMutator: ApproovServiceMutator {
+    func handlePinningShouldProcessRequest(_ request: URLRequest) -> Bool {
+        return request.url?.host != "metrics.example.com"
+    }
+}
+
+private func testBridgeRoutesPinningHookToActiveMutator() {
+    let bridge = ApproovServiceMutatorBridge.shared
+    let skipped = URLRequest(url: URL(string: "https://metrics.example.com/")!)
+    let pinned = URLRequest(url: URL(string: "https://api.example.com/")!)
+
+    bridge.serviceMutator = SkipPinningMutator()
+    assertFalse(bridge.handlePinningShouldProcessRequest(skipped),
+                "The bridge must return the active mutator's decision to skip pinning")
+    assertTrue(bridge.handlePinningShouldProcessRequest(pinned),
+               "The bridge must keep pinning for hosts the mutator does not skip")
+
+    bridge.setPolicyMutator(PolicyMutator.BIT_MITM_DETECTED, sign: false, useAccountSigning: false)
+    assertTrue(bridge.handlePinningShouldProcessRequest(skipped),
+               "PolicyMutator must keep pinning for every request")
+
+    bridge.resetToDefault()
+    assertTrue(bridge.handlePinningShouldProcessRequest(skipped),
+               "The default mutator must keep pinning for every request")
+}
+
 @main
 struct PolicyMutatorTestsRunner {
     static func main() {
@@ -316,6 +343,7 @@ struct PolicyMutatorTestsRunner {
         testMultipleMaskBitsProceedIndependently()
         testSubstitutionHandlersSkipMaskedFailuresAndBlockUnmaskedFailures()
         testBridgeInstallsPolicyMutatorAndSurfacesBlockAsFail()
+        testBridgeRoutesPinningHookToActiveMutator()
 
         do {
             try testSignFalseForwardsRequestUnchanged()

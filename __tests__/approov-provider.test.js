@@ -65,6 +65,67 @@ describe('ApproovProvider', () => {
     );
   });
 
+  test('runs onInitialized after initialize and before reporting ready', async () => {
+    const order = [];
+    let readyDuringOnInitialized = null;
+    let latestState = null;
+    const nativeService = {
+      initialize: jest.fn().mockImplementation(async () => {
+        order.push('initialize');
+      }),
+      logMessage: jest.fn(),
+    };
+    setNativeService(nativeService);
+    const onInitialized = jest.fn().mockImplementation(async () => {
+      order.push('onInitialized');
+      readyDuringOnInitialized = latestState ? latestState.approovReady : false;
+    });
+    function CaptureState() {
+      latestState = useApproov();
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        React.createElement(
+          ApproovProvider,
+          { config: 'cfg', onInit: () => order.push('onInit'), onInitialized },
+          React.createElement(CaptureState)
+        )
+      );
+    });
+
+    expect(order).toEqual(['onInit', 'initialize', 'onInitialized']);
+    expect(readyDuringOnInitialized).toBe(false);
+    expect(latestState.approovReady).toBe(true);
+  });
+
+  test('a failing onInitialized leaves the provider not ready with the error', async () => {
+    const failure = new Error('configuration failed');
+    setNativeService({
+      initialize: jest.fn().mockResolvedValue(undefined),
+      logMessage: jest.fn(),
+    });
+    let latestState = null;
+    function CaptureState() {
+      latestState = useApproov();
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        React.createElement(
+          ApproovProvider,
+          { config: 'cfg', onInitialized: () => { throw failure; } },
+          React.createElement(CaptureState)
+        )
+      );
+    });
+
+    expect(latestState.approovReady).toBe(false);
+    expect(latestState.approovError).toBe(failure);
+  });
+
   test('approovInitCount increments per successful initialization so effects re-run', async () => {
     // approovReady latches true on the first success, so an effect keyed only on it
     // cannot observe a later re-initialization - and every successful initialization

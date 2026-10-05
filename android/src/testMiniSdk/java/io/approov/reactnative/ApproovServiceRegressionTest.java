@@ -1,0 +1,552 @@
+package io.approov.reactnative;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+
+import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReadableType;
+import com.facebook.react.modules.network.NetworkingModule;
+import com.facebook.react.modules.network.OkHttpClientFactory;
+import com.facebook.react.modules.network.OkHttpClientProvider;
+import com.facebook.react.bridge.ReactApplicationContext;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+
+import java.util.HashMap;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
+public class ApproovServiceRegressionTest {
+
+    private ReactApplicationContext reactContext;
+    private MockedStatic<NetworkingModule> networkingModuleStatic;
+    private MockedStatic<Approov> approovStatic;
+
+    @Before
+    public void setUp() throws Exception {
+        resetServiceStaticState();
+        reactContext = MiniSdkHarness.reactContext();
+        MiniSdkHarness.loadScenario("\"protectedDomains\": [\"example.com\"]");
+
+        networkingModuleStatic = mockStatic(NetworkingModule.class);
+        // the mini-SDK answers every SDK call; the wrapper records calls and lets a test inject
+        // a failure the mini-SDK cannot produce
+        approovStatic = mockStatic(Approov.class, CALLS_REAL_METHODS);
+    }
+
+    @After
+    public void tearDown() {
+        resetServiceStaticState();
+        approovStatic.close();
+        networkingModuleStatic.close();
+        AttesterProxyController.reset();
+    }
+
+    private ApproovService newService() {
+        return new ApproovService(reactContext);
+    }
+
+    private void resetServiceStaticState() {
+        try {
+            java.lang.reflect.Field initializedField = ApproovService.class.getDeclaredField("isInitialized");
+            initializedField.setAccessible(true);
+            initializedField.set(null, false);
+
+            java.lang.reflect.Field configField = ApproovService.class.getDeclaredField("initialConfig");
+            configField.setAccessible(true);
+            configField.set(null, null);
+
+            // Restore the built-in message-signing mutator so a custom mutator installed by one
+            // test (e.g. via ApproovService.setServiceMutator) never leaks into a later test,
+            // even if that test fails an assertion before its own re-initialize step resets it.
+            ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning();
+            signer.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+            ApproovService.setServiceMutator(signer);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to reset ApproovService static state", e);
+        }
+    }
+
+    private static String readBody(InputStream inputStream) throws IOException {
+        return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static String readRequestBody(BufferedReader reader, int contentLength) throws IOException {
+        char[] chars = new char[contentLength];
+        int offset = 0;
+        while (offset < contentLength) {
+            int read = reader.read(chars, offset, contentLength - offset);
+            if (read == -1) {
+                break;
+            }
+            offset += read;
+        }
+        return new String(chars, 0, offset);
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonStringMethods() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+
+        when(options.hasKey("method")).thenReturn(true);
+        when(options.getType("method")).thenReturn(ReadableType.Boolean);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov method must be a string when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonStringBodies() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+
+        when(options.hasKey("body")).thenReturn(true);
+        when(options.getType("body")).thenReturn(ReadableType.Boolean);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov body must be a string when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonObjectHeaders() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Boolean);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov headers must be an object when provided");
+    }
+
+    @Test
+    public void fetchWithApproovRejectsNonStringHeaderValues() {
+        ApproovService service = newService();
+        ReadableMap options = mock(ReadableMap.class);
+        Promise promise = mock(Promise.class);
+        ReadableMap headers = mock(ReadableMap.class);
+
+        when(options.hasKey("headers")).thenReturn(true);
+        when(options.getType("headers")).thenReturn(ReadableType.Map);
+        when(options.getMap("headers")).thenReturn(headers);
+
+        HashMap<String, Object> headersMap = new HashMap<>();
+        headersMap.put("X-Bad-Header", true);
+        when(headers.toHashMap()).thenReturn(headersMap);
+
+        service.fetchWithApproov("http://localhost/test", options, promise);
+
+        verify(promise, timeout(2000))
+            .reject("bad_request", "fetchWithApproov header values must be strings");
+    }
+
+    @Test
+    public void fetchWithApproovPreservesPostBodiesForLocalRequests() throws Exception {
+        ApproovService service = newService();
+        ServerSocket serverSocket = new ServerSocket();
+        serverSocket.bind(new InetSocketAddress("localhost", 0));
+        AtomicReference<String> requestMethod = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        CountDownLatch serverLatch = new CountDownLatch(1);
+        CountDownLatch serverReady = new CountDownLatch(1);
+
+        Thread serverThread = new Thread(() -> {
+            try (ServerSocket ignored = serverSocket; Socket socket = serverSocket.accept()) {
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8)
+                );
+
+                String requestLine = reader.readLine();
+                requestMethod.set(requestLine.split(" ")[0]);
+                int contentLength = 0;
+                String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    if (line.toLowerCase().startsWith("content-length:")) {
+                        contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                    }
+                }
+                requestBody.set(readRequestBody(reader, contentLength));
+
+                byte[] response = "native-ok".getBytes(StandardCharsets.UTF_8);
+                String headers = "HTTP/1.1 201 Created\r\n"
+                    + "Content-Type: text/plain\r\n"
+                    + "Content-Length: " + response.length + "\r\n"
+                    + "Connection: close\r\n\r\n";
+                socket.getOutputStream().write(headers.getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().write(response);
+                socket.getOutputStream().flush();
+                serverLatch.countDown();
+            } catch (IOException ignored) {
+            }
+        });
+        serverThread.start();
+        serverReady.countDown();
+
+        try {
+            assertTrue(serverReady.await(1, TimeUnit.SECONDS));
+            ReadableMap options = mock(ReadableMap.class);
+            when(options.hasKey("method")).thenReturn(true);
+            when(options.getType("method")).thenReturn(ReadableType.String);
+            when(options.getString("method")).thenReturn("POST");
+            when(options.hasKey("body")).thenReturn(true);
+            when(options.getType("body")).thenReturn(ReadableType.String);
+            when(options.getString("body")).thenReturn("{\"hello\":\"world\"}");
+            when(options.hasKey("headers")).thenReturn(false);
+
+            Promise promise = mock(Promise.class);
+            doAnswer(invocation -> {
+                return null;
+            }).when(promise).resolve(any());
+
+            service.fetchWithApproov(
+                "http://localhost:" + serverSocket.getLocalPort() + "/reply",
+                options,
+                promise
+            );
+
+            assertTrue("Request should reach the local test server",
+                serverLatch.await(5, TimeUnit.SECONDS));
+            assertEquals("POST", requestMethod.get());
+            assertEquals("{\"hello\":\"world\"}", requestBody.get());
+        } finally {
+            serverSocket.close();
+            serverThread.join(5000);
+        }
+    }
+
+    @Test
+    public void initializeWithEmptyConfigMarksLayerInitializedWithoutApproovSdkCalls() {
+        ApproovService service = newService();
+        Promise promise = mock(Promise.class);
+
+        service.initialize("", null, promise);
+
+        verify(promise, timeout(2000)).resolve(null);
+        assertTrue(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+        approovStatic.verifyNoInteractions();
+    }
+
+    @Test
+    public void initializeWithSameConfigResetsRuntimeConfiguration() {
+        ApproovService service = newService();
+        String config = MiniSdkHarness.CONFIG;
+
+        // The SDK may report that it is already initialized with this config (the mini-SDK
+        // keeps its state across tests); that is not an error, so the service layer commits
+        // the configuration successfully.
+        Promise firstInit = mock(Promise.class);
+        service.initialize(config, null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+        assertTrue(service.isApproovEnabled());
+
+        // Configure runtime state after the first initialization, exactly as an app
+        // would after ApproovService.initialize() resolves.
+        service.addSubstitutionHeader("Authorization", "Bearer ");
+        service.addExclusionURLRegex("https://example.com/excluded/.*");
+        service.setTokenHeader("X-Custom-Token", "Bearer ");
+        service.setBindingHeader("Authorization");
+
+        // Re-initialize with the SAME config. This is forwarded to the native SDK and,
+        // after native success, is treated as a fresh initialization boundary.
+        Promise secondInit = mock(Promise.class);
+        service.initialize(config, null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        // The service-layer runtime configuration is reset only after SDK success.
+        assertFalse("substitution header should be cleared on same-config re-init",
+            service.getSubstitutionHeaders().containsKey("Authorization"));
+        assertFalse("exclusion URL regex should be cleared on same-config re-init",
+            service.getExclusionURLRegexs().containsKey("https://example.com/excluded/.*"));
+        assertEquals("token header should reset to default", "Approov-Token", service.getTokenHeader());
+        assertNull("binding header should reset to default", service.getBindingHeader());
+        assertTrue(service.isApproovEnabled());
+    }
+
+    @Test
+    public void initializeWithDifferentConfigResetsRuntimeConfiguration() {
+        ApproovService service = newService();
+        // The real SDK (and the mini-SDK) rejects a different config once initialized, so
+        // a successful different-config re-initialization is only reachable with the SDK
+        // call stubbed; everything else still runs against the mini-SDK.
+        approovStatic.when(() -> Approov.initialize(any(), anyString(), anyString(), nullable(String.class)))
+            .thenReturn(true);
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize("config-one", null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+        service.addSubstitutionHeader("Authorization", "Bearer ");
+
+        // A genuinely different config still resets the runtime configuration.
+        Promise secondInit = mock(Promise.class);
+        service.initialize("config-two", null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        assertFalse("substitution header should be cleared on a different config",
+            service.getSubstitutionHeaders().containsKey("Authorization"));
+    }
+
+    @Test
+    public void initializeWithDifferentConfigResetsCustomServiceMutator() {
+        ApproovService service = newService();
+        // The real SDK (and the mini-SDK) rejects a different config once initialized, so
+        // a successful different-config re-initialization is only reachable with the SDK
+        // call stubbed; everything else still runs against the mini-SDK.
+        approovStatic.when(() -> Approov.initialize(any(), anyString(), anyString(), nullable(String.class)))
+            .thenReturn(true);
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize("config-one", null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+
+        // Install a PolicyMutator — the mutator the CHANGELOG's scenario actually
+        // installs, via the JS setServiceMutatorType wrapper. Using PolicyMutator here
+        // rather than ApproovServiceMutator.DEFAULT is deliberate: PolicyMutator is the
+        // type that must not survive the boundary, and it is the type an app can install
+        // from JavaScript.
+        ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
+        ApproovService.setServiceMutator(custom);
+        assertSame(custom, ApproovService.getServiceMutator());
+
+        // A genuinely different config must reset the mutator so a custom override does
+        // not persist across an initialization boundary (root TESTING_REQUIREMENTS.md
+        // section 2, "Service Mutator Reset").
+        Promise secondInit = mock(Promise.class);
+        service.initialize("config-two", null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertNotSame("custom mutator must not persist across a config change", custom, afterReset);
+        assertFalse("re-init must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
+        assertSame("re-init must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
+    }
+
+    @Test
+    public void initializeWithSameConfigResetsCustomServiceMutator() {
+        ApproovService service = newService();
+
+        Promise firstInit = mock(Promise.class);
+        service.initialize(MiniSdkHarness.CONFIG, null, firstInit);
+        verify(firstInit, timeout(2000)).resolve(null);
+
+        ApproovServiceMutator custom = new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false);
+        ApproovService.setServiceMutator(custom);
+
+        // A same-config re-initialization is an initialization boundary and must not
+        // allow custom mutator state to persist.
+        Promise secondInit = mock(Promise.class);
+        service.initialize(MiniSdkHarness.CONFIG, null, secondInit);
+        verify(secondInit, timeout(2000)).resolve(null);
+
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertNotSame("same-config re-init must reset custom mutators", custom, afterReset);
+        assertFalse("same-config re-init must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
+        assertSame("same-config re-init must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
+    }
+
+    @Test
+    public void setServiceMutatorNullRestoresDefaultMutator() {
+        ApproovService.setServiceMutator(new PolicyMutator(PolicyMutator.BIT_NO_NETWORK, false));
+
+        ApproovService.setServiceMutator(null);
+
+        ApproovServiceMutator afterReset = ApproovService.getServiceMutator();
+        assertSame("null reset must restore the default mutator",
+            ApproovServiceMutator.DEFAULT, afterReset);
+        assertFalse("null reset must not leave a PolicyMutator installed",
+            afterReset instanceof PolicyMutator);
+    }
+
+    @Test
+    public void setTokenHeaderTreatsNullPrefixAsEmptyString() {
+        ApproovService service = newService();
+
+        service.setTokenHeader("X-Approov-Token", null);
+
+        assertEquals("X-Approov-Token", service.getTokenHeader());
+        assertEquals("", service.getTokenPrefix());
+    }
+
+    @Test
+    public void statusMethodsReflectServiceLayerAndApproovEnabledStates() {
+        ApproovService service = newService();
+        Promise initializedPromise = mock(Promise.class);
+        Promise enabledPromise = mock(Promise.class);
+
+        service.isInitialized(initializedPromise);
+        service.isApproovEnabled(enabledPromise);
+
+        verify(initializedPromise).resolve(false);
+        verify(enabledPromise).resolve(false);
+
+        Promise initializePromise = mock(Promise.class);
+        service.initialize("", null, initializePromise);
+        verify(initializePromise, timeout(2000)).resolve(null);
+
+        Promise initializedAfterEmptyConfig = mock(Promise.class);
+        Promise enabledAfterEmptyConfig = mock(Promise.class);
+        service.isInitialized(initializedAfterEmptyConfig);
+        service.isApproovEnabled(enabledAfterEmptyConfig);
+
+        verify(initializedAfterEmptyConfig).resolve(true);
+        verify(enabledAfterEmptyConfig).resolve(false);
+    }
+
+    @Test
+    public void initializeCommitsNoStateWhenPinsCannotBeBuilt() {
+        ApproovService service = newService();
+        approovStatic.when(() -> Approov.getPins("public-key-sha256"))
+            .thenThrow(new IllegalStateException("pins unavailable"));
+        Promise promise = mock(Promise.class);
+
+        service.initialize(MiniSdkHarness.CONFIG, "reinit-pins-unavailable", promise);
+
+        // rejected, and for the pin failure, not some other reason
+        verify(promise).reject(org.mockito.ArgumentMatchers.eq("initialize"),
+            org.mockito.ArgumentMatchers.contains("pins unavailable"), (com.facebook.react.bridge.WritableMap) any());
+        // the service must not report initialized while holding the previous (empty) pins,
+        // or requests would carry tokens over connections Approov does not pin
+        assertFalse(service.isInitialized());
+        assertFalse(service.isApproovEnabled());
+    }
+
+    @Test
+    public void updateClientFactoryWrapExistingStripsDuplicateApproovInterceptors() {
+        ApproovService service = newService();
+        Promise promise = mock(Promise.class);
+        NetworkingModule networkingModule = mock(NetworkingModule.class);
+        when(reactContext.getNativeModule(NetworkingModule.class)).thenReturn(networkingModule);
+
+        Interceptor extraInterceptor = chain -> chain.proceed(chain.request());
+        OkHttpClient existingClient = new OkHttpClient.Builder()
+            .addInterceptor(new ApproovInterceptor(service))
+            .addInterceptor(extraInterceptor)
+            .build();
+
+        AtomicReference<OkHttpClientFactory> capturedFactory = new AtomicReference<>();
+        try (MockedStatic<OkHttpClientProvider> okHttpClientProvider = mockStatic(OkHttpClientProvider.class)) {
+            okHttpClientProvider.when(OkHttpClientProvider::getOkHttpClient).thenReturn(existingClient);
+            okHttpClientProvider
+                .when(() -> OkHttpClientProvider.setOkHttpClientFactory((OkHttpClientFactory) any()))
+                .thenAnswer(invocation -> {
+                    capturedFactory.set(invocation.getArgument(0));
+                    return null;
+                });
+
+            service.updateClientFactory(true, promise);
+
+            verify(promise).resolve(true);
+            assertNotNull("updateClientFactory should publish a recovered client factory", capturedFactory.get());
+
+            OkHttpClient recoveredClient = capturedFactory.get().createNewNetworkModuleClient();
+            long approovInterceptors = recoveredClient.interceptors().stream()
+                .filter(interceptor -> interceptor instanceof ApproovInterceptor)
+                .count();
+
+            assertEquals(1, approovInterceptors);
+            assertTrue(recoveredClient.interceptors().contains(extraInterceptor));
+        }
+    }
+
+
+    // initialize() installs the new pins while holding the service monitor. A pin refresh,
+    // triggered by a token fetch on an OkHttp thread reporting a configuration change or forced
+    // pins, must not hold the pinning interceptor's monitor while it waits for the service
+    // monitor, or the two threads block each other for good: initialization never completes and
+    // every request then waits on the service monitor in the interceptor.
+    @Test
+    public void pinRefreshDuringInitializationCommitDoesNotDeadlock() throws Exception {
+        ApproovService service = newService();
+        ApproovPinningInterceptor interceptor = service.getPinningInterceptor();
+        Thread refresh = new Thread(service::rebuildPins, "pin-refresh");
+        refresh.setDaemon(true);
+        java.util.concurrent.CountDownLatch commitHoldsService = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService commit = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "init-commit");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            // the shape of the commit in initialize(): service monitor, then installPins
+            java.util.concurrent.Future<?> committed = commit.submit(() -> {
+                synchronized (service) {
+                    commitHoldsService.countDown();
+                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                    while (refresh.getState() != Thread.State.BLOCKED
+                            && refresh.getState() != Thread.State.TERMINATED && System.nanoTime() < deadline)
+                        Thread.yield();
+                    interceptor.installPins(okhttp3.CertificatePinner.DEFAULT);
+                }
+                return null;
+            });
+            assertTrue(commitHoldsService.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            refresh.start();
+
+            try {
+                committed.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                fail("initialization commit and pin refresh deadlocked");
+            }
+            refresh.join(5000);
+            assertFalse("pin refresh did not complete", refresh.isAlive());
+        } finally {
+            commit.shutdownNow();
+        }
+    }
+}

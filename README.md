@@ -53,6 +53,8 @@ Import the service layer:
 import { ApproovProvider, ApproovService } from '@approov/approov-service-react-native';
 ```
 
+**You MUST await successful completion of `ApproovService.initialize(config)` with your valid Approov configuration before making any protected request.** Gate every protected request path, including background tasks and startup effects, on that completion. Android and iOS no longer wait for initialization inside their request interceptors; a request sent before initialization can proceed unprotected. If initialization fails, keep protected requests blocked. Do not rely on a startup delay or polling `isInitialized()` as a substitute for awaiting the initialization promise.
+
 Initialize explicitly during startup and keep a correlation id in your app logs:
 
 ```javascript
@@ -67,26 +69,32 @@ async function initializeApproov() {
       const deviceId = await ApproovService.getDeviceID();
       console.log('Approov initialized', { approovSessionId, deviceId });
     } else {
-      console.warn('Approov initialized without active protection', { approovSessionId });
+      throw new Error('Approov protection is not enabled');
     }
   } catch (error) {
-    console.warn('Approov initialization failed; continuing unprotected', {
+    console.error('Approov initialization failed; protected requests remain blocked', {
       approovSessionId,
       error,
     });
-    await ApproovService.initialize('');
+    throw error;
   }
+}
+
+async function startProtectedRequests() {
+  await initializeApproov();
+  // Start protected requests only after the await above succeeds.
 }
 ```
 
-If you prefer component-wrapped startup, wrap your application with `ApproovProvider` after applying any setup calls:
+If you prefer component-wrapped startup, wrap your application with `ApproovProvider`. The same initialization requirement applies: protected requests must remain blocked until initialization completes successfully, including requests started outside the provider's children. Initialization resets the token, binding and substitution headers, exclusion regexes and any service mutator, so apply those in `onInitialized`, which runs after each successful initialization and before `approovReady` becomes true. `onInit` runs *before* initialization, so anything it sets from that list is lost. See [Configuration Is Reset By Initialization](USAGE.md#configuration-is-reset-by-initialization):
 
 ```javascript
-const approovSetup = () => {
+const approovConfiguration = () => {
+  ApproovService.setBindingHeader('Authorization');
 };
 
 return (
-  <ApproovProvider config="<enter-your-config-string-here>" onInit={approovSetup}>
+  <ApproovProvider config="<enter-your-config-string-here>" onInitialized={approovConfiguration}>
     <View>
       <Button onPress={callAPI} title="Press Me!" />
     </View>
@@ -98,7 +106,11 @@ The config string is provided in your Approov onboarding email.
 
 ## Using Approov
 
+On Android, token processing uses an application interceptor and certificate pinning uses a network interceptor. Clients share the service's pin state: initialization loads pins before its promise resolves, and SDK configuration updates refresh that state for existing clients. Creating clients does not fetch pins. The initial SDK pin fetch can still block initialization. Approov pins replace the client's built-in pinning policy; customer pins are not merged. Every HTTPS network exchange checks the current pins against the certificate chain the trust manager verified, including exchanges on reused connections; these checks do not fetch pins from the SDK.
+
 Once initialization succeeds, network requests may have Approov tokens, message signatures, dynamic pinning, or secure substitutions applied. Initially you will not have set which API domains to protect, so requests are unchanged, but the service will contact the Approov cloud and log `UNKNOWN_URL` (Android) or `unknown URL` (iOS).
+
+**WebSockets are not supported.** A WebSocket connection, including GraphQL subscriptions carried over one, is passed through without an Approov token, secure string substitution or message signature, and Approov does not pin it. Protect only HTTPS requests with Approov; GraphQL queries and mutations sent over HTTPS are protected like any other request. See [USAGE.md](USAGE.md#websockets-are-not-supported).
 
 Support is provided for the [rn-fetch-blob](https://github.com/joltup/rn-fetch-blob) networking stack through the [@approov/rn-fetch-blob](https://www.npmjs.com/package/@approov/rn-fetch-blob) fork:
 

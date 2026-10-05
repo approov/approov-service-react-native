@@ -50,6 +50,26 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithDelegate:(id<NSURLSessionDataDelegate> _Nullable)delegate
                   approovService:(ApproovService *_Nullable)approovService;
 
+/// Records the headers and URL a request had before Approov processed it, on
+/// the processed request, so a redirect can undo exactly what Approov added.
+/// The record is stored as NSURLProtocol properties, which URLSession keeps on
+/// the task's requests and on the redirect request it builds. It holds the
+/// app's own values (placeholders, not substituted secrets) and only SHA-256
+/// digests of what Approov applied, never the token, signatures or secrets.
+///
+/// @param original is the request as the app built it
+/// @param processed is the request Approov will send
++ (void)recordPreApproovRequest:(NSURLRequest *)original
+             onProcessedRequest:(NSMutableURLRequest *)processed;
+
+/**
+ * Takes out of a request everything Approov applied to the request it was built
+ * from (for example a completed task's currentRequest copied into a new task),
+ * using the record that request carries, so only the app's own values are
+ * processed again. A request without a record is returned unchanged.
+ */
++ (NSURLRequest *)requestByUndoingRecordedApproovChangesIn:(NSURLRequest *)request;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -86,11 +86,12 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
     ///   - error: the optional underlying failure.
     /// - Returns: the original, unsigned request.
     private func proceedUnsigned(_ request: URLRequest, reason: StaticString, _ error: Error? = nil) -> URLRequest {
-        if let error {
-            os_log(reason, type: .error, String(describing: error))
-        } else {
-            os_log(reason, type: .error)
+        var message = "\(reason)"
+        if message.hasPrefix("ApproovService: ") {
+            message.removeFirst("ApproovService: ".count)
         }
+        message = message.replacingOccurrences(of: "%@", with: error.map { String(describing: $0) } ?? "")
+        ApproovServiceMutatorBridge.logError(message, component: "MessageSigning")
         return request
     }
 
@@ -246,10 +247,10 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
                     if let sigBaseDigestHeader = try SFV.serializeDictionary(key: "sha-256", data: digest) {
                         signedRequest.setValue(sigBaseDigestHeader, forHTTPHeaderField: "Signature-Base-Digest")
                     } else {
-                        os_log("ApproovService: failed to add debug signature base digest", type: .error)
+                        ApproovServiceMutatorBridge.logError("failed to add debug signature base digest", component: "MessageSigning")
                     }
                 } catch {
-                    os_log("ApproovService: failed to add debug signature base digest: %@", type: .error, String(describing: error))
+                    ApproovServiceMutatorBridge.logError("failed to add debug signature base digest: \(error)", component: "MessageSigning")
                 }
             } else {
                 signedRequest.setValue(nil, forHTTPHeaderField: "Signature-Base-Digest")
@@ -382,7 +383,7 @@ public class ApproovDefaultMessageSigning: ApproovServiceMutator, CustomStringCo
             try defaultSignatureParametersFactory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, required: false)
         } catch {
             // ApproovDefaultMessageSigning.DIGEST_SHA256 is a supported body digest algorithm - will never throw
-            os_log("ApproovDefaultMessageSigning - generateDefaultSignatureParametersFactory: Failed to set default body digest algorithm", type: .error)
+            ApproovServiceMutatorBridge.logError("generateDefaultSignatureParametersFactory: failed to set default body digest algorithm", component: "MessageSigning")
         }
         return defaultSignatureParametersFactory
     }

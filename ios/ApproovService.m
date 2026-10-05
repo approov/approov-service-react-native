@@ -86,15 +86,6 @@ RCT_EXPORT_MODULE(ApproovService);
 static NSString *const ConfigResource = @"approov";
 static NSString *const ConfigExtension = @"config";
 
-// time window (in millseconds) applied to any network request attempts made
-// before Approov is initialized. The start of the window is defined by the
-// first network request received prior to initialization. That network request,
-// and any others arriving during the window, may then be delayed until the end
-// of the window period. This is to allow time for the Approov initialization to
-// be completed as it may be in a race with API requests made as the app starts
-// up.
-static NSTimeInterval STARTUP_SYNC_TIME_WINDOW = 2.5;
-
 // lock object used during initialization
 static id initializerLock = nil;
 
@@ -105,25 +96,17 @@ static id initializerLock = nil;
 static id configLock = nil;
 
 // keeps track of whether Approov is initialized
-BOOL isInitialized = NO;
-
-// lock object used for synchronizing the earliestNetworkRequestTime
-static id earliestNetworkRequestTimeLock = nil;
-
-// the earliest time that any network request will be allowed to avoid any
-// potential race conditions with Approov protected API calls being made before
-// Approov itself can be initialized - or 0.0 they may proceed immediately
-NSTimeInterval earliestNetworkRequestTime = 0.0;
+static BOOL isInitialized = NO;
 
 // the current shared ApproovService instance
 static ApproovService *sharedApproovService = nil;
 
 // original config string used during initialization
-NSString *initialConfigString = nil;
+static NSString *initialConfigString = nil;
 
 // keeps track of whether a prefetch request has been made prior to
 // initialization
-BOOL pendingPrefetch = NO;
+static BOOL pendingPrefetch = NO;
 
 static BOOL ApproovIsEnabled(void) {
   // Read under initializerLock so the request path never observes a torn/partial
@@ -139,36 +122,43 @@ static BOOL ApproovIsEnabled(void) {
 
 // YES if the status should be used as the token header value if the token is
 // empty
-BOOL useApproovStatusIfNoToken = NO;
+static BOOL useApproovStatusIfNoToken = NO;
 
 // YES if no logging should be output on unknown (or excluded) URLs
-BOOL suppressLoggingUnknownURL = NO;
+static BOOL suppressLoggingUnknownURL = NO;
 
 // header that will be added to Approov enabled requests
-NSString *approovTokenHeader = @"Approov-Token";
+static NSString *approovTokenHeader = @"Approov-Token";
 
 // default header that will carry any optional Approov TraceID debug value from
 // the SDK
-NSString *approovTraceIDHeader = @"Approov-TraceID";
+static NSString *approovTraceIDHeader = @"Approov-TraceID";
 
 // any prefix to be added before the Approov token, such as "Bearer "
-NSString *approovTokenPrefix = @"";
+static NSString *approovTokenPrefix = @"";
 
 // any header to be used for binding in Approov tokens or empty string if not
 // set
-NSString *bindingHeader = @"";
+static NSString *bindingHeader = @"";
+
+// token header, prefix and binding header applied from approov.plist at launch, or nil.
+// initialize() resets the runtime configuration to these instead of the built-in defaults, so
+// configuration from the bundled properties is not lost on the first JavaScript initialize().
+static NSString *launchTokenHeader = nil;
+static NSString *launchTokenPrefix = nil;
+static NSString *launchBindingHeader = nil;
 
 // map of headers that should have their values substituted for secure strings,
 // mapped to their required prefixes
-NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
+static NSMutableDictionary<NSString *, NSString *> *substitutionHeaders = nil;
 
 // set of query parameter keys whose values may be substituted for secure
 // strings
-NSMutableSet<NSString *> *substitutionQueryParams = nil;
+static NSMutableSet<NSString *> *substitutionQueryParams = nil;
 
 // set of URL regular expressions that should be excluded from Approov
 // protection
-NSMutableSet<NSString *> *exclusionURLRegexs = nil;
+static NSMutableSet<NSString *> *exclusionURLRegexs = nil;
 
 /**
  * Indicates that this module must initialize before any Javascript is run.
@@ -212,7 +202,6 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
   if (self == [ApproovService class]) {
     initializerLock = [NSObject new];
     configLock = [NSObject new];
-    earliestNetworkRequestTimeLock = [NSObject new];
   }
 }
 
@@ -287,12 +276,16 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
         if (tokenPrefix == nil)
           tokenPrefix = @"";
         [self setTokenHeader:tokenHeader prefix:tokenPrefix];
+        launchTokenHeader = tokenHeader;
+        launchTokenPrefix = tokenPrefix;
       }
 
       // set any token binding header
       NSString *bindingHeader = [props valueForKey:@"binding.name"];
-      if ((bindingHeader != nil) && ([bindingHeader length] != 0))
+      if ((bindingHeader != nil) && ([bindingHeader length] != 0)) {
         [self setBindingHeader:bindingHeader];
+        launchBindingHeader = bindingHeader;
+      }
     }
   } else
     ApproovLogI(@"started");
@@ -344,9 +337,8 @@ NSMutableSet<NSString *> *exclusionURLRegexs = nil;
  * The platform SDK returns YES on first initialization, or NO with a nil error
  * if already initialized with the same configuration (treated as success).
  * NO with a non-nil error indicates a genuine failure such as a different-config
- * conflict, which is surfaced as a rejected promise. The startup synchronization
- * gate is cleared on both success and failure so that pending requests are never
- * held indefinitely.
+ * conflict, which is surfaced as a rejected promise. Protected request paths must
+ * await successful initialization; request interception has no startup grace period.
  *
  * @param config   the configuration string, or empty string for bypass mode
  * @param comment  optional comment forwarded to the native SDK, or nil
@@ -391,14 +383,9 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     }
 
     if (initializationError != nil) {
-      // Genuine initialization failure — release the gate so pending requests
-      // are not held indefinitely. Service-layer state is NOT modified;
-      // the previous operating mode (protected or bypass) is fully preserved.
+      // Preserve the previous operating mode if SDK initialization fails.
       ApproovLogE(@"initialization failed: %@",
                   [initializationError localizedDescription]);
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestNetworkRequestTime = 0.0;
-      }
       NSError *error =
           [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                      code:0
@@ -420,7 +407,8 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     // Warn about runtime configuration that is about to be discarded. Token binding
     // ceasing to apply is the security-relevant one, so it is called out separately
     // from the rest.
-    if ((bindingHeader != nil) && (bindingHeader.length != 0))
+    if ((bindingHeader != nil) && (bindingHeader.length != 0) &&
+        ![bindingHeader isEqualToString:(launchBindingHeader ?: @"")])
       ApproovLogW(@"initialization is discarding the binding header - re-apply "
                    "setBindingHeader after initialize or tokens will no longer be bound "
                    "to that header value");
@@ -437,10 +425,11 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     // the end of this critical section under the same initializerLock.
     useApproovStatusIfNoToken = NO;
     @synchronized(configLock) {
-      approovTokenHeader = @"Approov-Token";
+      // the defaults, or what approov.plist set at launch
+      approovTokenHeader = launchTokenHeader ?: @"Approov-Token";
       approovTraceIDHeader = @"Approov-TraceID";
-      approovTokenPrefix = @"";
-      bindingHeader = @"";
+      approovTokenPrefix = launchTokenPrefix ?: @"";
+      bindingHeader = launchBindingHeader ?: @"";
       substitutionHeaders = [[NSMutableDictionary alloc] init];
       substitutionQueryParams = [[NSMutableSet alloc] init];
       exclusionURLRegexs = [[NSMutableSet alloc] init];
@@ -454,9 +443,6 @@ RCT_EXPORT_METHOD(initialize : (NSString *)config
     [[ApproovServiceMutatorBridge shared] resetToDefault];
     initialConfigString = config;
     isInitialized = YES;
-    @synchronized(earliestNetworkRequestTimeLock) {
-      earliestNetworkRequestTime = 0.0;
-    }
     if (ApproovIsEnabled()) {
       [Approov setUserProperty:@"approov-react-native"];
       ApproovLogI(@"initialized on deviceID %@", [Approov getDeviceID]);
@@ -556,10 +542,6 @@ RCT_EXPORT_METHOD(setServiceMutatorType : (double)mask
   }
 }
 
-+ (id)networkRequestLock {
-  return earliestNetworkRequestTimeLock;
-}
-
 /**
  * Gets the last ARC (Attestation Response Code) code.
  *
@@ -645,7 +627,7 @@ RCT_EXPORT_METHOD(setInstallAttrsInToken : (NSString *)attrs resolver : (
  * handleInterceptorFetchTokenResult in a custom mutator.
  */
 RCT_EXPORT_METHOD(setProceedOnNetworkFail) {
-  ApproovLogI(@"setProceedOnNetworkFail: deprecated no-op - use "
+  ApproovLogW(@"setProceedOnNetworkFail: deprecated no-op - use "
               @"ApproovServiceMutator instead");
 }
 
@@ -760,6 +742,8 @@ RCT_EXPORT_METHOD(addAllowedDelegate : (NSString *)delegatePattern) {
  */
 RCT_EXPORT_METHOD(setLogLevel : (NSInteger)level) {
   setApproovLogLevel((int)level);
+  // the Swift mutator bridge cannot call the C loggers, so it mirrors the level
+  ApproovServiceMutatorBridge.logLevel = level;
   ApproovLogI(@"setLogLevel %d", (int)level);
 }
 
@@ -1041,7 +1025,7 @@ RCT_EXPORT_METHOD(getDeviceID : (RCTPromiseResolveBlock)
     return;
   }
   NSString *deviceID = [Approov getDeviceID];
-  ApproovLogI(@"getDeviceID: %@", deviceID);
+  ApproovLogD(@"getDeviceID: %@", deviceID);
   if (deviceID == nil) {
     NSError *error = [[NSError alloc] initWithDomain:@"io.approov.reactnative"
                                                 code:0
@@ -1421,70 +1405,59 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   NSString *url = updatedRequest.URL.absoluteString;
   if ([host isEqualToString:@"localhost"]) {
     if (!suppressLoggingUnknownURL)
-      ApproovLogI(@"localhost forwarded: %@", url);
+      ApproovLogD(@"localhost forwarded: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
               withMessage:@"localhost forwarded"];
   }
 
-  // if the Approov SDK is not initialized then we just return immediately
-  // without making any changes
+#if DEBUG
+  // In a debug build, also forward the loopback addresses used to reach the development
+  // machine, such as Metro on 127.0.0.1. They are never Approov-protected and, being
+  // cleartext, would otherwise cost a token fetch that returns BAD_URL. Release builds
+  // do not skip them.
+  static NSSet<NSString *> *debugDevelopmentHosts;
+  static dispatch_once_t debugDevelopmentHostsOnce;
+  dispatch_once(&debugDevelopmentHostsOnce, ^{
+    debugDevelopmentHosts = [NSSet setWithObjects:@"127.0.0.1", @"::1", nil];
+  });
+  if ([debugDevelopmentHosts containsObject:host]) {
+    if (!suppressLoggingUnknownURL)
+      ApproovLogD(@"development host forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"development host forwarded"];
+  }
+#endif
+
+  // Protected request paths MUST await initialize(). There is no startup grace period.
   if (!isInitialized) {
-    // if this is the first network request performed prior to Approov
-    // initialization then we start a time window in case we are in a race with
-    // that initialization
-    @synchronized(earliestNetworkRequestTimeLock) {
-      if (earliestNetworkRequestTime == 0) {
-        earliestNetworkRequestTime =
-            [[NSDate date] timeIntervalSince1970] + STARTUP_SYNC_TIME_WINDOW;
-        ApproovLogI(@"startup sync time window started");
-      }
-    }
-
-    // wait until any initial fetch time is reached
-    BOOL waitForReady = YES;
-    while (waitForReady) {
-      // if initialization has completed then we can proceed
-      if (isInitialized) {
-        waitForReady = NO;
-        break;
-      }
-
-      NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-      NSTimeInterval earliestTime = 0.0;
-      @synchronized(earliestNetworkRequestTimeLock) {
-        earliestTime = earliestNetworkRequestTime;
-      }
-      if (currentTime >= earliestTime)
-        waitForReady = NO;
-      else {
-        // sleep for a short period to block this request thread
-        static BOOL hasLoggedInitWarning = NO;
-        if (!hasLoggedInitWarning) {
-          ApproovLogE(
-              @"Approov initialization is delaying a network request! A native "
-              @"thread is sleeping. You MUST await ApproovService.initialize() "
-              @"or use the useApproov() hook before calling fetch().");
-          hasLoggedInitWarning = YES;
-        }
-        ApproovLogI(@"request paused: %@", url);
-        [NSThread sleepForTimeInterval:0.1];
-      }
-    }
-
-    // if Approov is still not initialized then forward the request unchanged
-    if (!isInitialized) {
-      ApproovLogI(@"uninitialized forwarded: %@", url);
-      return [ApproovInterceptorResult
-          createWithRequest:updatedRequest
-                 withAction:ApproovInterceptorActionProceed
-                withMessage:@"uninitalized forwarded"];
-    }
+    // Warn once with the guidance; later early requests (Metro's own traffic included) log
+    // at debug so the warning is not repeated for every request.
+    static dispatch_once_t uninitializedForwardReported;
+    __block BOOL firstUninitializedForward = NO;
+    dispatch_once(&uninitializedForwardReported, ^{ firstUninitializedForward = YES; });
+    if (firstUninitializedForward)
+      ApproovLogW(@"uninitialized forwarded (await ApproovService.initialize() before protected requests): %@", url);
+    else
+      ApproovLogD(@"uninitialized forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"uninitalized forwarded"];
   }
 
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    // Bypass mode is worth seeing in production logs, but once, not for every request.
+    static dispatch_once_t bypassForwardReported;
+    __block BOOL firstBypassForward = NO;
+    dispatch_once(&bypassForwardReported, ^{ firstBypassForward = YES; });
+    if (firstBypassForward)
+      ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    else
+      ApproovLogD(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1512,7 +1485,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
                               range:NSMakeRange(0, [url length])];
       if (match) {
         if (!suppressLoggingUnknownURL)
-          ApproovLogI(@"excluded url: %@", url);
+          ApproovLogD(@"excluded url: %@", url);
         return [ApproovInterceptorResult
             createWithRequest:updatedRequest
                    withAction:ApproovInterceptorActionProceed
@@ -1521,13 +1494,36 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
     }
   }
 
+  // Fetching a token blocks the calling thread until the SDK answers, which can take
+  // seconds on a poor network. On the main thread that freezes the UI and lets the iOS
+  // watchdog kill the app (0x8badf00d), so Approov processing is skipped there and the
+  // request is forwarded unmodified. Third-party SDKs such as Firebase can start
+  // requests on the main queue, and their sessions are intercepted too.
+  if ([NSThread isMainThread]) {
+    // Warn once with the guidance; later main thread requests log at debug so the warning
+    // is not repeated for every request.
+    static dispatch_once_t mainThreadForwardReported;
+    __block BOOL firstMainThreadForward = NO;
+    dispatch_once(&mainThreadForwardReported, ^{ firstMainThreadForward = YES; });
+    if (firstMainThreadForward)
+      ApproovLogW(@"main thread request forwarded WITHOUT Approov protection (no token, "
+                  @"no signing); a token fetch would block the main thread. Start "
+                  @"protected requests from a background thread: %@", url);
+    else
+      ApproovLogD(@"main thread request forwarded: %@", url);
+    return [ApproovInterceptorResult
+        createWithRequest:updatedRequest
+               withAction:ApproovInterceptorActionProceed
+              withMessage:@"main thread forwarded"];
+  }
+
   // update the data hash based on any token binding header
   @synchronized(configLock) {
     if (![bindingHeader isEqualToString:@""]) {
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
       if (headerValue != nil) {
         [Approov setDataHashInToken:headerValue];
-        ApproovLogI(@"setting data hash for binding header %@", bindingHeader);
+        ApproovLogD(@"setting data hash for binding header %@", bindingHeader);
       }
     }
   }
@@ -1536,13 +1532,13 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   ApproovTokenFetchResult *result = [Approov fetchApproovTokenAndWait:url];
   if (!suppressLoggingUnknownURL ||
       ([result status] != ApproovTokenFetchStatusUnknownURL))
-    ApproovLogI(@"token for %@: %@", url, [result loggableToken]);
+    ApproovLogD(@"token for %@: %@", url, [result loggableToken]);
 
   // log if a configuration update is received and call fetchConfig to clear the
   // update state
   if (result.isConfigChanged) {
     [Approov fetchConfig];
-    ApproovLogI(@"dynamic configuration update received");
+    ApproovLogD(@"dynamic configuration update received");
   }
 
   // process the token fetch result
@@ -1694,7 +1690,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
           fetchSecureStringAndWait:[value substringFromIndex:prefix.length
       ]:nil];
       status = [result status];
-      ApproovLogI(@"substituting header %@: %@", header,
+      ApproovLogD(@"substituting header %@: %@", header,
                   [Approov stringFromApproovTokenFetchStatus:status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
@@ -1762,7 +1758,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSString *matchText = [url substringWithRange:[match rangeAtIndex:1]];
       result = [Approov fetchSecureStringAndWait:matchText:nil];
       status = [result status];
-      ApproovLogI(@"substituting query parameter %@: %@", key,
+      ApproovLogD(@"substituting query parameter %@: %@", key,
                   [Approov stringFromApproovTokenFetchStatus:result.status]);
       NSError *mutatorError = nil;
       BOOL shouldSubstitute = [[ApproovServiceMutatorBridge shared]
@@ -1804,7 +1800,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
 
 // Subject Public Key Info (SPKI) headers for public keys' type and size. Only
 // RSA-2048, RSA-4096, EC-256 and EC-384 are supported
-NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
+static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
 /**
  * Initialize the SPKI header constants.
@@ -1965,7 +1961,7 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
 
   // if the Approov SDK is not initialized then there are no pins so we proceed
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"verifyPins for %@ called while Approov is disabled", host);
+    ApproovLogD(@"verifyPins for %@ called while Approov is disabled", host);
     return ApproovTrustDecisionNotPinned;
   }
 
@@ -2022,7 +2018,7 @@ NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHeaders;
       // match pins on the receivers host
       for (NSString *pinHashB64 in pinsForHost) {
         if ([pinHashB64 isEqualToString:publicKeyHashB64]) {
-          ApproovLogI(
+          ApproovLogD(
               @"verifyPins for %@ matched public key pin %@ from %d pins", host,
               pinHashB64, [pinsForHost count]);
           return ApproovTrustDecisionAllow;
@@ -2209,6 +2205,12 @@ RCT_EXPORT_METHOD(fetchWithApproov : (NSString *)url options : (NSDictionary *)
                  mutatorError);
           return;
         }
+        // Remember the app's own headers and URL so a redirect can take back out
+        // everything Approov added, as for intercepted sessions. Without this a
+        // redirect to another host would carry the token, signature and
+        // substituted secrets issued for this one.
+        [PinningURLSessionDelegate recordPreApproovRequest:request
+                                        onProcessedRequest:finalRequest];
 
         // 4. Create an isolated, unswizzled NSURLSession with our Pinning
         // Delegate

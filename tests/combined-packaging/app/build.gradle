@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'io.approov.packagingcheck'
+    compileSdk = rootProject.ext.compileSdkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+    defaultConfig {
+        applicationId = 'io.approov.packagingcheck'
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = 1
+        versionName = '1.0'
+    }
+    buildTypes {
+        release {
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    def integration = providers.gradleProperty('integration').getOrElse('both')
+    if (integration != 'okhttp') {
+        implementation project(':approov-react-native')
+    }
+    if (integration != 'react-native') {
+        implementation 'io.approov:service.okhttp:3.5.8'
+    }
+}
+
+// Checks, after the minified release build, that the members the service layer reads by
+// reflection and the names diagnostics report survive R8, as the consumer rules intend.
+def checkKeptMembers = tasks.register('checkKeptMembers') {
+    doLast {
+        def integration = providers.gradleProperty('integration').getOrElse('both')
+        if (integration == 'okhttp')
+            return
+        def seeds = file('build/outputs/r8-seeds.txt').text
+        def mapping = file('build/outputs/mapping/release/mapping.txt').text
+        def missing = []
+        def anySeed = { String cls, List<String> members ->
+            if (!members.any { member -> seeds =~ /(?m)^\Q${cls}\E: .*\b\Q${member}\E\b/ })
+                missing << "${cls}.${members} (none kept)"
+        }
+        anySeed('com.facebook.react.modules.network.OkHttpClientProvider', ['factory', 'sFactory'])
+        anySeed('com.facebook.react.modules.network.NetworkingModule', ['client', 'mClient'])
+        anySeed('com.facebook.react.modules.network.NetworkingModule', ['customClientBuilder', 'mCustomClientBuilder'])
+        anySeed('com.facebook.react.modules.network.NetworkingModule', ['cookieJarContainer', 'mCookieJarContainer'])
+        anySeed('com.facebook.react.modules.network.NetworkingModule', ['cookieHandler', 'mCookieHandler'])
+        // the constructor the SDK's native library looks up by name
+        if (!(seeds =~ /(?m)^\Qcom.criticalblue.approovsdk.AttestationServicesResponse: \E(AttestationServicesResponse|<init>)\Q(java.lang.String,byte[],long,int,int)\E/))
+            missing << 'AttestationServicesResponse(String, byte[], long, int, int) (not kept)'
+        for (cls in ['io.approov.reactnative.ApproovInterceptor', 'io.approov.reactnative.ApproovPinningInterceptor']) {
+            if (!(mapping =~ /(?m)^\Q${cls}\E -> \Q${cls}\E:/))
+                missing << "${cls} (renamed or removed)"
+        }
+        if (!missing.isEmpty())
+            throw new GradleException('R8 did not keep: ' + missing.join(', '))
+        println 'checkKeptMembers: reflected React Native members, the SDK constructor and interceptor names are kept'
+    }
+}
+tasks.matching { it.name == 'assembleRelease' }.configureEach { finalizedBy checkKeptMembers }

@@ -7,7 +7,7 @@ You can initialize the `ApproovService` with an empty configuration string if yo
 
 > ```javascript
 > // Initialize with an empty string to operate as a standard network client
-> ApproovService.initialize("");
+> await ApproovService.initialize("");
 > ```
 
 When initialized this way, all network requests made through the native React Native networking module will proceed without Approov token injection, message signing, secure string substitution, or dynamic pinning. You can enable full Approov protection later in the application lifecycle by calling `ApproovService.initialize(config)` with a valid configuration string.
@@ -18,7 +18,8 @@ The Approov SDK must fully complete its native initialization sequence and recei
 
 If your application executes a `fetch()` or `axios` request *before* `ApproovService.initialize()` has successfully completed, that specific request may proceed without an Approov token and without a reliable pinning guarantee. On iOS, the passive `+load` probe may still log evidence that startup networking primitives already existed, but the request itself is not recoverable after it has left the device.
 
-> You must await `useApproov()` / `approovReady` (or `await ApproovService.initialize(...)`) **before** making protected `fetch()` calls.
+> You **MUST await successful `ApproovService.initialize(validConfig)` completion before every protected request path can start**. With `ApproovProvider`, gate requests on `approovReady && !approovError`, which reflects that promise. If initialization fails, keep protected requests blocked.
+> Android and iOS have no startup grace period; the former 2.5-second waits have been removed. Polling `isInitialized()` is not a substitute for awaiting the initialization promise.
 > A request that leaves the device before initialization completes may be forwarded without an Approov token.
 > If you intentionally initialize with `""`, that request path is treated as an explicit no-Approov bootstrap mode: requests will proceed without Approov protection until you later call `ApproovService.initialize("<valid-config>")`.
 > This empty-first then valid-config-later flow is supported for advanced service-layer integrations, but switching directly between different non-empty config strings is still rejected.
@@ -59,7 +60,7 @@ const MainScreen = () => {
 ```
 
 ### Option 2: Awaiting the Promise (For Headless/Service logic)
-If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You should `await` it before making any subsequent network calls.
+If you are manually initializing Approov outside of the React component tree (e.g., in a background service or a dedicated API wrapper module), `ApproovService.initialize()` returns a Promise. You MUST `await` its successful completion before making protected network calls.
 
 ```javascript
 import { Platform } from 'react-native';
@@ -94,6 +95,25 @@ async function bootstrapAppAndFetch() {
   }
 }
 ```
+
+### Configuration Is Reset By Initialization
+
+Every successful `ApproovService.initialize()` call resets the runtime configuration to its defaults, on both Android and iOS. This includes same-config re-initialization, an `ApproovProvider` remount and a React Native hot restart. The reset covers the token header and prefix (`setTokenHeader`), the trace ID header (`setTraceIDHeader`), the binding header (`setBindingHeader`), substitution headers and query parameters, exclusion URL regexes, `setSuppressLoggingUnknownURL` and any custom service mutator. A warning is logged when a binding header, substitutions, exclusions or a custom mutator are discarded this way. If the app bundles `approov.props` (Android) or `approov.plist` (iOS) with `token.name`, `token.prefix` or `binding.name`, the reset goes back to those values instead of the built-in defaults. A custom mutator installed from native code is reset too, so install it again after initialization.
+
+Apply this configuration **after** initialization has completed. With `ApproovProvider`, use `onInitialized`: it runs after each successful initialization and before `approovReady` becomes true, so protected requests gated on `approovReady` never start without it. If it throws or rejects, the provider reports the error and stays not ready. `onInit` runs *before* `initialize`, so anything set there from the list above is discarded immediately. A binding header set in `onInit` is the security-relevant case: the tokens are then not bound to that header.
+
+```javascript
+<ApproovProvider
+  config={config}
+  onInitialized={() => {
+    ApproovService.setBindingHeader('Authorization');
+    if (__DEV__) ApproovService.addExclusionURLRegex('^http://[^/]+:8081/');
+  }}>
+  {children}
+</ApproovProvider>
+```
+
+An effect keyed on `approovInitCount` also works, but then gate protected requests on the effect having run, since `approovReady` is already true when it runs. If you call `ApproovService.initialize()` yourself (*Option 2*), apply the configuration after each successful `await`. Settings that are not listed above, such as `setLogLevel`, survive initialization and can stay in `onInit`.
 
 ### Recommended Early Diagnostics Metadata Capture
 During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
@@ -152,6 +172,22 @@ You should send this metadata to your observability platform during early adopti
 React Native heavily optimizes Android networking by using a single, globally shared `OkHttpClient`. If another observability or analytics SDK (e.g., Datadog, New Relic) initializes *after* Approov does, that SDK might programmatically overwrite the networking factory, completely stripping away the Approov protection without throwing an error.
 
 For robust Android deployments, it is **highly recommended** to perform the `ApproovService.getPinningDiagnostics()` health-check exactly once, just before you execute the very first API request of the application session, as demonstrated in Option 2 above. If the interceptor is missing, calling `ApproovService.updateClientFactory(true)` will instantly heal the active client, preserving the foreign SDK's hooks while adding the Approov protection back on top.
+
+## WebSockets Are Not Supported
+
+The service layer protects HTTPS requests only. WebSocket connections (`ws://`, `wss://`), including GraphQL subscriptions carried over them, are not supported, and any behaviour you observe on them is not part of the service layer's contract:
+
+* **Android:** React Native's WebSocket module builds its own OkHttp client, which Approov does not configure, so React Native WebSockets never see Approov. A WebSocket opened through the shared client from `OkHttpClientProvider` (some libraries do this) would pass through Approov's interceptor, but OkHttp does not run Approov's pin check on a WebSocket upgrade. So that a token can never travel over a connection Approov has not pinned, the service layer forwards such an upgrade request untouched: no Approov token, no secure string substitution and no message signature. It logs `WebSocket upgrade forwarded without Approov processing (not supported)` at DEBUG level.
+* **iOS:** React Native opens WebSockets with SocketRocket, which does not use `NSURLSession`, so the service layer never sees them.
+
+Do not put secure string placeholders in WebSocket URLs or headers, and do not rely on an Approov token to authorize a WebSocket at your backend. GraphQL queries and mutations sent as ordinary HTTPS requests (`POST` with a JSON body, or `GET` with the query in the URL) are protected like any other request: they carry the token, are pinned, and are signed when message signing is enabled.
+
+## Redirects
+
+Approov credentials never follow a redirect to another origin. An origin is the scheme, host and port, so a redirect from `https` to `http` on the same host, or to another port, counts as another origin. What happens to the follow-up differs by platform:
+
+* **Android:** a follow-up to another origin carries no Approov token, trace ID, message signature or substituted secure string, and it is not protected again, even if that origin is an Approov-protected API. Call such an API directly instead of through a redirect. A header the app sets itself on a new request built from `Response.request()` is kept. A follow-up to the same origin is sent as it is, with the token and any signature issued for the first request; a signature that covers the path or method no longer matches a redirect that changes them.
+* **iOS:** a follow-up is processed again for its own URL. Everything Approov added for the previous attempt is taken out (a substituted secure string goes back to its placeholder), and the follow-up is then protected, signed and pinned like a new request to that URL. A follow-up that Approov would block (for example a cleartext `http` URL, which is `BAD_URL`) fails with the same error as a first request (`499`, or `503` for a network status), not as a cancellation.
 
 ## Message Signing
 
@@ -359,7 +395,7 @@ await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { signature: '
 
 **Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. A warning is logged whenever a custom mutator is discarded this way. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
 
-Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it afterwards, keyed on `approovInitCount`:
+Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it in `onInitialized`, or in an effect keyed on `approovInitCount`:
 
 ```javascript
 const { approovReady, approovInitCount } = useApproov();
@@ -378,7 +414,9 @@ If you call `ApproovService.initialize()` yourself rather than through `ApproovP
 
 > **iOS note:** `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` have no equivalent Approov status on iOS, so those two bits are inert there (harmless if included).
 
-**Development-only: let Metro's cleartext bundle through.** Metro serves the dev bundle over cleartext `http://`, which the SDK reports as `BAD_URL`. In development builds you can forward it with the dedicated preset (issue #30):
+**Cleartext `http://` is not supported.** The Approov SDK only accepts `https://` URLs. `localhost` is always passed through untouched, and in a debug build so are the other addresses used to reach the development machine: `127.0.0.1` and `::1` on both platforms, plus `10.0.2.2` (Android emulator) and `10.0.3.2` (Genymotion) on Android. A debug build means a debuggable app on Android and a build compiled with `DEBUG` on iOS; release builds process these addresses like any other host. After initialization, an `http://` request to any other host is reported as `BAD_URL` and the default policy blocks it, whether or not the host is one of your protected API domains. Use `https://`, or exclude a host that must stay cleartext with `addExclusionURLRegex`.
+
+**Development-only: let Metro's cleartext bundle through.** Metro serves the dev bundle over cleartext `http://`, which the SDK reports as `BAD_URL`. On an emulator or simulator this needs nothing: debug builds forward Metro on the loopback and emulator addresses above without any Approov lookup. On a physical device Metro is on your machine's LAN address, so exclude it after initialization with `addExclusionURLRegex('^http://[^/]+:8081/')` (see [Configuration Is Reset By Initialization](#configuration-is-reset-by-initialization)), which skips the lookup entirely, or forward it with the dedicated preset (issue #30), which still performs the lookup:
 
 ```javascript
 if (__DEV__) await ApproovService.setServiceMutatorType(ApproovService.MutatorPreset.PROCEED_DEV_CLEARTEXT);
@@ -678,6 +716,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 This example implementation demonstrates how to customize the native `ApproovServiceMutator` to apply different options to API requests based on the hostname. Note that because custom mutators run directly on the underlying native HTTP client hooks, you must implement them in Java/Kotlin (Android) and Swift/Objective-C (iOS).
 
+> **`handlePinningShouldProcessRequest` decides by host.** Both platforms honour it. Android calls it for every HTTPS request with the full request, before the Approov pin check. iOS checks pins once per TLS connection, so it calls the hook when the connection is set up, with a request for the connection's origin only (`https://host:port/` with a lowercase host and the port left out when it is 443, no path, headers or body). Base the decision on the host, as the examples below do, so both platforms behave the same. Returning `false` skips only the Approov pin check; normal TLS certificate validation still applies. On iOS the decision holds for that connection and every request that reuses it, so installing a different mutator affects new connections only; on Android every request is checked against the mutator in force at the time.
+
 **Android Implementation (Java)**
 ```java
 package com.yourcompany.yourapp;
@@ -855,3 +895,15 @@ If you must log from the client, ensure you have a fallback strategy for when th
 - Keep mutator logic fast and side-effect safe. These native hooks run on the request path and blocking them will hang the network traffic.
 - To add message signing on top of your own behaviour, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Basing a custom mutator on `ApproovServiceMutator.DEFAULT` (Android) gives you the pass-through behaviour, which performs no message signing.
 - If you override multiple hooks, keep them focused (one concern per hook) for easier testing and maintenance.
+
+## Testing with Jest
+
+Jest cannot load the package as it is: `index.js` uses ES module syntax that Jest does not transform in `node_modules` by default, and the native module does not exist under Jest. The package ships a Jest mock for an app's own unit tests. Register it once in a setup file:
+
+```js
+// jest.setup.js, listed in "setupFiles" in the Jest configuration
+jest.mock('@approov/approov-service-react-native', () =>
+  require('@approov/approov-service-react-native/jest'));
+```
+
+The mock needs no transform settings and talks to nothing. Every `ApproovService` method is a `jest.fn` whose promise resolves with a placeholder (`fetchToken` gives `mock-approov-token`), `fetchWithApproov` calls the global `fetch` so the app's own fetch mocks apply, and `ApproovProvider` runs `onInit`, `initialize` and `onInitialized` before reporting ready, as the real one does. Override a result per test, for example `ApproovService.initialize.mockRejectedValueOnce(new Error('offline'))`. No Approov protection is exercised: test that on a device.

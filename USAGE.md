@@ -98,20 +98,22 @@ async function bootstrapAppAndFetch() {
 
 ### Configuration Is Reset By Initialization
 
-Every successful `ApproovService.initialize()` call resets the runtime configuration to its defaults, on both Android and iOS. This includes same-config re-initialization, an `ApproovProvider` remount and a React Native hot restart. The reset covers the token header and prefix (`setTokenHeader`), the trace ID header (`setTraceIDHeader`), the binding header (`setBindingHeader`), substitution headers and query parameters, exclusion URL regexes, `setSuppressLoggingUnknownURL` and any custom service mutator. A warning is logged when a binding header, substitutions, exclusions or a custom mutator are discarded this way.
+Every successful `ApproovService.initialize()` call resets the runtime configuration to its defaults, on both Android and iOS. This includes same-config re-initialization, an `ApproovProvider` remount and a React Native hot restart. The reset covers the token header and prefix (`setTokenHeader`), the trace ID header (`setTraceIDHeader`), the binding header (`setBindingHeader`), substitution headers and query parameters, exclusion URL regexes, `setSuppressLoggingUnknownURL` and any custom service mutator. A warning is logged when a binding header, substitutions, exclusions or a custom mutator are discarded this way. If the app bundles `approov.props` (Android) or `approov.plist` (iOS) with `token.name`, `token.prefix` or `binding.name`, the reset goes back to those values instead of the built-in defaults. A custom mutator installed from native code is reset too, so install it again after initialization.
 
-Apply this configuration **after** initialization has completed. `ApproovProvider`'s `onInit` callback runs *before* `initialize`, so anything set there is discarded immediately. A binding header set in `onInit` is the security-relevant case: the tokens are then not bound to that header. With the provider, apply the configuration in an effect keyed on `approovInitCount`, so it is re-applied after every re-initialization:
+Apply this configuration **after** initialization has completed. With `ApproovProvider`, use `onInitialized`: it runs after each successful initialization and before `approovReady` becomes true, so protected requests gated on `approovReady` never start without it. If it throws or rejects, the provider reports the error and stays not ready. `onInit` runs *before* `initialize`, so anything set there from the list above is discarded immediately. A binding header set in `onInit` is the security-relevant case: the tokens are then not bound to that header.
 
 ```javascript
-const { approovReady, approovInitCount } = useApproov();
-useEffect(() => {
-    if (!approovReady) return;
+<ApproovProvider
+  config={config}
+  onInitialized={() => {
     ApproovService.setBindingHeader('Authorization');
     if (__DEV__) ApproovService.addExclusionURLRegex('^http://[^/]+:8081/');
-}, [approovReady, approovInitCount]);
+  }}>
+  {children}
+</ApproovProvider>
 ```
 
-Gate protected requests on the same effect having run. If you call `ApproovService.initialize()` yourself (*Option 2*), apply the configuration after each successful `await`. Settings that are not listed above, such as `setLogLevel`, survive initialization and can stay in `onInit`.
+An effect keyed on `approovInitCount` also works, but then gate protected requests on the effect having run, since `approovReady` is already true when it runs. If you call `ApproovService.initialize()` yourself (*Option 2*), apply the configuration after each successful `await`. Settings that are not listed above, such as `setLogLevel`, survive initialization and can stay in `onInit`.
 
 ### Recommended Early Diagnostics Metadata Capture
 During development, staging, and the first production rollout of a new app build, you should capture `ApproovService.getPinningDiagnostics()` metadata twice:
@@ -175,14 +177,17 @@ For robust Android deployments, it is **highly recommended** to perform the `App
 
 The service layer protects HTTPS requests only. WebSocket connections (`ws://`, `wss://`), including GraphQL subscriptions carried over them, are not supported, and any behaviour you observe on them is not part of the service layer's contract:
 
-* **Android:** React Native opens WebSockets through the same OkHttp client, but OkHttp does not run Approov's pin check on a WebSocket upgrade. So that a token can never travel over a connection Approov has not pinned, the service layer forwards the upgrade request untouched: no Approov token, no secure string substitution and no message signature. It logs `WebSocket upgrade forwarded without Approov processing (not supported)` at DEBUG level.
+* **Android:** React Native's WebSocket module builds its own OkHttp client, which Approov does not configure, so React Native WebSockets never see Approov. A WebSocket opened through the shared client from `OkHttpClientProvider` (some libraries do this) would pass through Approov's interceptor, but OkHttp does not run Approov's pin check on a WebSocket upgrade. So that a token can never travel over a connection Approov has not pinned, the service layer forwards such an upgrade request untouched: no Approov token, no secure string substitution and no message signature. It logs `WebSocket upgrade forwarded without Approov processing (not supported)` at DEBUG level.
 * **iOS:** React Native opens WebSockets with SocketRocket, which does not use `NSURLSession`, so the service layer never sees them.
 
 Do not put secure string placeholders in WebSocket URLs or headers, and do not rely on an Approov token to authorize a WebSocket at your backend. GraphQL queries and mutations sent as ordinary HTTPS requests (`POST` with a JSON body, or `GET` with the query in the URL) are protected like any other request: they carry the token, are pinned, and are signed when message signing is enabled.
 
 ## Redirects
 
-Approov credentials never follow a redirect to another host. A redirect from a protected API to a different host carries no Approov token, trace ID, message signature or substituted secure string, whether or not that host is Approov-protected, so a CDN or third party your API redirects to never receives them.
+Approov credentials never follow a redirect to another origin. An origin is the scheme, host and port, so a redirect from `https` to `http` on the same host, or to another port, counts as another origin. What happens to the follow-up differs by platform:
+
+* **Android:** a follow-up to another origin carries no Approov token, trace ID, message signature or substituted secure string, and it is not protected again, even if that origin is an Approov-protected API. Call such an API directly instead of through a redirect. A header the app sets itself on a new request built from `Response.request()` is kept. A follow-up to the same origin is sent as it is, with the token and any signature issued for the first request; a signature that covers the path or method no longer matches a redirect that changes them.
+* **iOS:** a follow-up is processed again for its own URL. Everything Approov added for the previous attempt is taken out (a substituted secure string goes back to its placeholder), and the follow-up is then protected, signed and pinned like a new request to that URL. A follow-up that Approov would block (for example a cleartext `http` URL, which is `BAD_URL`) fails with the same error as a first request (`499`, or `503` for a network status), not as a cancellation.
 
 ## Message Signing
 
@@ -390,7 +395,7 @@ await ApproovService.setServiceMutatorType(RD.NO_APPROOV_SERVICE, { signature: '
 
 **Reset on re-initialization.** Any successful initialization or re-initialization resets the mutator back to the built-in default, including same-config re-initialization and empty-bootstrap-to-protected upgrades. A warning is logged whenever a custom mutator is discarded this way. Re-apply `setServiceMutatorType` afterwards if you still need a custom policy.
 
-Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it afterwards, keyed on `approovInitCount`:
+Do **not** set the policy in `ApproovProvider`'s `onInit` — that callback runs *before* `initialize`, so the policy is immediately wiped by the reset. Apply it in `onInitialized`, or in an effect keyed on `approovInitCount`:
 
 ```javascript
 const { approovReady, approovInitCount } = useApproov();
@@ -711,7 +716,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 This example implementation demonstrates how to customize the native `ApproovServiceMutator` to apply different options to API requests based on the hostname. Note that because custom mutators run directly on the underlying native HTTP client hooks, you must implement them in Java/Kotlin (Android) and Swift/Objective-C (iOS).
 
-> **`handlePinningShouldProcessRequest` decides by host.** Both platforms honour it. Android calls it for every HTTPS request with the full request, before the Approov pin check. iOS checks pins once per TLS connection, so it calls the hook when the connection is set up, with a request for the connection's origin only (`https://host:port/`, no path, headers or body). Base the decision on the host, as the examples below do, so both platforms behave the same. Returning `false` skips only the Approov pin check; normal TLS certificate validation still applies. On iOS the decision holds for that connection and every request that reuses it, so installing a different mutator affects new connections only; on Android every request is checked against the mutator in force at the time.
+> **`handlePinningShouldProcessRequest` decides by host.** Both platforms honour it. Android calls it for every HTTPS request with the full request, before the Approov pin check. iOS checks pins once per TLS connection, so it calls the hook when the connection is set up, with a request for the connection's origin only (`https://host:port/` with a lowercase host and the port left out when it is 443, no path, headers or body). Base the decision on the host, as the examples below do, so both platforms behave the same. Returning `false` skips only the Approov pin check; normal TLS certificate validation still applies. On iOS the decision holds for that connection and every request that reuses it, so installing a different mutator affects new connections only; on Android every request is checked against the mutator in force at the time.
 
 **Android Implementation (Java)**
 ```java

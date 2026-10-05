@@ -895,3 +895,15 @@ If you must log from the client, ensure you have a fallback strategy for when th
 - Keep mutator logic fast and side-effect safe. These native hooks run on the request path and blocking them will hang the network traffic.
 - To add message signing on top of your own behaviour, extend `ApproovDefaultMessageSigning` or compose your mutator with the message signer as shown in *Customizing Mutators with Message Signing* above. Basing a custom mutator on `ApproovServiceMutator.DEFAULT` (Android) gives you the pass-through behaviour, which performs no message signing.
 - If you override multiple hooks, keep them focused (one concern per hook) for easier testing and maintenance.
+
+## Testing with Jest
+
+Jest cannot load the package as it is: `index.js` uses ES module syntax that Jest does not transform in `node_modules` by default, and the native module does not exist under Jest. The package ships a Jest mock for an app's own unit tests. Register it once in a setup file:
+
+```js
+// jest.setup.js, listed in "setupFiles" in the Jest configuration
+jest.mock('@approov/approov-service-react-native', () =>
+  require('@approov/approov-service-react-native/jest'));
+```
+
+The mock needs no transform settings and talks to nothing. Every `ApproovService` method is a `jest.fn` whose promise resolves with a placeholder (`fetchToken` gives `mock-approov-token`), `fetchWithApproov` calls the global `fetch` so the app's own fetch mocks apply, and `ApproovProvider` runs `onInit`, `initialize` and `onInitialized` before reporting ready, as the real one does. Override a result per test, for example `ApproovService.initialize.mockRejectedValueOnce(new Error('offline'))`. No Approov protection is exercised: test that on a device.

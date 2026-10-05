@@ -163,6 +163,14 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // the JS API cross-platform safe.
     private boolean sessionMetadataCollectionEnabled;
 
+    // token header, prefix and binding header applied from approov.props at launch, or null.
+    // initialize() resets the runtime configuration to these instead of the built-in defaults,
+    // so configuration from the bundled properties is not lost on the first JavaScript
+    // initialize().
+    private String launchTokenHeader;
+    private String launchTokenPrefix;
+    private String launchBindingHeader;
+
     // header to be used to send Approov tokens
     private String approovTokenHeader;
 
@@ -600,12 +608,16 @@ public class ApproovService extends ReactContextBaseJavaModule {
                     if (prefix == null)
                         prefix = "";
                     setTokenHeader(header, prefix);
+                    launchTokenHeader = header;
+                    launchTokenPrefix = prefix;
                 }
 
                 // set any token binding header
                 String bindingHeader = props.getProperty("binding.name");
-                if ((bindingHeader != null) && (bindingHeader.length() != 0))
+                if ((bindingHeader != null) && (bindingHeader.length() != 0)) {
                     setBindingHeader(bindingHeader);
+                    launchBindingHeader = bindingHeader;
+                }
             }
         } else
             log(LOG_INFO, TAG, "started");
@@ -1157,7 +1169,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 // Warn about runtime configuration that is about to be discarded. Token
                 // binding ceasing to apply is the security-relevant one, so it is called
                 // out separately from the rest.
-                if (bindingHeader != null)
+                if ((bindingHeader != null) && !bindingHeader.equals(launchBindingHeader))
                     log(LOG_WARN, TAG, "initialization is discarding the binding header - re-apply " +
                             "setBindingHeader after initialize or tokens will no longer be " +
                             "bound to that header value");
@@ -1169,10 +1181,11 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 isInitialized = false;
                 initialConfig = null;
                 useApproovStatusIfNoToken = false;
-                approovTokenHeader = APPROOV_TOKEN_HEADER;
+                // the defaults, or what approov.props set at launch
+                approovTokenHeader = (launchTokenHeader != null) ? launchTokenHeader : APPROOV_TOKEN_HEADER;
                 approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-                approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-                bindingHeader = null;
+                approovTokenPrefix = (launchTokenPrefix != null) ? launchTokenPrefix : APPROOV_TOKEN_PREFIX;
+                bindingHeader = launchBindingHeader;
                 substitutionHeaders = new HashMap<>();
                 substitutionQueryParams = new HashMap<>();
                 exclusionURLRegexs = new HashMap<>();

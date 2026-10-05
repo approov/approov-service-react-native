@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <stdatomic.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <objc/runtime.h>
 
@@ -2870,19 +2871,20 @@ int main(void) {
 
     // Approov skips token fetches on the main thread, so the tests run on a worker
     // thread, as real protected requests do. The main thread keeps servicing its run
-    // loop so a test can dispatch a block onto it.
-    __block BOOL testsDone = NO;
+    // loop so a test can dispatch a block onto it. The flag is atomic: the release store and
+    // acquire load also make the test thread's gFailureCount visible to the main thread.
+    static atomic_bool testsDone = false;
     NSThread *testThread = [[NSThread alloc] initWithBlock:^{
       @autoreleasepool {
         for (void (^testBlock)(void) in tests) {
           testBlock();
         }
       }
-      testsDone = YES;
+      atomic_store_explicit(&testsDone, true, memory_order_release);
     }];
     testThread.stackSize = 8 * 1024 * 1024;
     [testThread start];
-    while (!testsDone) {
+    while (!atomic_load_explicit(&testsDone, memory_order_acquire)) {
       [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     }

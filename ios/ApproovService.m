@@ -1392,7 +1392,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   NSString *url = updatedRequest.URL.absoluteString;
   if ([host isEqualToString:@"localhost"]) {
     if (!suppressLoggingUnknownURL)
-      ApproovLogI(@"localhost forwarded: %@", url);
+      ApproovLogD(@"localhost forwarded: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1437,7 +1437,14 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
   }
 
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    // Bypass mode is worth seeing in production logs, but once, not for every request.
+    static dispatch_once_t bypassForwardReported;
+    __block BOOL firstBypassForward = NO;
+    dispatch_once(&bypassForwardReported, ^{ firstBypassForward = YES; });
+    if (firstBypassForward)
+      ApproovLogI(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
+    else
+      ApproovLogD(@"Approov disabled (bypass mode) - forwarding request unprotected: %@", url);
     return [ApproovInterceptorResult
         createWithRequest:updatedRequest
                withAction:ApproovInterceptorActionProceed
@@ -1465,7 +1472,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
                               range:NSMakeRange(0, [url length])];
       if (match) {
         if (!suppressLoggingUnknownURL)
-          ApproovLogI(@"excluded url: %@", url);
+          ApproovLogD(@"excluded url: %@", url);
         return [ApproovInterceptorResult
             createWithRequest:updatedRequest
                    withAction:ApproovInterceptorActionProceed
@@ -1480,7 +1487,7 @@ RCT_EXPORT_METHOD(getSessionDiagnostics : (RCTPromiseResolveBlock)
       NSString *headerValue = [request valueForHTTPHeaderField:bindingHeader];
       if (headerValue != nil) {
         [Approov setDataHashInToken:headerValue];
-        ApproovLogI(@"setting data hash for binding header %@", bindingHeader);
+        ApproovLogD(@"setting data hash for binding header %@", bindingHeader);
       }
     }
   }
@@ -1918,7 +1925,7 @@ static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHead
 
   // if the Approov SDK is not initialized then there are no pins so we proceed
   if (!ApproovIsEnabled()) {
-    ApproovLogI(@"verifyPins for %@ called while Approov is disabled", host);
+    ApproovLogD(@"verifyPins for %@ called while Approov is disabled", host);
     return ApproovTrustDecisionNotPinned;
   }
 
@@ -1975,7 +1982,7 @@ static NSDictionary<NSString *, NSDictionary<NSNumber *, NSData *> *> *sSPKIHead
       // match pins on the receivers host
       for (NSString *pinHashB64 in pinsForHost) {
         if ([pinHashB64 isEqualToString:publicKeyHashB64]) {
-          ApproovLogI(
+          ApproovLogD(
               @"verifyPins for %@ matched public key pin %@ from %d pins", host,
               pinHashB64, [pinsForHost count]);
           return ApproovTrustDecisionAllow;

@@ -81,6 +81,22 @@ public class ApproovService extends ReactContextBaseJavaModule {
     // logging tag
     private static final String TAG = "ApproovService";
 
+    /**
+     * Interface for classes that want to be told when the Approov pins change.
+     *
+     * @deprecated all clients share one pin state that the service refreshes itself, so there is
+     *             nothing to rebuild. Kept so existing native code compiles; listeners are still
+     *             called after the service refreshes its pins.
+     */
+    @Deprecated
+    public interface PinChangeListener {
+        void approovPinsUpdated();
+    }
+
+    // listeners registered through the deprecated pin change API
+    @SuppressWarnings("deprecation")
+    private final List<PinChangeListener> pinChangeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     // module name that defines how it is called from Javascript
     private static final String MODULE_NAME = "ApproovService";
 
@@ -374,6 +390,21 @@ public class ApproovService extends ReactContextBaseJavaModule {
             log(LOG_WARN, tag, "uninitialized forwarded (await ApproovService.initialize() before protected requests): " + url);
         else
             log(LOG_DEBUG, tag, "uninitialized forwarded: " + url);
+    }
+
+    // set once the first request forwarded in bypass mode has been reported
+    private final AtomicBoolean bypassForwardReported = new AtomicBoolean(false);
+
+    /**
+     * Reports a request forwarded unprotected because Approov is disabled (bypass mode): INFO for
+     * the first such request, so it shows in production logs, DEBUG for the rest.
+     *
+     * @param tag the logging tag
+     * @param url the forwarded URL
+     */
+    void logBypassForward(String tag, String url) {
+        int level = bypassForwardReported.compareAndSet(false, true) ? LOG_INFO : LOG_DEBUG;
+        log(level, tag, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
     }
 
     /**
@@ -946,8 +977,66 @@ public class ApproovService extends ReactContextBaseJavaModule {
      * monitor, like the commit in initialize(), so a refresh cannot interleave with that commit
      * and install pins for the enabled state it is replacing.
      */
-    public synchronized void rebuildPins() {
-        pinningInterceptor.rebuildPins(this);
+    public void rebuildPins() {
+        synchronized (this) {
+            pinningInterceptor.rebuildPins(this);
+        }
+        // outside the monitor, so a listener cannot block requests
+        notifyPinChangeListeners();
+    }
+
+    /**
+     * Adds a pin change listener that is called after the service refreshes its pins.
+     *
+     * @param listener is the pin change listener
+     * @deprecated see {@link PinChangeListener}
+     */
+    @Deprecated
+    public void addPinChangeListener(PinChangeListener listener) {
+        if (listener != null)
+            pinChangeListeners.add(listener);
+    }
+
+    /**
+     * Gets all of the pin change listeners.
+     *
+     * @return a copy of the registered listeners
+     * @deprecated see {@link PinChangeListener}
+     */
+    @Deprecated
+    public List<PinChangeListener> getPinChangeListeners() {
+        return new ArrayList<>(pinChangeListeners);
+    }
+
+    /**
+     * Calls every registered pin change listener.
+     *
+     * @deprecated see {@link PinChangeListener}
+     */
+    @Deprecated
+    public void notifyPinChangeListeners() {
+        for (PinChangeListener listener : pinChangeListeners)
+            listener.approovPinsUpdated();
+    }
+
+    /**
+     * Formerly started the startup wait before initialization. There is no startup wait any more.
+     *
+     * @deprecated await ApproovService.initialize() before protected requests instead
+     */
+    @Deprecated
+    public void setEarliestNetworkRequestTime() {
+    }
+
+    /**
+     * Formerly returned the end of the startup wait. There is no startup wait any more.
+     *
+     * @return always 0, meaning requests are not delayed
+     * @deprecated await ApproovService.initialize() before protected requests instead
+     */
+    @Deprecated
+    public long getEarliestNetworkRequestTime() {
+        return 0;
     }
 
     ApproovPinningInterceptor getPinningInterceptor() {
@@ -1098,6 +1187,7 @@ public class ApproovService extends ReactContextBaseJavaModule {
                 initialConfig = config;
                 isInitialized = true;
             }
+            notifyPinChangeListeners();
             if (isApproovEnabled()) {
                 Approov.setUserProperty("approov-react-native");
                 log(LOG_INFO, TAG, "initialized on deviceID " + Approov.getDeviceID());

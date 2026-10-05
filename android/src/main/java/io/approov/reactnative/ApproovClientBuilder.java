@@ -28,7 +28,8 @@ import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 
 // ApproovClientBuilder is a custom client building for OkHttp to add Approov protection, including dynamic pinning
-public class ApproovClientBuilder implements CustomClientBuilder {
+@SuppressWarnings("deprecation")
+public class ApproovClientBuilder implements CustomClientBuilder, ApproovService.PinChangeListener {
     // interceptor for adding Approov tokens or substituting headers and/or query parameters;
     // null once retired
     private volatile Interceptor interceptor;
@@ -77,6 +78,16 @@ public class ApproovClientBuilder implements CustomClientBuilder {
     void retire() {
         interceptor = null;
         pinningInterceptor = null;
+    }
+
+    /**
+     * Formerly rebuilt this builder's pinner. Every client now shares the service's pin state.
+     *
+     * @deprecated there is nothing to rebuild
+     */
+    @Deprecated
+    @Override
+    public void approovPinsUpdated() {
     }
 
     @Override

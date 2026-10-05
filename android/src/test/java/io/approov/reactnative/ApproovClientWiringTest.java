@@ -123,4 +123,19 @@ public class ApproovClientWiringTest {
     public void everyServiceSharesOnePinningInterceptor() {
         assertSame(service.getPinningInterceptor(), new ApproovService(context).getPinningInterceptor());
     }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    public void deprecatedPinChangeApiStillCompilesAndIsCalledOnARefresh() {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        ApproovService.PinChangeListener listener = calls::incrementAndGet;
+        service.addPinChangeListener(listener);
+        assertEquals(java.util.Collections.singletonList(listener), service.getPinChangeListeners());
+
+        service.rebuildPins();
+        assertEquals(1, calls.get());
+        service.setEarliestNetworkRequestTime();
+        assertEquals(0, service.getEarliestNetworkRequestTime());
+        new ApproovClientBuilder(service, null).approovPinsUpdated();
+    }
 }

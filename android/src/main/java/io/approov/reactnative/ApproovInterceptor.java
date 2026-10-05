@@ -175,9 +175,7 @@ public class ApproovInterceptor implements Interceptor {
         }
 
         if (!approovService.isApproovEnabled()) {
-            // INFO (was DEBUG): bypass mode is security-relevant and should be visible in
-            // production logs, matching the iOS layer. Message kept identical across platforms.
-            ApproovService.log(ApproovService.LOG_INFO, TAG, "Approov disabled (bypass mode) - forwarding request unprotected: " + url);
+            approovService.logBypassForward(TAG, url);
             return request;
         }
 
@@ -249,13 +247,11 @@ public class ApproovInterceptor implements Interceptor {
             request = request.newBuilder().header(traceIDHeader, traceID).build();
         }
 
-        // log the request mutation result (matches iOS "task mutation" log at INFO level).
-        // Routed through the service's level-gated logger so it honours setLogLevel and is
-        // suppressed below INFO, matching the iOS ApproovLogI behaviour — rather than
-        // writing to android.util.Log unconditionally for every request.
+        // log the request mutation result (matches the iOS "task mutation" line); per-request
+        // detail is DEBUG on both platforms
         String tokenAfter = request.header(tokenHeaderKey);
         String traceAfter = (traceIDHeader != null) ? request.header(traceIDHeader) : null;
-        ApproovService.log(ApproovService.LOG_INFO, TAG, "request mutation " + url
+        ApproovService.log(ApproovService.LOG_DEBUG, TAG, "request mutation " + url
                 + " token=" + headerState(tokenBefore) + "->" + headerState(tokenAfter)
                 + " trace=" + headerState(traceAfter));
 

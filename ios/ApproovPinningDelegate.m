@@ -341,7 +341,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
       [_originalDelegate respondsToSelector:@selector
                          (URLSession:
                                 task:didReceiveChallenge:completionHandler:)]) {
-    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to task "
+    ApproovLogD(@"ApproovService forwarding %@ challenge for %@ to task "
                 @"delegate %@",
                 challengeType, host, delegateClassName);
     id<NSURLSessionTaskDelegate> taskDelegate =
@@ -355,7 +355,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
 
   if ([_originalDelegate respondsToSelector:@selector
                          (URLSession:didReceiveChallenge:completionHandler:)]) {
-    ApproovLogI(@"ApproovService forwarding %@ challenge for %@ to session "
+    ApproovLogD(@"ApproovService forwarding %@ challenge for %@ to session "
                 @"delegate %@",
                 challengeType, host, delegateClassName);
     [_originalDelegate URLSession:session
@@ -364,7 +364,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     return;
   }
 
-  ApproovLogI(@"ApproovService no original delegate challenge handler for %@ "
+  ApproovLogD(@"ApproovService no original delegate challenge handler for %@ "
               @"on %@, using default handling",
               challengeType, host);
   completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
@@ -389,7 +389,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *authMethod =
       challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
-  ApproovLogI(@"ApproovService received task challenge %@ for %@", authMethod,
+  ApproovLogD(@"ApproovService received task challenge %@ for %@", authMethod,
               host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
@@ -409,7 +409,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     }
 
     if (![self shouldPinForChallenge:challenge task:dataTask]) {
-      ApproovLogI(@"pinning skipped by the service mutator for %@", host);
+      ApproovLogD(@"pinning skipped by the service mutator for %@", host);
       [self forwardChallengeToOriginalDelegateForSession:session
                                                     task:dataTask
                                                challenge:challenge
@@ -432,7 +432,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogI(@"ApproovService pinning allowed connection to %@, chaining "
+      ApproovLogD(@"ApproovService pinning allowed connection to %@, chaining "
                   @"server-trust challenge to original delegate",
                   host);
       [self forwardChallengeToOriginalDelegateForSession:session
@@ -470,7 +470,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
   NSString *host = challenge.protectionSpace.host ?: @"<unknown>";
   NSString *authMethod =
       challenge.protectionSpace.authenticationMethod ?: @"<unknown>";
-  ApproovLogI(@"ApproovService received session challenge %@ for %@",
+  ApproovLogD(@"ApproovService received session challenge %@ for %@",
               authMethod, host);
   if ([challenge.protectionSpace.authenticationMethod
           isEqualToString:NSURLAuthenticationMethodServerTrust]) {
@@ -490,7 +490,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
     }
 
     if (![self shouldPinForChallenge:challenge task:nil]) {
-      ApproovLogI(@"pinning skipped by the service mutator for %@ (session-level)",
+      ApproovLogD(@"pinning skipped by the service mutator for %@ (session-level)",
                   host);
       [self forwardChallengeToOriginalDelegateForSession:session
                                                     task:nil
@@ -516,7 +516,7 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
       completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge,
                         NULL);
     } else {
-      ApproovLogI(@"ApproovService pinning allowed connection to %@ "
+      ApproovLogD(@"ApproovService pinning allowed connection to %@ "
                   @"(session-level), chaining server-trust challenge to "
                   @"original delegate",
                   host);
@@ -636,7 +636,9 @@ static NSString *_Nullable ApproovHeaderLookup(NSDictionary<NSString *, NSString
           completionHandler(nil);
           return;
         }
-        ApproovLogD(@"redirect %@ -> %@ reprocessed", previous.URL, prepared.URL);
+        // previous.URL may carry substituted secure strings, so log only its host; clean.URL
+        // holds the app's placeholders
+        ApproovLogD(@"redirect from %@ -> %@ reprocessed", previous.URL.host, clean.URL);
         completionHandler(prepared);
       };
       NSOperationQueue *queue = session.delegateQueue;

@@ -5,14 +5,18 @@ import path from 'path';
 import withApproov, {
   ACCOUNT_ID_ENV,
   assertAccountId,
+  DEFAULT_IOS_VERSION,
+  IOS_POD_NAME,
   ACCOUNT_ID_META_DATA,
   INIT_COMMENT_META_DATA,
   INFO_PLIST_ACCOUNT_ID,
   INFO_PLIST_INIT_COMMENT,
   modifyAndroidManifest,
   modifyAppBuildGradle,
+  modifyAppDelegate,
   modifyInfoPlist,
   modifyMainApplication,
+  modifyPodfile,
   modifyProjectBuildGradle,
   modifySettingsGradle,
   resolveProps,
@@ -23,20 +27,34 @@ import withApproov, {
 const TEST_ID = 'test-account-id-not-real';
 const fixture = (name: string) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const sdk55 = (name: string) => fixture(path.join('sdk55', name));
+const sdk58 = (name: string) => fixture(path.join('sdk58', name));
+const sdk52 = (name: string) => fixture(path.join('sdk52', name));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'approov-plugin-'));
 const projectRoot = path.join(tmp, 'app');
 const androidDir = path.join(projectRoot, 'android');
 const gradlePluginDir = path.join(tmp, 'approov-service-android', 'approov-gradle-plugin');
 const testRepoDir = path.join(tmp, 'approov-service-android', 'approov-service', 'build', 'test-maven-repository');
+const iosDir = path.join(projectRoot, 'ios');
+const iosPodDir = path.join(tmp, 'approov-service-ios');
 fs.mkdirSync(androidDir, { recursive: true });
 fs.mkdirSync(gradlePluginDir, { recursive: true });
 fs.writeFileSync(path.join(gradlePluginDir, 'settings.gradle'), "rootProject.name = 'approov-gradle-plugin'\n");
 fs.mkdirSync(testRepoDir, { recursive: true });
+fs.mkdirSync(iosDir, { recursive: true });
+fs.mkdirSync(iosPodDir, { recursive: true });
+fs.writeFileSync(path.join(iosPodDir, 'approov-service-ios.podspec'), '# test podspec\n');
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const resolve = (props: Record<string, unknown> = {}, env: Record<string, string> = {}): ResolvedProps =>
   resolveProps({ accountId: TEST_ID, ...props }, env, projectRoot);
+
+const syntheticConfig = (size: number) => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let out = '';
+  for (let i = 0; i < size; i++) out += alphabet[(i * 7 + 3) % alphabet.length];
+  return out;
+};
 
 const twice = <T>(fn: (input: T) => T, input: T) => fn(fn(input));
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
@@ -80,7 +98,34 @@ describe('resolveProps', () => {
         gradlePluginPath: undefined,
         cronetDependencyPackages: undefined,
       },
+      ios: { version: DEFAULT_IOS_VERSION, podPath: undefined },
     });
+    expect(DEFAULT_IOS_VERSION).toBe('1.0.0');
+    expect(IOS_POD_NAME).toBe('approov-service-ios');
+  });
+
+  it('accepts a full SDK config string as long as an account ID, unchanged', () => {
+    // synthetic: base64-alphabet ASCII of the size of an `approov sdk -getConfig` string, not a real config
+    const long = syntheticConfig(12 * 1024);
+    expect(resolve({ accountId: long }).accountId).toBe(long);
+    expect(resolveProps({}, { [ACCOUNT_ID_ENV]: long }, projectRoot).accountId).toBe(long);
+  });
+
+  it('resolves the iOS pod version or a local pod path', () => {
+    expect(resolve({ ios: { version: '1.2.3' } }).ios).toEqual({ version: '1.2.3', podPath: undefined });
+    const r = resolve({ ios: { podPath: path.relative(projectRoot, iosPodDir) } });
+    expect(r.ios).toEqual({ version: DEFAULT_IOS_VERSION, podPath: iosPodDir });
+  });
+
+  it('rejects malformed iOS options', () => {
+    expect(() => resolve({ ios: 'x' })).toThrow(/"ios" must be an object/);
+    expect(() => resolve({ ios: { version: '1 0' } })).toThrow(/ios.version/);
+    expect(() => resolve({ ios: { podPath: './nowhere' } })).toThrow(/ios.podPath/);
+    expect(() => resolve({ ios: { podPath: path.relative(projectRoot, gradlePluginDir) } })).toThrow(
+      /approov-service-ios.podspec/,
+    );
+    expect(() => resolve({ ios: { version: '1.0.0', podPath: iosPodDir } })).toThrow(/not both/);
+    expect(() => resolve({ ios: { podspec: 'x' } })).toThrow(/unknown option "ios.podspec"/);
   });
 
   it('fails with a clear message when the account ID is missing', () => {
@@ -325,6 +370,14 @@ describe('AndroidManifest.xml', () => {
     expect(metaData(m2)).toEqual([]);
   });
 
+  it('writes a 12 KB config string unchanged', async () => {
+    const long = syntheticConfig(12 * 1024);
+    const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ accountId: long }));
+    const { XML } = require('@expo/config-plugins');
+    const reparsed = await parseManifest(XML.format(out));
+    expect(metaData(reparsed)).toEqual([{ 'android:name': ACCOUNT_ID_META_DATA, 'android:value': long }]);
+  });
+
   it('renders as expected', async () => {
     const { XML } = require('@expo/config-plugins');
     const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ comment: 'c' }));
@@ -347,6 +400,109 @@ describe('Info.plist', () => {
     const r = resolveProps({ nativeInitialize: false }, {}, projectRoot);
     expect(modifyInfoPlist({ CFBundleName: 'x' }, r)).toEqual({ CFBundleName: 'x' });
   });
+
+  it('writes a 12 KB config string unchanged', () => {
+    const long = syntheticConfig(12 * 1024);
+    expect(modifyInfoPlist({}, resolve({ accountId: long }))[INFO_PLIST_ACCOUNT_ID]).toBe(long);
+  });
+});
+
+describe('Podfile', () => {
+  it('adds the universal iOS pod by version inside the app target, once', () => {
+    const out = twice((s: string) => modifyPodfile(s, resolve(), iosDir), sdk55('Podfile'));
+    expect(count(out, "pod 'approov-service-ios'")).toBe(1);
+    expect(out).toContain(`pod 'approov-service-ios', '${DEFAULT_IOS_VERSION}'`);
+    const lines = out.split('\n');
+    const pod = lines.findIndex((l) => l.includes("pod 'approov-service-ios'"));
+    expect(pod).toBeGreaterThan(lines.findIndex((l) => l.includes('use_expo_modules!')));
+    expect(pod).toBeLessThan(lines.findIndex((l) => l.includes('use_native_modules!')));
+    expect(out).toMatchSnapshot();
+  });
+
+  it('adds a local development pod by path, relative to the ios directory', () => {
+    const out = modifyPodfile(sdk55('Podfile'), resolve({ ios: { podPath: iosPodDir } }), iosDir);
+    expect(out).toContain(`pod 'approov-service-ios', :path => '${path.relative(iosDir, iosPodDir)}'`);
+    expect(out).not.toContain(`'${DEFAULT_IOS_VERSION}'`);
+  });
+
+  it('replaces a previous entry when the option changes', () => {
+    const once = modifyPodfile(sdk55('Podfile'), resolve(), iosDir);
+    const out = modifyPodfile(once, resolve({ ios: { version: '1.0.1' } }), iosDir);
+    expect(count(out, "pod 'approov-service-ios'")).toBe(1);
+    expect(out).toContain("pod 'approov-service-ios', '1.0.1'");
+  });
+
+  it('adds the pod with nativeInitialize false too, the layer is needed for JavaScript initialization', () => {
+    const r = resolveProps({ nativeInitialize: false }, {}, projectRoot);
+    expect(modifyPodfile(sdk55('Podfile'), r, iosDir)).toContain("pod 'approov-service-ios'");
+  });
+
+  it('fails clearly on a Podfile without a target block', () => {
+    expect(() => modifyPodfile("platform :ios, '15.1'\n", resolve(), iosDir)).toThrow(/no "target \.\.\. do" block/);
+  });
+});
+
+describe('AppDelegate', () => {
+  const initCall = 'try ApproovService.initialize(approovAccountId, comment: approovComment)';
+
+  it('initializes Approov in the SDK 55 Swift AppDelegate before React Native starts', () => {
+    const out = modifyAppDelegate(sdk55('AppDelegate.swift'), 'swift', resolve());
+    const init = out.indexOf(initCall);
+    expect(init).toBeGreaterThan(out.indexOf('didFinishLaunchingWithOptions launchOptions'));
+    expect(init).toBeLessThan(out.indexOf('ExpoReactNativeFactory(delegate: delegate)'));
+    expect(init).toBeLessThan(out.indexOf('factory.startReactNative('));
+    expect(init).toBeLessThan(out.indexOf('return super.application(application, didFinishLaunchingWithOptions'));
+    // imported once, after the template's own imports
+    expect(count(out, 'import ApproovService')).toBe(1);
+    expect(out.indexOf('import ApproovService')).toBeGreaterThan(out.indexOf('import ReactAppDependencyProvider'));
+    expect(out.indexOf('import ApproovService')).toBeLessThan(out.indexOf('@main'));
+    // read from Info.plist, never inlined
+    expect(out).toContain(`Bundle.main.object(forInfoDictionaryKey: "${INFO_PLIST_ACCOUNT_ID}")`);
+    expect(out).toContain(`Bundle.main.object(forInfoDictionaryKey: "${INFO_PLIST_INIT_COMMENT}")`);
+    expect(out).not.toContain(TEST_ID);
+    // guarded: only the error type is logged, then bypass mode (TESTING_REQUIREMENTS 9.3)
+    expect(out).toContain('} catch {');
+    expect(out).toContain('type(of: error)');
+    expect(out).not.toMatch(/\\\(error\)|localizedDescription/);
+    expect(out).toContain('try? ApproovService.initialize("")');
+    expect(out).toContain('ApproovService.isApproovServiceEnabled()');
+    expect(out).toContain('ApproovService.isApproovProtectionEnabled()');
+    expect(out).toMatchSnapshot();
+  });
+
+  it('initializes Approov in the SDK 58 Swift AppDelegate (React Native started by the SceneDelegate)', () => {
+    const out = modifyAppDelegate(sdk58('AppDelegate.swift'), 'swift', resolve());
+    const init = out.indexOf(initCall);
+    expect(init).toBeGreaterThan(out.indexOf('didFinishLaunchingWithOptions launchOptions'));
+    expect(init).toBeLessThan(out.indexOf('ExpoReactNativeFactory(delegate: delegate)'));
+    expect(init).toBeLessThan(out.indexOf('return super.application('));
+  });
+
+  it('is idempotent', () => {
+    const once = modifyAppDelegate(sdk55('AppDelegate.swift'), 'swift', resolve());
+    expect(modifyAppDelegate(once, 'swift', resolve())).toBe(once);
+  });
+
+  it('is unchanged with nativeInitialize false, and removes a previous insertion', () => {
+    const r = resolve({ nativeInitialize: false });
+    expect(modifyAppDelegate(sdk55('AppDelegate.swift'), 'swift', r)).toBe(sdk55('AppDelegate.swift'));
+    const once = modifyAppDelegate(sdk55('AppDelegate.swift'), 'swift', resolve());
+    expect(modifyAppDelegate(once, 'swift', r)).toBe(sdk55('AppDelegate.swift'));
+  });
+
+  it('fails clearly on the Objective-C AppDelegate of Expo SDK 52 and earlier unless nativeInitialize is false', () => {
+    expect(() => modifyAppDelegate(sdk52('AppDelegate.mm'), 'objcpp', resolve())).toThrow(/Objective-C AppDelegate/);
+    expect(() => modifyAppDelegate(sdk52('AppDelegate.mm'), 'objcpp', resolve())).toThrow(/nativeInitialize/);
+    expect(modifyAppDelegate(sdk52('AppDelegate.mm'), 'objcpp', resolve({ nativeInitialize: false }))).toBe(
+      sdk52('AppDelegate.mm'),
+    );
+  });
+
+  it('fails clearly without application(_:didFinishLaunchingWithOptions:)', () => {
+    expect(() => modifyAppDelegate('import UIKit\nclass AppDelegate {}\n', 'swift', resolve())).toThrow(
+      /didFinishLaunchingWithOptions/,
+    );
+  });
 });
 
 describe('withApproov', () => {
@@ -357,7 +513,7 @@ describe('withApproov', () => {
     expect(Object.keys(config.mods.android).sort()).toEqual(
       ['appBuildGradle', 'mainApplication', 'manifest', 'projectBuildGradle', 'settingsGradle'].sort(),
     );
-    expect(Object.keys(config.mods.ios)).toEqual(['infoPlist']);
+    expect(Object.keys(config.mods.ios).sort()).toEqual(['appDelegate', 'infoPlist', 'podfile']);
   });
 
   it('reads the config without an account ID, so expo config and the expo-constants build step work', () => {

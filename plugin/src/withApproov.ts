@@ -7,7 +7,9 @@
  * source build with gradlePluginPath), applies it right after com.android.application, adds the
  * universal library, optionally configures approov.cronetDependencyPackages, writes the account ID to
  * the manifest meta-data and inserts a guarded native ApproovService.initialize in MainApplication.
- * iOS: writes the account ID to Info.plist only (native iOS initialization is not inserted yet).
+ * iOS: adds the universal iOS pod (approov-service-ios, by version or from a local path) to the Podfile,
+ * writes the account ID to Info.plist and inserts a guarded native ApproovService.initialize at the start
+ * of application(_:didFinishLaunchingWithOptions:) in the Swift AppDelegate (Expo SDK 53 and later).
  *
  * Every generated block is tagged, so running prebuild again replaces it rather than duplicating it.
  */
@@ -21,8 +23,10 @@ import {
   InfoPlist,
   withAndroidManifest,
   withAppBuildGradle,
+  withAppDelegate,
   withInfoPlist,
   withMainApplication,
+  withPodfile,
   withProjectBuildGradle,
   withSettingsGradle,
 } from '@expo/config-plugins';
@@ -42,6 +46,11 @@ export const DEFAULT_ANDROID_VERSION = '3.8.0';
 export const SERVICE_ARTIFACT = 'io.approov:service.android';
 export const GRADLE_PLUGIN_ARTIFACT = 'io.approov:service.android-gradle-plugin';
 const APPROOV_GROUP = 'io.approov';
+
+// The universal iOS layer (approov-service-ios), as a CocoaPods pod. Its version is independent of the
+// Android one. Until the pod is published (or vendored into this package's pod, D2), use ios.podPath.
+export const IOS_POD_NAME = 'approov-service-ios';
+export const DEFAULT_IOS_VERSION = '1.0.0';
 const LOG_TAG = 'ApproovInit';
 
 export type AndroidProps = {
@@ -58,14 +67,22 @@ export type AndroidProps = {
   cronetDependencyPackages?: string[];
 };
 
+export type IosProps = {
+  /** Version of the approov-service-ios pod (default 1.0.0). */
+  version?: string;
+  /** Local development: the approov-service-ios source directory (with its podspec), used as a :path pod. */
+  podPath?: string;
+};
+
 export type ApproovPluginProps = {
   /** The Approov account ID; else the APPROOV_ACCOUNT_ID environment variable at prebuild. */
   accountId?: string;
   /** Initialization comment passed to the SDK unchanged; null (default) for none. */
   comment?: string | null;
-  /** Insert native initialization in MainApplication (default true). */
+  /** Insert native initialization in MainApplication and AppDelegate (default true). */
   nativeInitialize?: boolean;
   android?: AndroidProps;
+  ios?: IosProps;
 };
 
 type KeywordRepository = 'mavenCentral' | 'mavenLocal' | 'google' | 'gradlePluginPortal';
@@ -83,10 +100,15 @@ export type ResolvedProps = {
     gradlePluginPath?: string;
     cronetDependencyPackages?: string[];
   };
+  ios: {
+    version: string;
+    podPath?: string;
+  };
 };
 
 const KEYWORD_REPOSITORIES: KeywordRepository[] = ['mavenCentral', 'mavenLocal', 'google', 'gradlePluginPortal'];
-const TOP_LEVEL_KEYS = ['accountId', 'comment', 'nativeInitialize', 'android'];
+const TOP_LEVEL_KEYS = ['accountId', 'comment', 'nativeInitialize', 'android', 'ios'];
+const IOS_KEYS = ['version', 'podPath'];
 const ANDROID_KEYS = [
   'version',
   'repositories',
@@ -204,6 +226,21 @@ export function resolveProps(
     cronetDependencyPackages = list as string[];
   }
 
+  const i = p.ios === undefined ? {} : p.ios;
+  if (!isPlainObject(i)) fail('"ios" must be an object');
+  checkKeys(i, IOS_KEYS, 'ios.');
+  if (i.version !== undefined && (typeof i.version !== 'string' || !VERSION.test(i.version))) {
+    fail('"ios.version" must be a version string such as 1.0.0');
+  }
+  if (i.version !== undefined && i.podPath !== undefined) fail('set "ios.version" or "ios.podPath", not both');
+  let podPath: string | undefined;
+  if (i.podPath !== undefined) {
+    podPath = resolveDirectory('ios.podPath', i.podPath, projectRoot);
+    if (!fs.existsSync(path.join(podPath, `${IOS_POD_NAME}.podspec`))) {
+      fail(`"ios.podPath" ${podPath} has no ${IOS_POD_NAME}.podspec`);
+    }
+  }
+
   return {
     accountId,
     comment,
@@ -215,6 +252,10 @@ export function resolveProps(
       repositories,
       gradlePluginPath,
       cronetDependencyPackages,
+    },
+    ios: {
+      version: typeof i.version === 'string' ? i.version : DEFAULT_IOS_VERSION,
+      podPath,
     },
   };
 }
@@ -499,7 +540,7 @@ export function modifyMainApplication(src: string, language: string, props: Reso
 // ---------------------------------------------------------------------------------------------
 // iOS
 
-/** Info.plist: the account ID (and comment). Native iOS initialization is not inserted yet. */
+/** Info.plist: the account ID (and comment), read by the native initialization in the AppDelegate. */
 export function modifyInfoPlist(plist: InfoPlist, props: ResolvedProps): InfoPlist {
   const out: InfoPlist = { ...plist };
   delete out[INFO_PLIST_ACCOUNT_ID];
@@ -509,6 +550,94 @@ export function modifyInfoPlist(plist: InfoPlist, props: ResolvedProps): InfoPli
     if (props.comment !== null) out[INFO_PLIST_INIT_COMMENT] = props.comment;
   }
   return out;
+}
+
+
+/** Ruby single-quoted string literal. */
+const rubyString = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+
+/**
+ * ios/Podfile: the universal iOS layer as a pod in the app target, from a local path (ios.podPath) or by
+ * version. Added with nativeInitialize false too: JavaScript initialization needs the layer as well.
+ */
+export function modifyPodfile(src: string, props: ResolvedProps, iosDir: string): string {
+  const tag = 'approov-pod';
+  const out = removeBlock(src, tag, '#');
+  const lines = out.split('\n');
+  const expoModules = findAfter(lines, 0, /^\s*use_expo_modules!/);
+  const target = findAfter(lines, 0, /^\s*target\s+['"].+['"]\s+do\s*$/);
+  if (target < 0) fail(`ios/Podfile: no "target ... do" block to add the ${IOS_POD_NAME} pod to`);
+  const after = expoModules > target ? expoModules : target;
+  const source = props.ios.podPath
+    ? `:path => ${rubyString(path.relative(iosDir, props.ios.podPath).split(path.sep).join('/'))}`
+    : rubyString(props.ios.version);
+  insertBlock(
+    lines,
+    after + 1,
+    tag,
+    ['# Approov: the universal iOS service layer (one approov-ios-sdk for every Approov pod)', `pod ${rubyString(IOS_POD_NAME)}, ${source}`],
+    expoModules > target ? indentOf(lines[expoModules]) : indentOf(lines[target]) + '  ',
+    '#',
+  );
+  return lines.join('\n');
+}
+
+function swiftInit(): string[] {
+  const log = (msg: string) => `NSLog("%@", "${LOG_TAG}: ${msg}")`;
+  return [
+    '// Approov: initialize the universal iOS layer before React Native starts, with the account ID',
+    `// the ${pkg.name} config plugin wrote to Info.plist. A missing or rejected`,
+    '// account ID is logged and the app continues in bypass mode, without Approov protection.',
+    'do {',
+    `  let approovAccountId = Bundle.main.object(forInfoDictionaryKey: "${INFO_PLIST_ACCOUNT_ID}") as? String ?? ""`,
+    '  if approovAccountId.isEmpty {',
+    `    ${log(`No Approov account ID in Info.plist ${INFO_PLIST_ACCOUNT_ID}: ${BYPASS_NOTE}`)}`,
+    '    try ApproovService.initialize("")',
+    '  } else {',
+    `    let approovComment = Bundle.main.object(forInfoDictionaryKey: "${INFO_PLIST_INIT_COMMENT}") as? String`,
+    '    try ApproovService.initialize(approovAccountId, comment: approovComment)',
+    '  }',
+    '} catch {',
+    `  ${log(`Approov initialization failed (\\(String(reflecting: type(of: error)))): ${BYPASS_NOTE}`)}`,
+    '  try? ApproovService.initialize("")',
+    '}',
+    `NSLog("%@", "${LOG_TAG}: Approov service enabled=\\(ApproovService.isApproovServiceEnabled()) " +`,
+    '  "protection enabled=\\(ApproovService.isApproovProtectionEnabled())")',
+  ];
+}
+
+/**
+ * AppDelegate: `import ApproovService` and a guarded native initialize as the first statements of
+ * application(_:didFinishLaunchingWithOptions:), before the React Native factory is created. Swift only
+ * (Expo SDK 53 and later); the Objective-C AppDelegate of SDK 52 and earlier cannot call the Swift-only
+ * universal API and fails with a clear message unless nativeInitialize is false.
+ */
+export function modifyAppDelegate(src: string, language: string, props: ResolvedProps): string {
+  const importTag = 'approov-import';
+  const initTag = 'approov-initialize';
+  const out = removeBlock(removeBlock(src, importTag), initTag);
+  if (!props.nativeInitialize) return out;
+  if (language !== 'swift') {
+    fail(
+      `native iOS initialization needs a Swift AppDelegate (Expo SDK 53 and later); this project has an ` +
+        `Objective-C AppDelegate (${language}). Set "nativeInitialize": false and initialize Approov from ` +
+        'JavaScript, or call ApproovService.initialize from Swift by hand.',
+    );
+  }
+  const lines = out.split('\n');
+  const signature = findAfter(lines, 0, /didFinishLaunchingWithOptions\s+launchOptions/);
+  const bodyOpen = signature < 0 ? -1 : findAfter(lines, signature, /\)\s*->\s*Bool\s*\{\s*$/);
+  if (bodyOpen < 0) fail('AppDelegate: no application(_:didFinishLaunchingWithOptions:) to insert Approov initialization in');
+  const firstStatement = findAfter(lines, bodyOpen + 1, /\S/);
+  const indent = firstStatement < 0 ? indentOf(lines[bodyOpen]) + '  ' : indentOf(lines[firstStatement]);
+  insertBlock(lines, bodyOpen + 1, initTag, swiftInit(), indent);
+
+  let lastImport = -1;
+  for (let i = 0; i < lines.length && i < signature; i++) {
+    if (/^\s*(@\w+\s+)*((public|internal|private|fileprivate|package)\s+)?import\s+\w/.test(lines[i])) lastImport = i;
+  }
+  insertBlock(lines, lastImport + 1, importTag, ['import ApproovService'], '');
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -546,6 +675,15 @@ const withApproov: ConfigPlugin<ApproovPluginProps | void> = (config, props) => 
   config = withInfoPlist(config, (c) => {
     assertAccountId(resolved);
     c.modResults = modifyInfoPlist(c.modResults, resolved);
+    return c;
+  });
+  config = withPodfile(config, (c) => {
+    c.modResults.contents = modifyPodfile(c.modResults.contents, resolved, c.modRequest.platformProjectRoot);
+    return c;
+  });
+  config = withAppDelegate(config, (c) => {
+    assertAccountId(resolved);
+    c.modResults.contents = modifyAppDelegate(c.modResults.contents, c.modResults.language, resolved);
     return c;
   });
   return config;

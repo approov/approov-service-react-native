@@ -125,6 +125,9 @@ const ANDROID_KEYS = [
   'cronetDependencyPackages',
 ];
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9_.+-]*$/;
+// Gradle dynamic versions: the library and the Gradle plugin must resolve to one exact release
+const DYNAMIC_VERSION = /\+|^latest\./;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const JAVA_PACKAGE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 function fail(message: string): never {
@@ -193,13 +196,17 @@ export function resolveProps(
   if (requireAccountId && accountId === undefined && nativeInitialize) failMissingAccountId();
   if (accountId !== undefined) {
     if (/[<>]/.test(accountId)) fail('"accountId" is still the placeholder: set your Approov account ID');
-    if (/\s/.test(accountId)) fail('"accountId" must not contain whitespace');
+    if (/\s/.test(accountId) || CONTROL_CHARACTERS.test(accountId)) {
+      fail('"accountId" must not contain whitespace or control characters');
+    }
   }
 
   if (p.comment !== undefined && p.comment !== null && typeof p.comment !== 'string') {
     fail('"comment" must be a string or null');
   }
   const comment = typeof p.comment === 'string' ? p.comment : null;
+  // a newline or tab would not reach the SDK unchanged through every native file format
+  if (comment !== null && CONTROL_CHARACTERS.test(comment)) fail('"comment" must not contain control characters');
 
   const a = p.android === undefined ? {} : p.android;
   if (!isPlainObject(a)) fail('"android" must be an object');
@@ -207,6 +214,9 @@ export function resolveProps(
 
   if (a.version !== undefined && (typeof a.version !== 'string' || !VERSION.test(a.version))) {
     fail('"android.version" must be a version string such as 3.8.0');
+  }
+  if (typeof a.version === 'string' && DYNAMIC_VERSION.test(a.version)) {
+    fail('"android.version" must be an exact version such as 3.8.0, not a dynamic one ("+" or "latest.")');
   }
   const version = typeof a.version === 'string' ? a.version : DEFAULT_ANDROID_VERSION;
 
@@ -453,19 +463,37 @@ export function modifyAppBuildGradle(src: string, props: ResolvedProps): string 
 // ---------------------------------------------------------------------------------------------
 // Android: manifest and MainApplication
 
+export const PERMISSIONS = ['android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE'];
+
+/**
+ * A meta-data android:value that aapt2 compiles to exactly `value` as a string. aapt2 stores a value that
+ * looks like an integer, boolean, color, float or resource reference as that type ("007" becomes 7, "#fff"
+ * a color, "@null" null, "@string/x" a reference that fails the build) and processes backslash escapes, so
+ * the native init would read something else. Every backslash is doubled, and an ASCII first character is
+ * written as a \uXXXX escape, which no typed value starts with and which aapt2 decodes.
+ */
+export function encodeManifestValue(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\');
+  const first = value.charCodeAt(0);
+  if (value === '' || first >= 0x80) return escaped;
+  return `\\u${first.toString(16).padStart(4, '0')}${escaped.slice(first === 0x5c ? 2 : 1)}`;
+}
+
 /** AndroidManifest.xml: the account ID (and comment) as application meta-data, read by the native init. */
 export function modifyAndroidManifest(
   manifest: AndroidConfig.Manifest.AndroidManifest,
   props: ResolvedProps,
 ): AndroidConfig.Manifest.AndroidManifest {
+  // required by the package, whichever way it is initialized (the Approov SDK does not declare them)
+  AndroidConfig.Permissions.ensurePermissions(manifest, PERMISSIONS);
   const app = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest);
   if (props.accountId !== undefined) {
-    AndroidConfig.Manifest.addMetaDataItemToMainApplication(app, ACCOUNT_ID_META_DATA, props.accountId);
+    AndroidConfig.Manifest.addMetaDataItemToMainApplication(app, ACCOUNT_ID_META_DATA, encodeManifestValue(props.accountId));
   } else {
     AndroidConfig.Manifest.removeMetaDataItemFromMainApplication(app, ACCOUNT_ID_META_DATA);
   }
   if (props.accountId !== undefined && props.comment !== null) {
-    AndroidConfig.Manifest.addMetaDataItemToMainApplication(app, INIT_COMMENT_META_DATA, props.comment);
+    AndroidConfig.Manifest.addMetaDataItemToMainApplication(app, INIT_COMMENT_META_DATA, encodeManifestValue(props.comment));
   } else {
     AndroidConfig.Manifest.removeMetaDataItemFromMainApplication(app, INIT_COMMENT_META_DATA);
   }
@@ -553,14 +581,20 @@ export function modifyMainApplication(src: string, language: string, props: Reso
 // ---------------------------------------------------------------------------------------------
 // iOS
 
+/**
+ * An Info.plist string that the built app reads back as exactly `value`: Xcode expands $(X), ${X} and $X in
+ * Info.plist values (an undefined setting to nothing) and turns $$ into $, so every $ is doubled.
+ */
+export const encodeInfoPlistValue = (value: string) => value.split('$').join('$$');
+
 /** Info.plist: the account ID (and comment), read by the native initialization in the AppDelegate. */
 export function modifyInfoPlist(plist: InfoPlist, props: ResolvedProps): InfoPlist {
   const out: InfoPlist = { ...plist };
   delete out[INFO_PLIST_ACCOUNT_ID];
   delete out[INFO_PLIST_INIT_COMMENT];
   if (props.accountId !== undefined) {
-    out[INFO_PLIST_ACCOUNT_ID] = props.accountId;
-    if (props.comment !== null) out[INFO_PLIST_INIT_COMMENT] = props.comment;
+    out[INFO_PLIST_ACCOUNT_ID] = encodeInfoPlistValue(props.accountId);
+    if (props.comment !== null) out[INFO_PLIST_INIT_COMMENT] = encodeInfoPlistValue(props.comment);
   }
   return out;
 }

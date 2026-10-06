@@ -7,6 +7,8 @@ import withApproov, {
   assertAccountId,
   DEFAULT_IOS_SDK_VERSION,
   DEFAULT_IOS_VERSION,
+  encodeInfoPlistValue,
+  encodeManifestValue,
   IOS_POD_NAME,
   ACCOUNT_ID_META_DATA,
   INIT_COMMENT_META_DATA,
@@ -86,6 +88,24 @@ const withoutEnvAccountId = async (fn: () => Promise<void>) => {
   }
 };
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+
+/** Comments that aapt2 would change without escaping, and a few that it would not. */
+const COMMENTS = ['expo-native', '007', 'true', 'FALSE', '1e5', '0x1F', '-1', '#fff', '@null', '@string/x', '?attr',
+  'a\\b', '\\n', '\\u0041', ' lead', 'trail ', "it's", 'say "hi"', '$x $(Y)', 'é', '😀x', 'options:x', ''];
+/** aapt2's processing of a string attribute value: backslash escapes. */
+const decodeAapt = (v: string) =>
+  v.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, e: string) =>
+    e[0] === 'u' && e.length === 5 ? String.fromCharCode(parseInt(e.slice(1), 16)) : ({ n: '\n', t: '\t' } as any)[e] ?? e,
+  );
+const ANDROID_SDK = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, path.join(os.homedir(), 'Library/Android/sdk')]
+  .filter((d): d is string => !!d && fs.existsSync(d))[0];
+const newest = (dir: string | undefined) =>
+  dir && fs.existsSync(dir) ? fs.readdirSync(dir).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop() : undefined;
+const BUILD_TOOLS = ANDROID_SDK && newest(path.join(ANDROID_SDK, 'build-tools'));
+const PLATFORM = ANDROID_SDK && newest(path.join(ANDROID_SDK, 'platforms'));
+const AAPT2 = BUILD_TOOLS && path.join(ANDROID_SDK as string, 'build-tools', BUILD_TOOLS, 'aapt2');
+const ANDROID_JAR = PLATFORM && path.join(ANDROID_SDK as string, 'platforms', PLATFORM, 'android.jar');
+const EMPTY_MANIFEST = { manifest: { $: {}, application: [{ $: { 'android:name': '.MainApplication' } }] } };
 
 const parseManifest = async (xml: string) => {
   const { AndroidConfig } = require('@expo/config-plugins');
@@ -215,6 +235,23 @@ describe('resolveProps', () => {
     expect(() => resolve({ android: { repositories: [] } })).toThrow(/repositories/);
     expect(() => resolve({ android: { repositories: ['./does-not-exist'] } })).toThrow(/does not exist/);
     expect(() => resolve({ android: { gradlePluginPath: './nowhere' } })).toThrow(/gradlePluginPath/);
+  });
+
+  it('rejects control characters in the account ID and the comment', () => {
+    // a newline or tab would not survive every native file format unchanged
+    expect(() => resolve({ accountId: 'abc\u0000def' })).toThrow(/"accountId" must not contain/);
+    expect(() => resolve({ comment: 'line1\nline2' })).toThrow(/"comment" must not contain control characters/);
+    expect(() => resolve({ comment: 'a\tb' })).toThrow(/"comment" must not contain control characters/);
+    expect(() => resolve({ comment: 'a\u007fb' })).toThrow(/"comment" must not contain control characters/);
+    expect(resolve({ comment: 'options:é $x "q" \\' }).comment).toBe('options:é $x "q" \\');
+  });
+
+  it('rejects a dynamic android.version, the library and the Gradle plugin must be one exact release', () => {
+    expect(() => resolve({ android: { version: '3.8.+' } })).toThrow(/android.version.*exact/);
+    expect(() => resolve({ android: { version: '3.+' } })).toThrow(/android.version.*exact/);
+    expect(() => resolve({ android: { version: 'latest.release' } })).toThrow(/android.version.*exact/);
+    expect(resolve({ android: { version: '3.8.0-local' } }).android.version).toBe('3.8.0-local');
+    expect(resolve({ android: { version: '3.8.1-rc.1' } }).android.version).toBe('3.8.1-rc.1');
   });
 
   it('rejects unknown options, so a typo is not silently ignored', () => {
@@ -465,9 +502,10 @@ describe('AndroidManifest.xml', () => {
     const r = resolve({ comment: 'expo-native' });
     const out = twice((m: any) => modifyAndroidManifest(m, r), await parseManifest(sdk55('AndroidManifest.xml')));
     expect(metaData(out)).toEqual([
-      { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': TEST_ID },
-      { 'android:name': INIT_COMMENT_META_DATA, 'android:value': 'expo-native' },
+      { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': encodeManifestValue(TEST_ID) },
+      { 'android:name': INIT_COMMENT_META_DATA, 'android:value': encodeManifestValue('expo-native') },
     ]);
+    expect(metaData(out).map((m: any) => decodeAapt(m['android:value']))).toEqual([TEST_ID, 'expo-native']);
   });
 
   it('removes the meta-data written earlier when the account ID is no longer set', async () => {
@@ -482,13 +520,25 @@ describe('AndroidManifest.xml', () => {
     expect(metaData(out)[1]['android:value']).toBe('');
   });
 
+  it('adds the INTERNET and ACCESS_NETWORK_STATE permissions the package needs, once', async () => {
+    const perms = (m: any) => (m.manifest['uses-permission'] || []).map((p: any) => p.$['android:name']);
+    const src = await parseManifest(sdk55('AndroidManifest.xml'));
+    expect(perms(src)).not.toContain('android.permission.ACCESS_NETWORK_STATE');
+    const out = twice((m: any) => modifyAndroidManifest(m, resolve()), src);
+    expect(perms(out).filter((p: string) => p === 'android.permission.INTERNET')).toHaveLength(1);
+    expect(perms(out).filter((p: string) => p === 'android.permission.ACCESS_NETWORK_STATE')).toHaveLength(1);
+    // also with JavaScript initialization only: the package makes the requests either way
+    const js = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolveProps({ nativeInitialize: false }, {}, projectRoot));
+    expect(perms(js)).toContain('android.permission.ACCESS_NETWORK_STATE');
+  });
+
   it('writes no comment when none is set', async () => {
     const withComment = modifyAndroidManifest(
       await parseManifest(sdk55('AndroidManifest.xml')),
       resolve({ comment: 'old' }),
     );
     expect(metaData(modifyAndroidManifest(withComment, resolve()))).toEqual([
-      { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': TEST_ID },
+      { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': encodeManifestValue(TEST_ID) },
     ]);
   });
 
@@ -505,7 +555,57 @@ describe('AndroidManifest.xml', () => {
     const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ accountId: long }));
     const { XML } = require('@expo/config-plugins');
     const reparsed = await parseManifest(XML.format(out));
-    expect(metaData(reparsed)).toEqual([{ 'android:name': ACCOUNT_ID_META_DATA, 'android:value': long }]);
+    expect(metaData(reparsed)).toEqual([{ 'android:name': ACCOUNT_ID_META_DATA, 'android:value': encodeManifestValue(long) }]);
+    expect(decodeAapt(metaData(reparsed)[0]['android:value'])).toBe(long);
+  });
+
+  it('escapes values so aapt2 keeps them as the exact string', async () => {
+    // aapt2 stores a meta-data value that looks like a number, boolean, color or reference as that type
+    // ("007" becomes 7, "#fff" a color, "@null" null) and drops a lone backslash: the native init would
+    // then pass the SDK a different comment than the one configured, and a JS initialize with the
+    // configured comment would be rejected
+    expect(encodeManifestValue('#your-account#p6nZ+/ab=')).toBe('\\u0023your-account#p6nZ+/ab=');
+    expect(encodeManifestValue('007')).toBe('\\u003007');
+    expect(encodeManifestValue('true')).toBe('\\u0074rue');
+    expect(encodeManifestValue('@null')).toBe('\\u0040null');
+    expect(encodeManifestValue('a\\b')).toBe('\\u0061\\\\b');
+    expect(encodeManifestValue('\\x')).toBe('\\u005cx');
+    expect(encodeManifestValue('é1')).toBe('é1');
+    expect(encodeManifestValue('')).toBe('');
+    for (const v of COMMENTS) expect(decodeAapt(encodeManifestValue(v))).toBe(v);
+    const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ comment: '007' }));
+    expect(metaData(out)).toEqual([
+      { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': encodeManifestValue(TEST_ID) },
+      { 'android:name': INIT_COMMENT_META_DATA, 'android:value': '\\u003007' },
+    ]);
+  });
+
+  (AAPT2 && ANDROID_JAR ? it : it.skip)('compiles with aapt2 to the exact account ID and comment strings', async () => {
+    const { XML } = require('@expo/config-plugins');
+    const values: [string, string][] = [];
+    const app: any = { manifest: { $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android', package: 'com.example.t' }, application: [{ $: {} }] } };
+    const add = (name: string, value: string) => {
+      values.push([name, value]);
+      const written = metaData(modifyAndroidManifest(JSON.parse(JSON.stringify(EMPTY_MANIFEST)), resolve({ accountId: TEST_ID, comment: value })))[1];
+      (app.manifest.application[0]['meta-data'] = app.manifest.application[0]['meta-data'] || []).push({ $: { 'android:name': name, 'android:value': written['android:value'] } });
+    };
+    COMMENTS.forEach((v, i) => add(`c${i}`, v));
+    const config = syntheticConfig(32768);
+    values.push(['id', config]);
+    const ids = metaData(modifyAndroidManifest(JSON.parse(JSON.stringify(EMPTY_MANIFEST)), resolve({ accountId: config })));
+    app.manifest.application[0]['meta-data'].push({ $: { 'android:name': 'id', 'android:value': ids[0]['android:value'] } });
+    const dir = fs.mkdtempSync(path.join(tmp, 'aapt2-'));
+    fs.writeFileSync(path.join(dir, 'AndroidManifest.xml'), XML.format(app));
+    const { execFileSync } = require('child_process');
+    execFileSync(AAPT2, ['link', '-o', path.join(dir, 'out.apk'), '-I', ANDROID_JAR, '--manifest', path.join(dir, 'AndroidManifest.xml')], {
+      stdio: 'pipe',
+    });
+    const dump: string = execFileSync(AAPT2, ['dump', 'xmltree', path.join(dir, 'out.apk'), '--file', 'AndroidManifest.xml'], { encoding: 'utf8', maxBuffer: 1 << 26 });
+    const got = [...dump.matchAll(/android:value\(0x01010024\)=(.*)$/gm)].map(([, v]) => {
+      const str = /^"(.*)" \(Raw: /.exec(v);
+      return str ? str[1] : v === '""' ? '' : `<typed ${v}>`;
+    });
+    expect(got).toEqual(values.map(([, v]) => v));
   });
 
   it('renders as expected', async () => {
@@ -538,6 +638,14 @@ describe('Info.plist', () => {
   it('writes a 12 KB config string unchanged', () => {
     const long = syntheticConfig(12 * 1024);
     expect(modifyInfoPlist({}, resolve({ accountId: long }))[INFO_PLIST_ACCOUNT_ID]).toBe(long);
+  });
+
+  it('escapes $ so Xcode does not expand build settings in the values', () => {
+    // Xcode expands $(X), ${X} and $X in Info.plist strings (undefined ones to nothing) and turns $$ into $
+    expect(encodeInfoPlistValue('options:$(PRODUCT_NAME) ${X} $Y $$')).toBe('options:$$(PRODUCT_NAME) $${X} $$Y $$$$');
+    expect(modifyInfoPlist({}, resolve({ comment: 'a$(B)c' }))[INFO_PLIST_INIT_COMMENT]).toBe('a$$(B)c');
+    expect(modifyInfoPlist({}, resolve({ accountId: '#acct#p$x=' }))[INFO_PLIST_ACCOUNT_ID]).toBe('#acct#p$$x=');
+    expect(modifyInfoPlist({}, resolve({ comment: '007' }))[INFO_PLIST_INIT_COMMENT]).toBe('007');
   });
 });
 
@@ -750,6 +858,17 @@ describe('withApproov', () => {
     const once = modifyMainApplication(sdk55('MainApplication.kt'), 'kt', resolve());
     const broken = once.replace(/^.*@generated end approov-initialize.*\n/m, '');
     expect(() => modifyMainApplication(broken, 'kt', resolve())).toThrow(/unterminated generated block "approov-initialize"/);
+  });
+
+  it('is built by prepack, so the published package contains plugin/build for app.plugin.js', () => {
+    const scripts = require('../../package.json').scripts;
+    expect(scripts.prepack).toMatch(/^npm run build:plugin && /);
+    // plugin/build is git-ignored (build/), so only prepack puts it in the package
+    const { execFileSync } = require('child_process');
+    const root = path.join(__dirname, '..', '..');
+    expect(execFileSync('git', ['check-ignore', 'plugin/build/withApproov.js'], { cwd: root, encoding: 'utf8' }).trim()).toBe(
+      'plugin/build/withApproov.js',
+    );
   });
 
   it('is exported by app.plugin.js', () => {

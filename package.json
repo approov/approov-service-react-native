@@ -58,7 +58,7 @@
     "test:android": "cd android && ./gradlew testDebugUnitTest",
     "test:ios": "bash ./tests/ios/run_native_tests.sh",
     "test:ios:if-supported": "node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run test:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS tests on non-macOS platform ' + process.platform); }\"",
-    "prepack": "node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run build:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS build on non-macOS platform ' + process.platform); }\"",
+    "prepack": "npm run build:plugin && node -e \"if (process.platform === 'darwin') { require('child_process').execSync('npm run build:ios', { stdio: 'inherit' }); } else { console.log('Skipping iOS build on non-macOS platform ' + process.platform); }\"",
     "build:plugin": "tsc -p plugin",
     "test:plugin": "npm run build:plugin && jest -c plugin/jest.config.cjs"
   }

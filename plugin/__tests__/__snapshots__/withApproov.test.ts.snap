@@ -7,6 +7,7 @@ exports[`AndroidManifest.xml renders as expected 1`] = `
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -21,8 +22,8 @@ exports[`AndroidManifest.xml renders as expected 1`] = `
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
-    <meta-data android:name="io.approov.ACCOUNT_ID" android:value="test-account-id-not-real"/>
-    <meta-data android:name="io.approov.INIT_COMMENT" android:value="c"/>
+    <meta-data android:name="io.approov.ACCOUNT_ID" android:value="\\u0074est-account-id-not-real"/>
+    <meta-data android:name="io.approov.INIT_COMMENT" android:value="\\u0063"/>
   </application>
 </manifest>"
 `;

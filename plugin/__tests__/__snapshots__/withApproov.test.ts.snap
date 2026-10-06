@@ -257,7 +257,7 @@ class MainApplication : Application(), ReactApplication {
 "
 `;
 
-exports[`Podfile adds the universal iOS pod by version inside the app target, once 1`] = `
+exports[`Podfile adds the SDK and the universal iOS layer from GitHub tags inside the app target, once 1`] = `
 "require File.join(File.dirname(\`node --print "require.resolve('expo/package.json')"\`), "scripts/autolinking")
 require File.join(File.dirname(\`node --print "require.resolve('react-native/package.json')"\`), "scripts/react_native_pods")
 
@@ -283,8 +283,9 @@ prepare_react_native_project!
 target 'HelloWorld' do
   use_expo_modules!
   # @generated begin approov-pod - expo prebuild (DO NOT MODIFY)
-  # Approov: the universal iOS service layer (one approov-ios-sdk for every Approov pod)
-  pod 'approov-service-ios', '3.8.0'
+  # Approov: the platform SDK and the universal iOS service layer, from GitHub (not on CocoaPods trunk)
+  pod 'approov-ios-sdk', :git => 'https://github.com/approov/approov-ios-sdk.git', :tag => '3.5.3'
+  pod 'approov-service-ios', :git => 'https://github.com/approov/approov-service-ios.git', :tag => '3.8.0'
   # @generated end approov-pod
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'

@@ -7,7 +7,7 @@
  * source build with gradlePluginPath), applies it right after com.android.application, adds the
  * universal library, optionally configures approov.cronetDependencyPackages, writes the account ID to
  * the manifest meta-data and inserts a guarded native ApproovService.initialize in MainApplication.
- * iOS: adds the universal iOS pod (approov-service-ios, by version or from a local path) to the Podfile,
+ * iOS: adds the universal iOS pod (approov-ios-sdk and approov-service-ios from GitHub at a tag, the layer optionally from a local path) to the Podfile,
  * writes the account ID to Info.plist and inserts a guarded native ApproovService.initialize at the start
  * of application(_:didFinishLaunchingWithOptions:) in the Swift AppDelegate (Expo SDK 53 and later).
  *
@@ -47,10 +47,16 @@ export const SERVICE_ARTIFACT = 'io.approov:service.android';
 export const GRADLE_PLUGIN_ARTIFACT = 'io.approov:service.android-gradle-plugin';
 const APPROOV_GROUP = 'io.approov';
 
-// The universal iOS layer (approov-service-ios), as a CocoaPods pod. Its version is independent of the
-// Android one. Until the pod is published (or vendored into this package's pod, D2), use ios.podPath.
+// The universal iOS layer (approov-service-ios) and the platform SDK (approov-ios-sdk), as CocoaPods pods
+// taken from their GitHub repositories at a tag. Neither is published to CocoaPods trunk, so the Podfile
+// must name the git source (a podspec dependency cannot carry one). The layer version is independent of
+// the Android one; ios.podPath replaces the layer's git source with a local checkout for development.
 export const IOS_POD_NAME = 'approov-service-ios';
+export const IOS_POD_GIT = 'https://github.com/approov/approov-service-ios.git';
+export const IOS_SDK_POD_NAME = 'approov-ios-sdk';
+export const IOS_SDK_POD_GIT = 'https://github.com/approov/approov-ios-sdk.git';
 export const DEFAULT_IOS_VERSION = '3.8.0';
+export const DEFAULT_IOS_SDK_VERSION = '3.5.3';
 const LOG_TAG = 'ApproovInit';
 
 export type AndroidProps = {
@@ -68,8 +74,10 @@ export type AndroidProps = {
 };
 
 export type IosProps = {
-  /** Version of the approov-service-ios pod (default 3.8.0). */
+  /** Git tag of approov-service-ios, the universal iOS layer (default 3.8.0). */
   version?: string;
+  /** Git tag of approov-ios-sdk, the platform SDK pod the layer depends on (default 3.5.3). */
+  sdkVersion?: string;
   /** Local development: the approov-service-ios source directory (with its podspec), used as a :path pod. */
   podPath?: string;
 };
@@ -102,13 +110,14 @@ export type ResolvedProps = {
   };
   ios: {
     version: string;
+    sdkVersion: string;
     podPath?: string;
   };
 };
 
 const KEYWORD_REPOSITORIES: KeywordRepository[] = ['mavenCentral', 'mavenLocal', 'google', 'gradlePluginPortal'];
 const TOP_LEVEL_KEYS = ['accountId', 'comment', 'nativeInitialize', 'android', 'ios'];
-const IOS_KEYS = ['version', 'podPath'];
+const IOS_KEYS = ['version', 'sdkVersion', 'podPath'];
 const ANDROID_KEYS = [
   'version',
   'repositories',
@@ -232,6 +241,9 @@ export function resolveProps(
   if (i.version !== undefined && (typeof i.version !== 'string' || !VERSION.test(i.version))) {
     fail('"ios.version" must be a version string such as 3.8.0');
   }
+  if (i.sdkVersion !== undefined && (typeof i.sdkVersion !== 'string' || !VERSION.test(i.sdkVersion))) {
+    fail('"ios.sdkVersion" must be a version string such as 3.5.3');
+  }
   if (i.version !== undefined && i.podPath !== undefined) fail('set "ios.version" or "ios.podPath", not both');
   let podPath: string | undefined;
   if (i.podPath !== undefined) {
@@ -255,6 +267,7 @@ export function resolveProps(
     },
     ios: {
       version: typeof i.version === 'string' ? i.version : DEFAULT_IOS_VERSION,
+      sdkVersion: typeof i.sdkVersion === 'string' ? i.sdkVersion : DEFAULT_IOS_SDK_VERSION,
       podPath,
     },
   };
@@ -557,8 +570,9 @@ export function modifyInfoPlist(plist: InfoPlist, props: ResolvedProps): InfoPli
 const rubyString = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 /**
- * ios/Podfile: the universal iOS layer as a pod in the app target, from a local path (ios.podPath) or by
- * version. Added with nativeInitialize false too: JavaScript initialization needs the layer as well.
+ * ios/Podfile: the platform SDK pod and the universal iOS layer pod in the app target, both from GitHub at a
+ * tag (ios.sdkVersion, ios.version); the layer from a local path with ios.podPath. The SDK is named here
+ * because the layer's podspec depends on it by version only and cannot say where to fetch it. Added with nativeInitialize false too: JavaScript initialization needs the layer as well.
  */
 export function modifyPodfile(src: string, props: ResolvedProps, iosDir: string): string {
   const tag = 'approov-pod';
@@ -570,12 +584,16 @@ export function modifyPodfile(src: string, props: ResolvedProps, iosDir: string)
   const after = expoModules > target ? expoModules : target;
   const source = props.ios.podPath
     ? `:path => ${rubyString(path.relative(iosDir, props.ios.podPath).split(path.sep).join('/'))}`
-    : rubyString(props.ios.version);
+    : `:git => ${rubyString(IOS_POD_GIT)}, :tag => ${rubyString(props.ios.version)}`;
   insertBlock(
     lines,
     after + 1,
     tag,
-    ['# Approov: the universal iOS service layer (one approov-ios-sdk for every Approov pod)', `pod ${rubyString(IOS_POD_NAME)}, ${source}`],
+    [
+      '# Approov: the platform SDK and the universal iOS service layer, from GitHub (not on CocoaPods trunk)',
+      `pod ${rubyString(IOS_SDK_POD_NAME)}, :git => ${rubyString(IOS_SDK_POD_GIT)}, :tag => ${rubyString(props.ios.sdkVersion)}`,
+      `pod ${rubyString(IOS_POD_NAME)}, ${source}`,
+    ],
     expoModules > target ? indentOf(lines[expoModules]) : indentOf(lines[target]) + '  ',
     '#',
   );

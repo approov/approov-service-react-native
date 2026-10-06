@@ -5,6 +5,7 @@ import path from 'path';
 import withApproov, {
   ACCOUNT_ID_ENV,
   assertAccountId,
+  DEFAULT_IOS_SDK_VERSION,
   DEFAULT_IOS_VERSION,
   IOS_POD_NAME,
   ACCOUNT_ID_META_DATA,
@@ -98,9 +99,10 @@ describe('resolveProps', () => {
         gradlePluginPath: undefined,
         cronetDependencyPackages: undefined,
       },
-      ios: { version: DEFAULT_IOS_VERSION, podPath: undefined },
+      ios: { version: DEFAULT_IOS_VERSION, sdkVersion: DEFAULT_IOS_SDK_VERSION, podPath: undefined },
     });
     expect(DEFAULT_IOS_VERSION).toBe('3.8.0');
+    expect(DEFAULT_IOS_SDK_VERSION).toBe('3.5.3');
     expect(IOS_POD_NAME).toBe('approov-service-ios');
   });
 
@@ -111,16 +113,23 @@ describe('resolveProps', () => {
     expect(resolveProps({}, { [ACCOUNT_ID_ENV]: long }, projectRoot).accountId).toBe(long);
   });
 
-  it('resolves the iOS pod version or a local pod path', () => {
-    expect(resolve({ ios: { version: '1.2.3' } }).ios).toEqual({ version: '1.2.3', podPath: undefined });
-    const r = resolve({ ios: { podPath: path.relative(projectRoot, iosPodDir) } });
-    expect(r.ios).toEqual({ version: DEFAULT_IOS_VERSION, podPath: iosPodDir });
+  it('resolves the iOS pod tags or a local pod path', () => {
+    expect(resolve({ ios: { version: '1.2.3' } }).ios).toEqual({
+      version: '1.2.3',
+      sdkVersion: DEFAULT_IOS_SDK_VERSION,
+      podPath: undefined,
+    });
+    expect(resolve({ ios: { sdkVersion: '3.8.1' } }).ios.sdkVersion).toBe('3.8.1');
+    const r = resolve({ ios: { podPath: path.relative(projectRoot, iosPodDir), sdkVersion: '3.8.1' } });
+    expect(r.ios).toEqual({ version: DEFAULT_IOS_VERSION, sdkVersion: '3.8.1', podPath: iosPodDir });
   });
 
   it('rejects malformed iOS options', () => {
     expect(() => resolve({ ios: 'x' })).toThrow(/"ios" must be an object/);
     expect(() => resolve({ ios: { version: '1 0' } })).toThrow(/ios.version/);
     expect(() => resolve({ ios: { version: '1 0' } })).toThrow(/such as 3\.8\.0/);
+    expect(() => resolve({ ios: { sdkVersion: '1 0' } })).toThrow(/ios.sdkVersion/);
+    expect(() => resolve({ ios: { sdkVersion: 3 } })).toThrow(/ios.sdkVersion/);
     expect(() => resolve({ ios: { podPath: './nowhere' } })).toThrow(/ios.podPath/);
     expect(() => resolve({ ios: { podPath: path.relative(projectRoot, gradlePluginDir) } })).toThrow(
       /approov-service-ios.podspec/,
@@ -409,28 +418,38 @@ describe('Info.plist', () => {
 });
 
 describe('Podfile', () => {
-  it('adds the universal iOS pod by version inside the app target, once', () => {
+  const SDK_LINE = `pod 'approov-ios-sdk', :git => 'https://github.com/approov/approov-ios-sdk.git', :tag => '${DEFAULT_IOS_SDK_VERSION}'`;
+  const LAYER_LINE = `pod 'approov-service-ios', :git => 'https://github.com/approov/approov-service-ios.git', :tag => '${DEFAULT_IOS_VERSION}'`;
+
+  it('adds the SDK and the universal iOS layer from GitHub tags inside the app target, once', () => {
     const out = twice((s: string) => modifyPodfile(s, resolve(), iosDir), sdk55('Podfile'));
     expect(count(out, "pod 'approov-service-ios'")).toBe(1);
-    expect(out).toContain(`pod 'approov-service-ios', '${DEFAULT_IOS_VERSION}'`);
+    expect(count(out, "pod 'approov-ios-sdk'")).toBe(1);
+    expect(out).toContain(SDK_LINE);
+    expect(out).toContain(LAYER_LINE);
     const lines = out.split('\n');
+    const sdk = lines.findIndex((l) => l.includes("pod 'approov-ios-sdk'"));
     const pod = lines.findIndex((l) => l.includes("pod 'approov-service-ios'"));
-    expect(pod).toBeGreaterThan(lines.findIndex((l) => l.includes('use_expo_modules!')));
+    expect(sdk).toBeLessThan(pod);
+    expect(sdk).toBeGreaterThan(lines.findIndex((l) => l.includes('use_expo_modules!')));
     expect(pod).toBeLessThan(lines.findIndex((l) => l.includes('use_native_modules!')));
     expect(out).toMatchSnapshot();
   });
 
-  it('adds a local development pod by path, relative to the ios directory', () => {
+  it('adds a local development layer by path and still the SDK from GitHub', () => {
     const out = modifyPodfile(sdk55('Podfile'), resolve({ ios: { podPath: iosPodDir } }), iosDir);
     expect(out).toContain(`pod 'approov-service-ios', :path => '${path.relative(iosDir, iosPodDir)}'`);
-    expect(out).not.toContain(`'${DEFAULT_IOS_VERSION}'`);
+    expect(out).not.toContain('approov-service-ios.git');
+    expect(out).toContain(SDK_LINE);
   });
 
-  it('replaces a previous entry when the option changes', () => {
+  it('replaces previous entries when the options change', () => {
     const once = modifyPodfile(sdk55('Podfile'), resolve(), iosDir);
-    const out = modifyPodfile(once, resolve({ ios: { version: '3.8.1' } }), iosDir);
+    const out = modifyPodfile(once, resolve({ ios: { version: '3.8.1', sdkVersion: '3.8.2' } }), iosDir);
     expect(count(out, "pod 'approov-service-ios'")).toBe(1);
-    expect(out).toContain("pod 'approov-service-ios', '3.8.1'");
+    expect(count(out, "pod 'approov-ios-sdk'")).toBe(1);
+    expect(out).toContain("approov-service-ios.git', :tag => '3.8.1'");
+    expect(out).toContain("approov-ios-sdk.git', :tag => '3.8.2'");
   });
 
   it('adds the pod with nativeInitialize false too, the layer is needed for JavaScript initialization', () => {

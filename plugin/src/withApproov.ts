@@ -1,5 +1,5 @@
 /**
- * Expo config plugin for the universal Approov Android layer (approov-service-android) and its
+ * Expo config plugin for the universal Approov Android layer (io.approov:service.android) and its
  * Gradle plugin io.approov.gradle, which weaves OkHttp, HttpsURLConnection, Volley and Cronet
  * (react-native-nitro-fetch included) at build time.
  *
@@ -36,16 +36,20 @@ export const INIT_COMMENT_META_DATA = 'io.approov.INIT_COMMENT';
 export const INFO_PLIST_ACCOUNT_ID = 'ApproovAccountID';
 export const INFO_PLIST_INIT_COMMENT = 'ApproovInitComment';
 
-export const DEFAULT_SERVICE_DEPENDENCY = 'io.approov:service.android:3.8.0';
-export const DEFAULT_GRADLE_PLUGIN_DEPENDENCY = 'io.approov:approov-gradle-plugin:3.8.0';
+// One version for the library and the Gradle plugin: they are released together and the plugin fails
+// the build when the library it resolves has a different version, so both coordinates derive from it.
+export const DEFAULT_ANDROID_VERSION = '3.8.0';
+export const SERVICE_ARTIFACT = 'io.approov:service.android';
+export const GRADLE_PLUGIN_ARTIFACT = 'io.approov:service.android-gradle-plugin';
 const APPROOV_GROUP = 'io.approov';
 const LOG_TAG = 'ApproovInit';
 
 export type AndroidProps = {
-  /** group:artifact:version of the universal Android library. */
-  serviceDependency?: string;
-  /** group:artifact:version of the io.approov.gradle plugin artifact (buildscript classpath). */
-  gradlePluginDependency?: string;
+  /**
+   * Version of io.approov:service.android and of io.approov:service.android-gradle-plugin (always the
+   * same version; default 3.8.0). Use 3.8.0-local with the mavenLocal repository for a local build.
+   */
+  version?: string;
   /** Repositories for both artifacts: mavenCentral, mavenLocal, google, gradlePluginPortal, a URL or a path. */
   repositories?: string[];
   /** Local development: the approov-gradle-plugin source directory, used as an included build. */
@@ -72,6 +76,7 @@ export type ResolvedProps = {
   comment: string | null;
   nativeInitialize: boolean;
   android: {
+    version: string;
     serviceDependency: string;
     gradlePluginDependency: string;
     repositories: Repository[];
@@ -83,13 +88,12 @@ export type ResolvedProps = {
 const KEYWORD_REPOSITORIES: KeywordRepository[] = ['mavenCentral', 'mavenLocal', 'google', 'gradlePluginPortal'];
 const TOP_LEVEL_KEYS = ['accountId', 'comment', 'nativeInitialize', 'android'];
 const ANDROID_KEYS = [
-  'serviceDependency',
-  'gradlePluginDependency',
+  'version',
   'repositories',
   'gradlePluginPath',
   'cronetDependencyPackages',
 ];
-const COORDINATE = /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.+-]+$/;
+const VERSION = /^[A-Za-z0-9][A-Za-z0-9_.+-]*$/;
 const JAVA_PACKAGE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 function fail(message: string): never {
@@ -170,13 +174,10 @@ export function resolveProps(
   if (!isPlainObject(a)) fail('"android" must be an object');
   checkKeys(a, ANDROID_KEYS, 'android.');
 
-  const coordinate = (option: string, value: unknown, fallback: string): string => {
-    if (value === undefined) return fallback;
-    if (typeof value !== 'string' || !COORDINATE.test(value)) {
-      fail(`"android.${option}" must be a Maven coordinate group:artifact:version`);
-    }
-    return value;
-  };
+  if (a.version !== undefined && (typeof a.version !== 'string' || !VERSION.test(a.version))) {
+    fail('"android.version" must be a version string such as 3.8.0');
+  }
+  const version = typeof a.version === 'string' ? a.version : DEFAULT_ANDROID_VERSION;
 
   let repositories: Repository[] = [{ kind: 'mavenCentral' }];
   if (a.repositories !== undefined) {
@@ -208,12 +209,9 @@ export function resolveProps(
     comment,
     nativeInitialize,
     android: {
-      serviceDependency: coordinate('serviceDependency', a.serviceDependency, DEFAULT_SERVICE_DEPENDENCY),
-      gradlePluginDependency: coordinate(
-        'gradlePluginDependency',
-        a.gradlePluginDependency,
-        DEFAULT_GRADLE_PLUGIN_DEPENDENCY,
-      ),
+      version,
+      serviceDependency: `${SERVICE_ARTIFACT}:${version}`,
+      gradlePluginDependency: `${GRADLE_PLUGIN_ARTIFACT}:${version}`,
       repositories,
       gradlePluginPath,
       cronetDependencyPackages,

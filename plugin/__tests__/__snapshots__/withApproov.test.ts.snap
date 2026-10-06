@@ -513,7 +513,7 @@ android {
 
 dependencies {
     // @generated begin approov-dependency - expo prebuild (DO NOT MODIFY)
-    implementation("io.approov:approov-service-android:0.0.0-cronet")
+    implementation("io.approov:service.android:3.8.0-local")
     // @generated end approov-dependency
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
@@ -576,7 +576,7 @@ buildscript {
   }
   dependencies {
     // @generated begin approov-classpath - expo prebuild (DO NOT MODIFY)
-    classpath("io.approov:approov-gradle-plugin:3.8.0")
+    classpath("io.approov:service.android-gradle-plugin:3.8.0")
     // @generated end approov-classpath
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
@@ -621,7 +621,7 @@ buildscript {
   }
   dependencies {
     // @generated begin approov-classpath - expo prebuild (DO NOT MODIFY)
-    classpath("io.approov:approov-gradle-plugin:3.8.0")
+    classpath("io.approov:service.android-gradle-plugin:3.8.0")
     // @generated end approov-classpath
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')

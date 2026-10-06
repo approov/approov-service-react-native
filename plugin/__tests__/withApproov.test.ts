@@ -51,6 +51,21 @@ const metaData = (manifest: any) =>
   (manifest.manifest.application[0]['meta-data'] || []).map((m: any) => m.$);
 
 describe('resolveProps', () => {
+  it('derives the library and the Gradle plugin from one version so they cannot drift', () => {
+    const r = resolve({ android: { version: '3.9.1' } });
+    expect(r.android.serviceDependency).toBe('io.approov:service.android:3.9.1');
+    expect(r.android.gradlePluginDependency).toBe('io.approov:service.android-gradle-plugin:3.9.1');
+  });
+
+  it('no longer accepts separate coordinates for the library and the plugin', () => {
+    expect(() => resolve({ android: { serviceDependency: 'io.approov:service.android:3.8.0' } })).toThrow(
+      /unknown option "android.serviceDependency"/,
+    );
+    expect(() => resolve({ android: { gradlePluginDependency: 'io.approov:x:3.8.0' } })).toThrow(
+      /unknown option "android.gradlePluginDependency"/,
+    );
+  });
+
   it('applies the defaults', () => {
     const r = resolve();
     expect(r).toEqual({
@@ -58,8 +73,9 @@ describe('resolveProps', () => {
       comment: null,
       nativeInitialize: true,
       android: {
+        version: '3.8.0',
         serviceDependency: 'io.approov:service.android:3.8.0',
-        gradlePluginDependency: 'io.approov:approov-gradle-plugin:3.8.0',
+        gradlePluginDependency: 'io.approov:service.android-gradle-plugin:3.8.0',
         repositories: [{ kind: 'mavenCentral' }],
         gradlePluginPath: undefined,
         cronetDependencyPackages: undefined,
@@ -94,10 +110,9 @@ describe('resolveProps', () => {
     expect(() => resolve({ accountId: 42 })).toThrow(/accountId/);
     expect(() => resolve({ comment: 7 })).toThrow(/comment/);
     expect(() => resolve({ nativeInitialize: 'yes' })).toThrow(/nativeInitialize/);
-    expect(() => resolve({ android: { serviceDependency: 'io.approov:service.android' } })).toThrow(
-      /serviceDependency/,
-    );
-    expect(() => resolve({ android: { gradlePluginDependency: 'a:b:"c' } })).toThrow(/gradlePluginDependency/);
+    expect(() => resolve({ android: { version: 3 } })).toThrow(/android.version/);
+    expect(() => resolve({ android: { version: '3.8 0' } })).toThrow(/android.version/);
+    expect(() => resolve({ android: { version: '' } })).toThrow(/android.version/);
     expect(() => resolve({ android: { cronetDependencyPackages: ['com.ok', 'not a package'] } })).toThrow(
       /cronetDependencyPackages/,
     );
@@ -149,11 +164,11 @@ describe('settings.gradle', () => {
 describe('android/build.gradle', () => {
   it('puts the Gradle plugin on the buildscript classpath, published from Maven Central', () => {
     const out = modifyProjectBuildGradle(sdk55('build.gradle'), resolve(), androidDir);
-    expect(out).toContain('classpath("io.approov:approov-gradle-plugin:3.8.0")');
+    expect(out).toContain('classpath("io.approov:service.android-gradle-plugin:3.8.0")');
     // mavenCentral() is already in both repository blocks of the template: not added again
     expect(count(out, 'mavenCentral()')).toBe(2);
     const lines = out.split('\n');
-    const classpath = lines.findIndex((l) => l.includes('io.approov:approov-gradle-plugin'));
+    const classpath = lines.findIndex((l) => l.includes('io.approov:service.android-gradle-plugin'));
     const buildscriptDeps = lines.findIndex((l) => /^\s*dependencies\s*\{/.test(l));
     expect(classpath).toBeGreaterThan(buildscriptDeps);
     expect(classpath).toBeLessThan(lines.findIndex((l) => l.startsWith('allprojects')));
@@ -202,12 +217,12 @@ describe('android/app/build.gradle', () => {
   it('writes the cronetDependencyPackages block when set, including an empty list', () => {
     const r = resolve({
       android: {
-        serviceDependency: 'io.approov:approov-service-android:0.0.0-cronet',
+        version: '3.8.0-local',
         cronetDependencyPackages: ['com.margelo.nitro.nitrofetch', 'com.example.cronet'],
       },
     });
     const out = modifyAppBuildGradle(sdk55('app-build.gradle'), r);
-    expect(out).toContain('implementation("io.approov:approov-service-android:0.0.0-cronet")');
+    expect(out).toContain('implementation("io.approov:service.android:3.8.0-local")');
     expect(out).toContain("cronetDependencyPackages = ['com.margelo.nitro.nitrofetch', 'com.example.cronet']");
     expect(out).toMatchSnapshot();
     const empty = modifyAppBuildGradle(sdk55('app-build.gradle'), resolve({ android: { cronetDependencyPackages: [] } }));

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Changed: Expo config plugin takes one `android.version` for the Android library and Gradle plugin**: the library is `io.approov:service.android` and the Gradle plugin `io.approov:service.android-gradle-plugin`, both from Maven Central, always at the same version (default `3.8.0`). The separate `android.serviceDependency` and `android.gradlePluginDependency` options are removed so the two cannot drift. The Gradle plugin fails the build when the app resolves a library version different from its own. For a local build use `android: { version: '3.8.0-local', repositories: ['mavenLocal', 'mavenCentral'] }`; apps declare the plugin through the generated buildscript classpath (`classpath("io.approov:service.android-gradle-plugin:<version>")`), not a `plugins {}` version.
+
 ## [3.5.18] - 2026-10-05
 
 - **Added: Jest mock for app unit tests**: `@approov/approov-service-react-native/jest` is a CommonJS mock of the package that loads under Jest (including `jest-expo`) without transform settings or the native module. Register it with `jest.mock` in a setup file; see "Testing with Jest" in USAGE.md.

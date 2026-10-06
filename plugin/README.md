@@ -73,7 +73,7 @@ It looks like `#your-account#p6nZ...=`. It is the same for every app in your acc
 | `android.gradlePluginPath` | none | Local development only: an `approov-gradle-plugin` source directory, included in the build with `includeBuild` in place of the published Gradle plugin. |
 | `android.cronetDependencyPackages` | the Gradle plugin's default, `["com.margelo.nitro.nitrofetch"]` | Dependency packages whose Cronet engine creation the Gradle plugin protects; `[]` limits it to your app's own classes. |
 | `ios.version` | `3.8.0` | The git tag of `approov-service-ios`. Not together with `ios.podPath`. |
-| `ios.sdkVersion` | `3.5.3` | The git tag of `approov-ios-sdk`, the Approov SDK pod the iOS package depends on. |
+| `ios.sdkVersion` | `3.5.3` | The git tag of `approov-ios-sdk`, the Approov SDK pod the iOS package depends on. It must satisfy the iOS package's podspec, which for `approov-service-ios` 3.8.0 requires exactly `3.5.3`; `pod install` fails otherwise. |
 | `ios.podPath` | none | Local development only: an `approov-service-ios` checkout (with its podspec), used as a `:path` pod in place of the GitHub tag. |
 
 Unknown options and malformed values fail the prebuild, and `expo config`, with a message naming the option. The account ID is checked only when native files are generated, so `expo config`, `expo start`, EAS Update and the `expo-constants` build step work without it.

@@ -115,8 +115,33 @@ function resolveDirectory(option: string, value: unknown, projectRoot: string): 
   return resolved;
 }
 
-/** Validates the plugin options and applies the defaults. Throws a clear error on any invalid option. */
-export function resolveProps(props: unknown, env: NodeJS.ProcessEnv, projectRoot: string): ResolvedProps {
+function failMissingAccountId(): never {
+  fail(
+    `the Approov account ID is missing. Set the "accountId" option or the ${ACCOUNT_ID_ENV} environment ` +
+      'variable when running expo prebuild, or set "nativeInitialize": false to initialize Approov from ' +
+      'JavaScript only.',
+  );
+}
+
+/**
+ * Prebuild-time check: native initialization needs the account ID. Called from the mods, which run only
+ * when native files are generated, not when Expo merely reads the config (expo config, expo start, the
+ * expo-constants build step, EAS Update), where the environment variable may legitimately be absent.
+ */
+export function assertAccountId(props: ResolvedProps): void {
+  if (props.nativeInitialize && props.accountId === undefined) failMissingAccountId();
+}
+
+/**
+ * Validates the plugin options and applies the defaults. Throws a clear error on any invalid option and,
+ * unless requireAccountId is false, on a missing account ID with nativeInitialize.
+ */
+export function resolveProps(
+  props: unknown,
+  env: NodeJS.ProcessEnv,
+  projectRoot: string,
+  { requireAccountId = true }: { requireAccountId?: boolean } = {},
+): ResolvedProps {
   const p = props === undefined || props === null ? {} : props;
   if (!isPlainObject(p)) fail('the options must be an object');
   checkKeys(p, TOP_LEVEL_KEYS, '');
@@ -130,13 +155,7 @@ export function resolveProps(props: unknown, env: NodeJS.ProcessEnv, projectRoot
   const fromEnv = env[ACCOUNT_ID_ENV];
   const rawId = p.accountId !== undefined ? p.accountId : fromEnv;
   const accountId = typeof rawId === 'string' && rawId.trim() !== '' ? rawId.trim() : undefined;
-  if (accountId === undefined && nativeInitialize) {
-    fail(
-      `the Approov account ID is missing. Set the "accountId" option or the ${ACCOUNT_ID_ENV} environment ` +
-        'variable when running expo prebuild, or set "nativeInitialize": false to initialize Approov from ' +
-        'JavaScript only.',
-    );
-  }
+  if (requireAccountId && accountId === undefined && nativeInitialize) failMissingAccountId();
   if (accountId !== undefined) {
     if (/[<>]/.test(accountId)) fail('"accountId" is still the placeholder: set your Approov account ID');
     if (/\s/.test(accountId)) fail('"accountId" must not contain whitespace');
@@ -498,7 +517,8 @@ export function modifyInfoPlist(plist: InfoPlist, props: ResolvedProps): InfoPli
 
 const withApproov: ConfigPlugin<ApproovPluginProps | void> = (config, props) => {
   const projectRoot = (config as { _internal?: { projectRoot?: string } })._internal?.projectRoot ?? process.cwd();
-  const resolved = resolveProps(props, process.env, projectRoot);
+  // the account ID is checked in the mods (assertAccountId): reading the config must not need it
+  const resolved = resolveProps(props, process.env, projectRoot, { requireAccountId: false });
 
   config = withSettingsGradle(config, (c) => {
     checkGroovy(c.modResults.language, 'android/settings.gradle');
@@ -516,14 +536,17 @@ const withApproov: ConfigPlugin<ApproovPluginProps | void> = (config, props) => 
     return c;
   });
   config = withAndroidManifest(config, (c) => {
+    assertAccountId(resolved);
     c.modResults = modifyAndroidManifest(c.modResults, resolved);
     return c;
   });
   config = withMainApplication(config, (c) => {
+    assertAccountId(resolved);
     c.modResults.contents = modifyMainApplication(c.modResults.contents, c.modResults.language, resolved);
     return c;
   });
   config = withInfoPlist(config, (c) => {
+    assertAccountId(resolved);
     c.modResults = modifyInfoPlist(c.modResults, resolved);
     return c;
   });

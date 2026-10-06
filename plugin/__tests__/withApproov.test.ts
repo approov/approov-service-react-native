@@ -4,6 +4,7 @@ import path from 'path';
 
 import withApproov, {
   ACCOUNT_ID_ENV,
+  assertAccountId,
   ACCOUNT_ID_META_DATA,
   INIT_COMMENT_META_DATA,
   INFO_PLIST_ACCOUNT_ID,
@@ -344,16 +345,26 @@ describe('withApproov', () => {
     expect(Object.keys(config.mods.ios)).toEqual(['infoPlist']);
   });
 
-  it('fails at prebuild when the account ID is missing', () => {
+  it('reads the config without an account ID, so expo config and the expo-constants build step work', () => {
     const saved = process.env[ACCOUNT_ID_ENV];
     delete process.env[ACCOUNT_ID_ENV];
     try {
-      expect(() => withApproov({ name: 'app', slug: 'app', _internal: { projectRoot } } as any, {})).toThrow(
-        /account ID is missing/,
-      );
+      expect(() => withApproov({ name: 'app', slug: 'app', _internal: { projectRoot } } as any, {})).not.toThrow();
+      // invalid options still fail as soon as the config is read
+      expect(() =>
+        withApproov({ name: 'app', slug: 'app', _internal: { projectRoot } } as any, { nativeInitialize: 1 } as any),
+      ).toThrow(/nativeInitialize/);
     } finally {
       if (saved !== undefined) process.env[ACCOUNT_ID_ENV] = saved;
     }
+  });
+
+  it('fails at prebuild (in the mods) when the account ID is missing', () => {
+    const r = resolveProps({}, {}, projectRoot, { requireAccountId: false });
+    expect(r.accountId).toBeUndefined();
+    expect(() => assertAccountId(r)).toThrow(/account ID is missing/);
+    expect(() => assertAccountId(resolve())).not.toThrow();
+    expect(() => assertAccountId(resolveProps({ nativeInitialize: false }, {}, projectRoot))).not.toThrow();
   });
 
   it('is exported by app.plugin.js', () => {

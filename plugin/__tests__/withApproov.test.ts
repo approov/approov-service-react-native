@@ -58,6 +58,33 @@ const syntheticConfig = (size: number) => {
 };
 
 const twice = <T>(fn: (input: T) => T, input: T) => fn(fn(input));
+const SDKS = [52, 53, 54, 55, 56, 57, 58];
+/** The template file of an Expo SDK: its own fixture when it differs from SDK 55's, else SDK 55's. */
+const template = (sdk: number, name: string) => {
+  const own = path.join(__dirname, 'fixtures', `sdk${sdk}`, name);
+  return fs.existsSync(own) ? fs.readFileSync(own, 'utf8') : sdk55(name);
+};
+
+/** Runs one registered mod of the plugin the way expo prebuild does, on the given modResults. */
+const runMod = async (props: Record<string, unknown>, platform: 'android' | 'ios', mod: string, modResults: unknown) => {
+  const config: any = withApproov({ name: 'app', slug: 'app', _internal: { projectRoot } } as any, props as any);
+  const platformProjectRoot = platform === 'android' ? androidDir : iosDir;
+  const result = await config.mods[platform][mod]({
+    ...config,
+    modResults,
+    modRequest: { projectRoot, platformProjectRoot, platform, modName: mod, introspect: false },
+  });
+  return result.modResults;
+};
+const withoutEnvAccountId = async (fn: () => Promise<void>) => {
+  const saved = process.env[ACCOUNT_ID_ENV];
+  delete process.env[ACCOUNT_ID_ENV];
+  try {
+    await fn();
+  } finally {
+    if (saved !== undefined) process.env[ACCOUNT_ID_ENV] = saved;
+  }
+};
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 
 const parseManifest = async (xml: string) => {
@@ -159,6 +186,19 @@ describe('resolveProps', () => {
     expect(() => resolveProps({}, { [ACCOUNT_ID_ENV]: '   ' }, projectRoot)).toThrow(/account ID is missing/);
   });
 
+  it('trims the account ID, so a trailing newline from an env file does not reach the app', () => {
+    expect(resolveProps({}, { [ACCOUNT_ID_ENV]: ' from-env\n' }, projectRoot).accountId).toBe('from-env');
+    expect(resolve({ accountId: '  from-option ' }).accountId).toBe('from-option');
+  });
+
+  it('treats only http and https entries as repository URLs', () => {
+    expect(resolve({ android: { repositories: ['https://repo.example.com/maven'] } }).android.repositories).toEqual([
+      { kind: 'url', url: 'https://repo.example.com/maven' },
+    ]);
+    // any other scheme is a path, which must exist
+    expect(() => resolve({ android: { repositories: ['git://repo.example.com/maven'] } })).toThrow(/does not exist/);
+  });
+
   it('rejects malformed values', () => {
     expect(() => resolve({ accountId: 'has space' })).toThrow(/accountId/);
     expect(() => resolve({ accountId: '<your-approov-account-id>' })).toThrow(/placeholder/);
@@ -241,6 +281,20 @@ describe('android/build.gradle', () => {
     expect(out).toMatchSnapshot();
   });
 
+  it('limits a URL repository to io.approov', () => {
+    const r = resolve({ android: { repositories: ['https://repo.example.com/maven'] } });
+    const out = modifyProjectBuildGradle(sdk55('build.gradle'), r, androidDir);
+    expect(count(out, "url = uri('https://repo.example.com/maven')")).toBe(2);
+    expect(count(out, 'includeGroup("io.approov")')).toBe(2);
+  });
+
+  it('escapes a quote in a local repository path, so it stays one Groovy string', () => {
+    const quoted = path.join(tmp, "o'brien-repo");
+    fs.mkdirSync(quoted, { recursive: true });
+    const out = modifyProjectBuildGradle(sdk55('build.gradle'), resolve({ android: { repositories: [quoted] } }), androidDir);
+    expect(out).toContain("url = uri(new File(rootDir, '../../o\\'brien-repo'))");
+  });
+
   it('is idempotent', () => {
     const r = resolve({ android: { repositories: ['mavenLocal', 'mavenCentral'] } });
     const once = modifyProjectBuildGradle(sdk55('build.gradle'), r, androidDir);
@@ -249,6 +303,20 @@ describe('android/build.gradle', () => {
 
   it('fails clearly on a template it does not recognise', () => {
     expect(() => modifyProjectBuildGradle('apply plugin: "x"\n', resolve(), androidDir)).toThrow(/buildscript/);
+  });
+
+  it.each(SDKS)('edits the Gradle files of the Expo SDK %i template, idempotently', (sdk) => {
+    const r = resolve({ android: { repositories: ['mavenLocal', 'mavenCentral'], cronetDependencyPackages: [] } });
+    const settings = twice((s: string) => modifySettingsGradle(s, r, androidDir), template(sdk, 'settings.gradle'));
+    expect(settings).toBe(template(sdk, 'settings.gradle'));
+    const project = twice((s: string) => modifyProjectBuildGradle(s, r, androidDir), template(sdk, 'build.gradle'));
+    expect(count(project, 'classpath("io.approov:service.android-gradle-plugin:3.8.0")')).toBe(1);
+    expect(count(project, 'mavenLocal {')).toBe(2);
+    const app = twice((s: string) => modifyAppBuildGradle(s, r), template(sdk, 'app-build.gradle'));
+    expect(count(app, 'apply plugin: "io.approov.gradle"')).toBe(1);
+    expect(app.indexOf('apply plugin: "io.approov.gradle"')).toBeGreaterThan(app.indexOf('apply plugin: "com.android.application"'));
+    expect(count(app, 'implementation("io.approov:service.android:3.8.0")')).toBe(1);
+    expect(count(app, 'cronetDependencyPackages = []')).toBe(1);
   });
 });
 
@@ -318,6 +386,18 @@ describe('MainApplication', () => {
     expect(out).toContain('catch (e: Exception)');
     expect(out).toContain('io.approov.service.android.ApproovService.initialize(this, "", null)');
     expect(out).not.toContain(TEST_ID);
+    // the comment from the manifest is passed, not dropped
+    expect(out).toContain(`val approovComment = approovMetaData?.get("${INIT_COMMENT_META_DATA}")?.toString()`);
+    expect(out).toContain('io.approov.service.android.ApproovService.initialize(this, approovAccountId, approovComment)');
+    // no account ID in the manifest: logged, then bypass mode, not an uninitialized layer
+    const missing = out.slice(out.indexOf('if (approovAccountId.isNullOrEmpty()) {'), out.indexOf('} else {'));
+    expect(missing).toContain('android.util.Log.e("ApproovInit"');
+    expect(missing).toContain('io.approov.service.android.ApproovService.initialize(this, "", null)');
+    // on a rejection only the exception class is logged (an SDK message may quote the value it received)
+    const caught = out.slice(out.indexOf('catch (e: Exception)'));
+    expect(caught).toContain('${e.javaClass.name}');
+    expect(caught).not.toMatch(/e\.message|e\.localizedMessage|\$e\b|\$\{e\}/);
+    expect(caught).toContain('io.approov.service.android.ApproovService.initialize(this, "", null)');
     expect(out).toMatchSnapshot();
   });
 
@@ -327,7 +407,35 @@ describe('MainApplication', () => {
       out.indexOf('super.onCreate();'),
     );
     expect(out).toContain('catch (Exception e)');
+    expect(out).toContain(`approovMetaData.get("${ACCOUNT_ID_META_DATA}")`);
+    expect(out).toContain(`approovMetaData.get("${INIT_COMMENT_META_DATA}")`);
+    expect(out).toContain(
+      'io.approov.service.android.ApproovService.initialize(this, approovAccountId, approovComment == null ? null : approovComment.toString());',
+    );
+    const missing = out.slice(out.indexOf('if (approovAccountId == null || approovAccountId.isEmpty()) {'), out.indexOf('} else {'));
+    expect(missing).toContain('io.approov.service.android.ApproovService.initialize(this, "", null);');
+    const caught = out.slice(out.indexOf('catch (Exception e)'));
+    expect(caught).toContain('e.getClass().getName()');
+    expect(caught).not.toMatch(/getMessage|getLocalizedMessage|\+ e\s*[);+]/);
+    expect(caught).toContain('io.approov.service.android.ApproovService.initialize(this, "", null);');
     expect(out).toMatchSnapshot();
+  });
+
+  it('fails clearly on a MainApplication language it cannot edit', () => {
+    expect(() => modifyMainApplication(sdk55('MainApplication.kt'), 'groovy', resolve())).toThrow(/not supported/);
+  });
+
+  it.each(SDKS)('initializes first thing in onCreate() of the Expo SDK %i template, once', (sdk) => {
+    const src = template(sdk, 'MainApplication.kt');
+    const out = twice((s: string) => modifyMainApplication(s, 'kt', resolve()), src);
+    expect(count(out, '@generated begin approov-initialize')).toBe(1);
+    const onCreate = out.slice(out.indexOf('override fun onCreate()'));
+    const init = onCreate.indexOf('ApproovService.initialize(this, approovAccountId');
+    expect(init).toBeGreaterThan(onCreate.indexOf('super.onCreate()'));
+    for (const start of ['SoLoader.init(', 'loadReactNative(this)', 'ApplicationLifecycleDispatcher.onApplicationCreate(this)']) {
+      if (onCreate.includes(start)) expect(init).toBeLessThan(onCreate.indexOf(start));
+    }
+    expect(modifyMainApplication(out, 'kt', resolve({ nativeInitialize: false }))).toBe(src);
   });
 
   it('is idempotent', () => {
@@ -360,6 +468,18 @@ describe('AndroidManifest.xml', () => {
       { 'android:name': ACCOUNT_ID_META_DATA, 'android:value': TEST_ID },
       { 'android:name': INIT_COMMENT_META_DATA, 'android:value': 'expo-native' },
     ]);
+  });
+
+  it('removes the meta-data written earlier when the account ID is no longer set', async () => {
+    const before = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ comment: 'c' }));
+    const r = resolveProps({ nativeInitialize: false }, {}, projectRoot);
+    expect(metaData(modifyAndroidManifest(before, r))).toEqual([]);
+  });
+
+  it('writes an empty comment, which the SDK treats differently from none', async () => {
+    const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ comment: '' }));
+    expect(metaData(out).map((m: any) => m['android:name'])).toEqual([ACCOUNT_ID_META_DATA, INIT_COMMENT_META_DATA]);
+    expect(metaData(out)[1]['android:value']).toBe('');
   });
 
   it('writes no comment when none is set', async () => {
@@ -404,6 +524,10 @@ describe('Info.plist', () => {
       [INFO_PLIST_INIT_COMMENT]: 'expo-native',
     });
     expect(modifyInfoPlist(out, resolve())).toEqual({ CFBundleName: 'x', [INFO_PLIST_ACCOUNT_ID]: TEST_ID });
+  });
+
+  it('writes an empty comment, which the SDK treats differently from none', () => {
+    expect(modifyInfoPlist({}, resolve({ comment: '' }))[INFO_PLIST_INIT_COMMENT]).toBe('');
   });
 
   it('writes nothing without an account ID', () => {
@@ -457,6 +581,26 @@ describe('Podfile', () => {
     expect(modifyPodfile(sdk55('Podfile'), r, iosDir)).toContain("pod 'approov-service-ios'");
   });
 
+  it('escapes a quote in a local pod path, so it stays one Ruby string', () => {
+    const quoted = path.join(tmp, "o'brien-ios");
+    fs.mkdirSync(quoted, { recursive: true });
+    fs.writeFileSync(path.join(quoted, 'approov-service-ios.podspec'), '# test podspec\n');
+    const out = modifyPodfile(sdk55('Podfile'), resolve({ ios: { podPath: quoted } }), iosDir);
+    expect(out).toContain("pod 'approov-service-ios', :path => '../../o\\'brien-ios'");
+  });
+
+  it.each(SDKS)('adds the pods inside the app target of the Expo SDK %i template, once', (sdk) => {
+    const src = template(sdk, 'Podfile');
+    const out = twice((s: string) => modifyPodfile(s, resolve(), iosDir), src);
+    expect(count(out, SDK_LINE)).toBe(1);
+    expect(count(out, LAYER_LINE)).toBe(1);
+    const lines = out.split('\n');
+    const target = lines.findIndex((l) => /^\s*target\s+['"].+['"]\s+do\s*$/.test(l));
+    const pod = lines.findIndex((l) => l.includes(LAYER_LINE));
+    expect(pod).toBeGreaterThan(target);
+    expect(lines.slice(target, pod).some((l) => /^end\s*$/.test(l))).toBe(false);
+  });
+
   it('fails clearly on a Podfile without a target block', () => {
     expect(() => modifyPodfile("platform :ios, '15.1'\n", resolve(), iosDir)).toThrow(/no "target \.\.\. do" block/);
   });
@@ -485,6 +629,10 @@ describe('AppDelegate', () => {
     expect(out).toContain('type(of: error)');
     expect(out).not.toMatch(/\\\(error\)|localizedDescription/);
     expect(out).toContain('try? ApproovService.initialize("")');
+    // no account ID in Info.plist: logged, then bypass mode
+    const missing = out.slice(out.indexOf('if approovAccountId.isEmpty {'), out.indexOf('} else {'));
+    expect(missing).toContain('NSLog(');
+    expect(missing).toContain('try ApproovService.initialize("")');
     expect(out).toContain('ApproovService.isApproovServiceEnabled()');
     expect(out).toContain('ApproovService.isApproovProtectionEnabled()');
     expect(out).toMatchSnapshot();
@@ -497,6 +645,22 @@ describe('AppDelegate', () => {
     expect(init).toBeLessThan(out.indexOf('ExpoReactNativeFactory(delegate: delegate)'));
     expect(init).toBeLessThan(out.indexOf('return super.application('));
   });
+
+  it.each(SDKS.filter((sdk) => sdk >= 53))(
+    'initializes Approov before React Native in the Expo SDK %i Swift AppDelegate, once',
+    (sdk) => {
+      const src = template(sdk, 'AppDelegate.swift');
+      const out = twice((s: string) => modifyAppDelegate(s, 'swift', resolve()), src);
+      expect(count(out, initCall)).toBe(1);
+      expect(count(out, 'import ApproovService')).toBe(1);
+      const init = out.indexOf(initCall);
+      expect(init).toBeGreaterThan(out.indexOf('didFinishLaunchingWithOptions launchOptions'));
+      for (const start of ['ExpoReactNativeFactory(delegate:', 'factory.startReactNative(', 'return super.application(application, didFinishLaunchingWithOptions']) {
+        if (out.includes(start)) expect(init).toBeLessThan(out.indexOf(start));
+      }
+      expect(modifyAppDelegate(out, 'swift', resolve({ nativeInitialize: false }))).toBe(src);
+    },
+  );
 
   it('is idempotent', () => {
     const once = modifyAppDelegate(sdk55('AppDelegate.swift'), 'swift', resolve());
@@ -556,6 +720,36 @@ describe('withApproov', () => {
     expect(() => assertAccountId(r)).toThrow(/account ID is missing/);
     expect(() => assertAccountId(resolve())).not.toThrow();
     expect(() => assertAccountId(resolveProps({ nativeInitialize: false }, {}, projectRoot))).not.toThrow();
+  });
+
+  it.each([
+    ['android', 'manifest', () => parseManifest(sdk55('AndroidManifest.xml'))],
+    ['android', 'mainApplication', async () => ({ contents: sdk55('MainApplication.kt'), language: 'kt' })],
+    ['ios', 'infoPlist', async () => ({ CFBundleName: 'app' })],
+    ['ios', 'appDelegate', async () => ({ contents: sdk55('AppDelegate.swift'), language: 'swift' })],
+  ] as const)('fails the %s %s mod when the account ID is missing, so one-platform prebuilds fail too', async (platform, mod, input) => {
+    await withoutEnvAccountId(async () => {
+      await expect(runMod({}, platform, mod, await input())).rejects.toThrow(/account ID is missing/);
+      await expect(runMod({ accountId: TEST_ID }, platform, mod, await input())).resolves.toBeDefined();
+      await expect(runMod({ nativeInitialize: false }, platform, mod, await input())).resolves.toBeDefined();
+    });
+  });
+
+  it.each([
+    ['settingsGradle', 'android/settings.gradle', () => sdk55('settings.gradle')],
+    ['projectBuildGradle', 'android/build.gradle', () => sdk55('build.gradle')],
+    ['appBuildGradle', 'android/app/build.gradle', () => sdk55('app-build.gradle')],
+  ])('fails the %s mod on a Kotlin DSL file instead of skipping it', async (mod, file, contents) => {
+    await expect(runMod({ accountId: TEST_ID }, 'android', mod, { contents: contents(), language: 'kt' })).rejects.toThrow(
+      new RegExp(`${file.replace(/[/.]/g, '\\$&')} must be Groovy`),
+    );
+    await expect(runMod({ accountId: TEST_ID }, 'android', mod, { contents: contents(), language: 'groovy' })).resolves.toBeDefined();
+  });
+
+  it('fails clearly on a generated block whose end marker was removed', () => {
+    const once = modifyMainApplication(sdk55('MainApplication.kt'), 'kt', resolve());
+    const broken = once.replace(/^.*@generated end approov-initialize.*\n/m, '');
+    expect(() => modifyMainApplication(broken, 'kt', resolve())).toThrow(/unterminated generated block "approov-initialize"/);
   });
 
   it('is exported by app.plugin.js', () => {

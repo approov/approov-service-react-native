@@ -863,6 +863,8 @@ describe('withApproov', () => {
   it('is built by prepack, so the published package contains plugin/build for app.plugin.js', () => {
     const scripts = require('../../package.json').scripts;
     expect(scripts.prepack).toMatch(/^npm run build:plugin && /);
+    // and npm test, which CI runs, includes these tests
+    expect(scripts.test.split(' && ')).toContain('npm run test:plugin');
     // plugin/build is git-ignored (build/), so only prepack puts it in the package
     const { execFileSync } = require('child_process');
     const root = path.join(__dirname, '..', '..');

@@ -35,6 +35,8 @@ For Expo projects use:
 expo install @approov/approov-service-react-native
 ```
 
+The package also contains an Expo config plugin for the 3.8.0 universal Approov packages (Android and iOS). It adds them to the projects `expo prebuild` generates and initializes Approov natively at app start; see the [Expo config plugin README](plugin/README.md) for its options, what it changes and how it interacts with initialization from JavaScript.
+
 ## Manifest / Project Changes
 
 For iOS you must install [pod](https://cocoapods.org/) dependencies. Change to the `ios` directory and run:

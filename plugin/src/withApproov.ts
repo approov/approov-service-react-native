@@ -50,7 +50,7 @@ const APPROOV_GROUP = 'io.approov';
 // The universal iOS layer (approov-service-ios), as a CocoaPods pod. Its version is independent of the
 // Android one. Until the pod is published (or vendored into this package's pod, D2), use ios.podPath.
 export const IOS_POD_NAME = 'approov-service-ios';
-export const DEFAULT_IOS_VERSION = '1.0.0';
+export const DEFAULT_IOS_VERSION = '3.8.0';
 const LOG_TAG = 'ApproovInit';
 
 export type AndroidProps = {
@@ -68,7 +68,7 @@ export type AndroidProps = {
 };
 
 export type IosProps = {
-  /** Version of the approov-service-ios pod (default 1.0.0). */
+  /** Version of the approov-service-ios pod (default 3.8.0). */
   version?: string;
   /** Local development: the approov-service-ios source directory (with its podspec), used as a :path pod. */
   podPath?: string;
@@ -230,7 +230,7 @@ export function resolveProps(
   if (!isPlainObject(i)) fail('"ios" must be an object');
   checkKeys(i, IOS_KEYS, 'ios.');
   if (i.version !== undefined && (typeof i.version !== 'string' || !VERSION.test(i.version))) {
-    fail('"ios.version" must be a version string such as 1.0.0');
+    fail('"ios.version" must be a version string such as 3.8.0');
   }
   if (i.version !== undefined && i.podPath !== undefined) fail('set "ios.version" or "ios.podPath", not both');
   let podPath: string | undefined;

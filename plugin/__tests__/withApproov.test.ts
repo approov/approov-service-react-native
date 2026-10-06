@@ -100,7 +100,7 @@ describe('resolveProps', () => {
       },
       ios: { version: DEFAULT_IOS_VERSION, podPath: undefined },
     });
-    expect(DEFAULT_IOS_VERSION).toBe('1.0.0');
+    expect(DEFAULT_IOS_VERSION).toBe('3.8.0');
     expect(IOS_POD_NAME).toBe('approov-service-ios');
   });
 
@@ -120,11 +120,12 @@ describe('resolveProps', () => {
   it('rejects malformed iOS options', () => {
     expect(() => resolve({ ios: 'x' })).toThrow(/"ios" must be an object/);
     expect(() => resolve({ ios: { version: '1 0' } })).toThrow(/ios.version/);
+    expect(() => resolve({ ios: { version: '1 0' } })).toThrow(/such as 3\.8\.0/);
     expect(() => resolve({ ios: { podPath: './nowhere' } })).toThrow(/ios.podPath/);
     expect(() => resolve({ ios: { podPath: path.relative(projectRoot, gradlePluginDir) } })).toThrow(
       /approov-service-ios.podspec/,
     );
-    expect(() => resolve({ ios: { version: '1.0.0', podPath: iosPodDir } })).toThrow(/not both/);
+    expect(() => resolve({ ios: { version: '3.8.0', podPath: iosPodDir } })).toThrow(/not both/);
     expect(() => resolve({ ios: { podspec: 'x' } })).toThrow(/unknown option "ios.podspec"/);
   });
 
@@ -427,9 +428,9 @@ describe('Podfile', () => {
 
   it('replaces a previous entry when the option changes', () => {
     const once = modifyPodfile(sdk55('Podfile'), resolve(), iosDir);
-    const out = modifyPodfile(once, resolve({ ios: { version: '1.0.1' } }), iosDir);
+    const out = modifyPodfile(once, resolve({ ios: { version: '3.8.1' } }), iosDir);
     expect(count(out, "pod 'approov-service-ios'")).toBe(1);
-    expect(out).toContain("pod 'approov-service-ios', '1.0.1'");
+    expect(out).toContain("pod 'approov-service-ios', '3.8.1'");
   });
 
   it('adds the pod with nativeInitialize false too, the layer is needed for JavaScript initialization', () => {

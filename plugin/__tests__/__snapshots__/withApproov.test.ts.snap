@@ -284,7 +284,7 @@ target 'HelloWorld' do
   use_expo_modules!
   # @generated begin approov-pod - expo prebuild (DO NOT MODIFY)
   # Approov: the universal iOS service layer (one approov-ios-sdk for every Approov pod)
-  pod 'approov-service-ios', '1.0.0'
+  pod 'approov-service-ios', '3.8.0'
   # @generated end approov-pod
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'

@@ -35,7 +35,7 @@ For Expo projects use:
 expo install @approov/approov-service-react-native
 ```
 
-The package also contains an Expo config plugin for the 3.8.0 universal Approov packages (Android and iOS). It adds them to the projects `expo prebuild` generates and initializes Approov natively at app start; see the [Expo config plugin README](plugin/README.md) for its options, what it changes and how it interacts with initialization from JavaScript.
+The package also contains an Expo config plugin for the 3.8.0 universal Approov packages (Android and iOS). It adds them to the projects `expo prebuild` generates and initializes Approov natively at app start, with the account ID and comment only: it configures nothing, so your app configures Approov afterwards, from JavaScript after `await ApproovService.initialize(...)` (which resolves at once when the native initialization already ran with the same account ID and comment) or natively, and a request processed before that configuration uses the defaults. The plugin ships with the React Native release built on the universal packages. See the [Expo config plugin README](plugin/README.md) for its options, what it changes, how it interacts with initialization from JavaScript and what early requests get.
 
 ## Manifest / Project Changes
 

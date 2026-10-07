@@ -2,7 +2,7 @@
 
 Add the plugin to your Expo app config, run `expo prebuild`, and the generated Android and iOS projects carry the universal Approov packages, initialized natively at app start with your Approov account ID before React Native starts. Every request your app makes to a domain you added to Approov then carries an Approov token that your backend can verify, over a TLS connection validated against the Managed Trust Roots Approov maintains for your account, or the certificate public keys configured for the domain. On Android this covers OkHttp, `HttpsURLConnection`, Volley and Cronet (react-native-nitro-fetch included) through the `io.approov.gradle` build plugin; on iOS it covers every `URLSession` created after initialization.
 
-The plugin targets the 3.8.0 universal packages: [approov-service-android](https://github.com/approov/approov-service-android) (`io.approov:service.android` with its Gradle plugin) and [approov-service-ios](https://github.com/approov/approov-service-ios). What those packages do once installed is described in their READMEs; this page covers only what the plugin adds and how to configure it.
+The plugin targets the 3.8.0 universal packages: [approov-service-android](https://github.com/approov/approov-service-android) (`io.approov:service.android` with its Gradle plugin) and [approov-service-ios](https://github.com/approov/approov-service-ios). It ships with the release of this package whose native module is built on those packages. What those packages do once installed is described in their READMEs; this page covers only what the plugin adds and how to set the plugin up. The plugin initializes Approov and configures nothing: the headers, secure strings, exclusions, service mutator, message signing and every other setting are made by your app afterwards (see [configuration](#configuration)).
 
 ## REQUIREMENTS
 
@@ -107,11 +107,33 @@ The account ID is read from the manifest and `Info.plist` at run time and never 
 ApproovInit: Approov service enabled=true protection enabled=true
 ```
 
-`protection enabled=false` means bypass mode.
+`protection enabled=false` means bypass mode. The native initialization passes only the account ID and comment; it configures nothing.
 
-**JavaScript as well.** This applies once the package's native module is built on the universal packages; while the 3.5.x module is excluded ([below](#the-35x-native-module)) there is no JavaScript `initialize` to call. One app process has one Approov service state, whichever language calls `initialize`. A JavaScript `ApproovService.initialize` (or `ApproovProvider`) after the native one, with the same account ID **and the same comment**, returns at once and changes nothing: both flags are already true and the configuration is kept. A different account ID or comment, including no comment against an empty one, is rejected by the Approov SDK and the error reaches the second caller as a rejected promise, while the native initialization stays in effect. So either leave initialization to the plugin, or pass JavaScript exactly the account ID and the `comment` you gave the plugin. A rejection here does not mean Approov is off: the native initialization is still in effect, so check the protection state before blocking requests on it.
+**JavaScript as well.** This applies once the package's native module is built on the universal packages; while the 3.5.x module is excluded ([below](#the-35x-native-module)) there is no JavaScript `initialize` to call. One app process has one Approov service state, whichever language calls `initialize`. A JavaScript `ApproovService.initialize` (or `ApproovProvider`) after the native one, with the same account ID **and the same comment**, returns at once and changes nothing: both flags are already true and the configuration is kept. A different account ID or comment, including no comment against an empty one, is rejected by the Approov SDK and the error reaches the second caller as a rejected promise, while the native initialization stays in effect. So either leave initialization to the plugin, or pass JavaScript exactly the account ID and the `comment` you gave the plugin; `await ApproovService.initialize(...)` then resolves at once, and is the point after which the app configures Approov from JavaScript. A rejection here does not mean Approov is off: the native initialization is still in effect, so check the protection state before blocking requests on it.
 
-**JavaScript only.** With `nativeInitialize: false` nothing is initialized natively. Call `initialize` from JavaScript before the first request; a request made before it goes out without Approov protection. This needs a native module built on the universal packages, like the case above.
+**JavaScript only.** With `nativeInitialize: false` nothing is initialized natively. Call `initialize` from JavaScript before the first request, await it and then configure; a request made before it goes out without Approov protection. This needs a native module built on the universal packages, like the case above.
+
+## CONFIGURATION
+
+The plugin performs no configuration at all. Its native initialization calls `initialize` with the account ID and comment, and that is all; every setting (the token, trace, status and binding headers, substitution headers and query parameters, exclusions, the service mutator, message signing, the logging level, the stale protection refresh period on Android, and so on) is made by your app after initialization, from JavaScript or natively. The order is always initialize, then configure. From JavaScript, await `initialize` with the account ID and comment you gave the plugin, which resolves at once when the native initialization already ran with them, and configure straight after it:
+
+```js
+import { ApproovService } from '@approov/approov-service-react-native';
+
+// the account ID and comment you gave the plugin: resolves at once after its native initialization
+await ApproovService.initialize('<your-approov-account-id>');
+// then configure, before the app issues protected requests; only the settings your app uses, for example:
+ApproovService.setTokenHeader('Authorization', 'Bearer ');
+```
+
+`initialize` never resets configuration, and configuration made before it is kept, but initialize, then configure, is the documented pattern.
+
+**Requests before your configuration.** Native initialization runs before React Native starts, so no request goes out before initialization, but a request can be processed before your configuration call runs. Such a request uses the defaults in force at that moment: the `DEFAULT` service mutator (`CLOSE_FAILURE` in 3.8.0), the `Approov-Token` header with no prefix, no binding header, no exclusions, no substitutions (so a secure string placeholder goes out unchanged), message signing off and logging at `INFO`. A configuration change applies only to requests processed after the call; a request already in flight is not processed again. Connection validation does not depend on this order: the trust roots and keys come from the Approov SDK's configuration and apply from initialization. Requests that can run before your configuration call include:
+
+- native code at startup, for example expo-updates checking for an update, react-native-nitro-fetch `prefetchOnAppStart` (not supported with protected endpoints on Android; see the Android package's ADVANCED.md), native SDKs, and Android headless JS tasks;
+- JavaScript modules that fetch when they are imported.
+
+Configure immediately after `initialize`, before the app issues protected requests, and keep startup requests to protected hosts after that point.
 
 ## THE 3.5.x NATIVE MODULE
 
@@ -127,7 +149,7 @@ module.exports = {
 };
 ```
 
-Without the native module the JavaScript `ApproovService` API is not available, so keep `nativeInitialize: true` and configure Approov natively.
+Without the native module the JavaScript `ApproovService` API is not available, so keep `nativeInitialize: true` and configure Approov natively, after the plugin's initialization.
 
 ## EAS BUILD
 
@@ -155,3 +177,4 @@ Without the native module the JavaScript `ApproovService` API is not available, 
 | Log: `Approov initialization failed (<exception class>)` | The value did not reach the SDK intact. Check it against `approov sdk -getConfigString` and run prebuild again. The app is in bypass mode. |
 | JavaScript `initialize` rejected after a native initialization | Different account ID or comment from the plugin's; see [initialization](#initialization). |
 | The manifest shows `#...` | Expected: see [what the plugin changes](#what-the-plugin-changes). |
+| A startup request went out with a placeholder, the default token header or no signature | It was processed before your configuration call ran, so it used the defaults; configure straight after `initialize` (see [configuration](#configuration)). |

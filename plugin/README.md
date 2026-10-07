@@ -18,6 +18,8 @@ The plugin targets the 3.8.0 universal packages: [approov-service-android](https
 npx expo install @approov/approov-service-react-native
 ```
 
+The plugin loads `expo/config-plugins`, which every Expo app has through its `expo` dependency, and it does not depend on `@expo/config-plugins` being hoisted. It therefore works with npm, Yarn classic, Yarn berry (including Plug'n'Play) and pnpm (isolated `node_modules`). `expo` is declared as an optional peer dependency (`>=52.0.0`), so a bare React Native app that does not use Expo is not made to install it.
+
 Add the plugin with your Approov account ID to `app.json`:
 
 ```json

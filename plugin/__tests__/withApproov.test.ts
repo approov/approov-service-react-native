@@ -108,7 +108,7 @@ const ANDROID_JAR = PLATFORM && path.join(ANDROID_SDK as string, 'platforms', PL
 const EMPTY_MANIFEST = { manifest: { $: {}, application: [{ $: { 'android:name': '.MainApplication' } }] } };
 
 const parseManifest = async (xml: string) => {
-  const { AndroidConfig } = require('@expo/config-plugins');
+  const { AndroidConfig } = require('expo/config-plugins');
   const tmpFile = path.join(tmp, `manifest-${Math.random()}.xml`);
   fs.writeFileSync(tmpFile, xml);
   return AndroidConfig.Manifest.readAndroidManifestAsync(tmpFile);
@@ -553,7 +553,7 @@ describe('AndroidManifest.xml', () => {
   it('writes a 12 KB config string unchanged', async () => {
     const long = syntheticConfig(12 * 1024);
     const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ accountId: long }));
-    const { XML } = require('@expo/config-plugins');
+    const { XML } = require('expo/config-plugins');
     const reparsed = await parseManifest(XML.format(out));
     expect(metaData(reparsed)).toEqual([{ 'android:name': ACCOUNT_ID_META_DATA, 'android:value': encodeManifestValue(long) }]);
     expect(decodeAapt(metaData(reparsed)[0]['android:value'])).toBe(long);
@@ -581,7 +581,7 @@ describe('AndroidManifest.xml', () => {
   });
 
   (AAPT2 && ANDROID_JAR ? it : it.skip)('compiles with aapt2 to the exact account ID and comment strings', async () => {
-    const { XML } = require('@expo/config-plugins');
+    const { XML } = require('expo/config-plugins');
     const values: [string, string][] = [];
     const app: any = { manifest: { $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android', package: 'com.example.t' }, application: [{ $: {} }] } };
     const add = (name: string, value: string) => {
@@ -609,7 +609,7 @@ describe('AndroidManifest.xml', () => {
   });
 
   it('renders as expected', async () => {
-    const { XML } = require('@expo/config-plugins');
+    const { XML } = require('expo/config-plugins');
     const out = modifyAndroidManifest(await parseManifest(sdk55('AndroidManifest.xml')), resolve({ comment: 'c' }));
     expect(XML.format(out)).toMatchSnapshot();
   });
@@ -875,5 +875,49 @@ describe('withApproov', () => {
 
   it('is exported by app.plugin.js', () => {
     expect(typeof require('../../app.plugin.js')).toBe('function');
+  });
+  describe('module resolution (pnpm isolated and Yarn PnP style installs)', () => {
+    const root = path.join(__dirname, '..', '..');
+
+    it('declares expo as an optional peer dependency', () => {
+      const pkgJson = require('../../package.json');
+      expect(pkgJson.peerDependencies.expo).toBeDefined();
+      expect(pkgJson.peerDependenciesMeta.expo).toEqual({ optional: true });
+      expect(pkgJson.dependencies?.['@expo/config-plugins']).toBeUndefined();
+    });
+
+    it('imports only expo/config-plugins, never @expo/config-plugins, in source and build', () => {
+      for (const file of ['src/withApproov.ts', 'build/withApproov.js', 'build/withApproov.d.ts']) {
+        const text = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+        expect(text).not.toMatch(/@expo\/config-plugins/);
+      }
+    });
+
+    it('loads when only expo/config-plugins resolves, as under pnpm isolation', () => {
+      // Layout: <tmp>/node_modules/.pnpm/pkg/node_modules/{@approov/approov-service-react-native,expo}
+      // The package sees its sibling expo (a re-export of the real config-plugins) and nothing else.
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'approov-plugin-resolve-'));
+      try {
+        const sandbox = path.join(tmp, 'node_modules', '.pnpm', 'pkg', 'node_modules');
+        const pkgDir = path.join(sandbox, '@approov', 'approov-service-react-native');
+        fs.mkdirSync(path.join(pkgDir, 'plugin'), { recursive: true });
+        fs.copyFileSync(path.join(root, 'package.json'), path.join(pkgDir, 'package.json'));
+        fs.copyFileSync(path.join(root, 'app.plugin.js'), path.join(pkgDir, 'app.plugin.js'));
+        fs.cpSync(path.join(root, 'plugin', 'build'), path.join(pkgDir, 'plugin', 'build'), { recursive: true });
+        const real = require.resolve('@expo/config-plugins', { paths: [require.resolve('expo/package.json')] });
+        fs.mkdirSync(path.join(sandbox, 'expo'));
+        fs.writeFileSync(path.join(sandbox, 'expo', 'package.json'), '{"name":"expo","version":"0.0.0"}');
+        fs.writeFileSync(path.join(sandbox, 'expo', 'config-plugins.js'), `module.exports = require(${JSON.stringify(real)});`);
+        const { execFileSync } = require('child_process');
+        const out = execFileSync(
+          process.execPath,
+          ['-e', "const p=require('./app.plugin.js'); console.log(typeof p); let nope=false; try{require('@expo/config-plugins')}catch(e){nope=true}; console.log(nope)"],
+          { cwd: pkgDir, encoding: 'utf8' },
+        );
+        expect(out.trim().split('\n')).toEqual(['function', 'true']);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
   });
 });

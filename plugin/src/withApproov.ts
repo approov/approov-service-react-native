@@ -29,7 +29,7 @@ import {
   withPodfile,
   withProjectBuildGradle,
   withSettingsGradle,
-} from '@expo/config-plugins';
+} from 'expo/config-plugins';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pkg: { name: string; version: string } = require('../../package.json');
